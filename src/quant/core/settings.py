@@ -96,6 +96,8 @@ class Settings(BaseSettings):
     broker: Literal["sim", "tiger"]
     tiger_props_path: Path | None = Field(None, validation_alias="TIGER_PROPS_PATH")
     database_url: SecretStr | None = None
+    # Parquet 行情数据根目录（PROJECT_PLAN 7.2）；容器内为 /data/parquet
+    data_dir: Path = Path("data/parquet")
     notify_webhook_url: SecretStr | None = None
 
     market: MarketSettings = MarketSettings()

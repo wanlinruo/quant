@@ -25,6 +25,8 @@ services:
     environment:
       TRADING_MODE: ${TRADING_MODE:-paper}
       QUANT_DATABASE_URL: postgresql+psycopg://quant:${POSTGRES_PASSWORD}@postgres:5432/quant
+    volumes:
+      - parquet:/data/parquet
     depends_on:
       postgres:
         condition: service_healthy
@@ -37,3 +39,4 @@ services:
 
 volumes:
   pgdata:
+  parquet:
