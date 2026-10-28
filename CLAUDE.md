@@ -4,11 +4,11 @@
 
 ## 当前阶段
 
-Phase 0 可行性验证。第一个任务：`scripts/phase0/tiger_check.py`（见 PROJECT_PLAN.md 第 15 章任务 0.1）。
+Phase 1 项目骨架（Phase 0 关键项 0.1–0.3 已通过，结果见 `scripts/phase0/REPORT.md`；0.4–0.6 待条件具备后补做）。任务见 GitHub issue 与对应里程碑。
 
 ## 关键约束
 
-- 券商：老虎证券 OpenAPI（`tigeropen`）。接口用法以官方文档为准：https://quant.itiger.com/openapi/zh/python/overview/introduction.html
+- 券商：老虎证券 OpenAPI（`tigeropen`）。接口用法以官方文档为准：https://docs.itigerup.com/docs/prepare （AI 可读索引：https://docs.itigerup.com/llms.txt，页面 URL 加 `.md` 得到 Markdown）
 - Mac 只做开发；服务器只运行 CI 部署的 Docker 镜像，不在服务器上改代码。
 - Broker 抽象为接口；策略只输出目标仓位权重，纯计算、无 I/O。
 - 回测与实盘共用同一个策略类。
@@ -21,14 +21,21 @@ Phase 0 可行性验证。第一个任务：`scripts/phase0/tiger_check.py`（�
 - 不得把密钥、账户号、`.env`、私钥文件提交到仓库或写入日志。
 - 遇到文档中标注【待确认】的事项，先问用户，不要自行假设。
 
-## 常用命令（Phase 1 起可用）
+## 常用命令
 
 ```
-make lint      # ruff + mypy
-make test      # pytest
-make up        # docker compose 本地启动
-make sync-data # 从服务器同步 Parquet 数据
+make check     # lint + test，与 CI 相同
+make lint      # ruff check + ruff format --check + mypy
+make test      # pytest（TRADING_MODE=sim）
+make format    # 自动修复并格式化
+make up        # 本地启动 postgres + dashboard（http://localhost:8501，强制 TRADING_MODE=sim）
+make down      # 停止本地服务（保留数据卷）
+make logs      # 查看本地服务日志
+make migrate   # 本地数据库执行迁移；表结构只能通过 Alembic 迁移修改
+make sync-data # 从服务器同步 Parquet 数据（Phase 4 起）
 ```
+
+业务时间一律用美东时间（`America/New_York`），交易日与半日市以 `exchange_calendars` 的 `XNYS` 为准，不硬编码；不在盘前盘后下单。
 
 ## 工作方式
 
@@ -59,6 +66,6 @@ make sync-data # 从服务器同步 Parquet 数据
 | `main` | 正式环境（Phase 4 起由 CI 部署），默认分支 | 只接受来自 `test` 的 PR，不直接 push |
 | `test` | 测试环境 | 功能分支直接 merge 进来；不直接在 `test` 上写代码 |
 
-**CI**（`.github/workflows/ci.yml`）：push 到 `test`/`main`、以及 PR 到 `main` 时运行 ruff check → ruff format --check → mypy → pytest；PR 上另有 `Branch policy` 检查只允许 `test` → `main`。
+**CI**（`.github/workflows/ci.yml`）：push 到 `test`/`main`、以及 PR 到 `main` 时运行 ruff check → ruff format --check → mypy → pytest，并构建 Docker 镜像做冒烟测试（`Docker build`）；PR 上另有 `Branch policy` 检查只允许 `test` → `main`。
 
 **分支保护**（仓库暂时公开以使用免费 CI）：`main` 必须经 PR 合入，`Lint & test` 与 `Branch policy` 必须通过，对管理员同样生效；`test` 禁止强推与删除。将来改回私有后（免费版不支持分支保护），以上规则靠 CI 检查与自觉遵守，不要绕过。仓库公开期间，更要确保不提交任何密钥、账户号。

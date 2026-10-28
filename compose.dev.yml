@@ -1,0 +1,23 @@
+# 本地开发覆盖：只监听 127.0.0.1，挂载源码，强制 TRADING_MODE=sim
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  dashboard:
+    environment:
+      TRADING_MODE: sim
+    ports:
+      - "127.0.0.1:8501:8501"
+    volumes:
+      - ./src:/app/src:ro
+      - ./configs:/app/configs:ro
+    command:
+      - streamlit
+      - run
+      - src/quant/dashboard/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+      - --server.runOnSave=true
+      - --browser.gatherUsageStats=false

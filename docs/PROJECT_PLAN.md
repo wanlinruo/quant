@@ -227,6 +227,7 @@ class Strategy(ABC):
 5. 低于最小交易阈值的调整跳过（默认：金额小于 100 美元，或偏离目标权重小于 2 个百分点），避免无意义的小额交易。
 6. 所有订单先经过风控（6.4），再提交。
 7. 使用限价单：买单价为最新卖价上浮少量，卖单价为最新买价下浮少量（可配置，默认 0.2%）。超时未成交则撤单并按最新报价重新挂单，最多重试 N 次，仍失败则告警并停止。
+8. 报价来源（Phase 0 决定，#3）：模拟盘阶段不购买实时行情，参考价取老虎免费延迟行情（约 15 分钟延迟，无买卖价时用最新价），因此执行时间不早于开盘后 20 分钟（默认 09:50 ET，见第 8 章）。每笔订单记录参考价与实际成交价；Phase 5 切实盘前按偏差决定是否购买 Nasdaq Basic（USD 35/月），偏差不大则改为放宽限价缓冲或推迟执行时间。
 
 ### 6.4 风控规则
 
@@ -251,7 +252,7 @@ class Strategy(ABC):
 | 用途 | 来源 | 说明 |
 |---|---|---|
 | 回测历史日线 | yfinance | 免费，取复权数据；不稳定，需要重试和校验 |
-| 实盘行情、实时报价 | 老虎 OpenAPI | 行情权限和费用【待确认】 |
+| 实盘行情、报价 | 老虎 OpenAPI | 美股实时行情需单独购买（Nasdaq Basic，USD 35/月）；模拟盘阶段只用免费延迟行情（约 15 分钟），见 Phase 0 报告 0.2 |
 | 交易日历 | exchange_calendars | 交易所 `XNYS` |
 
 `DataProvider` 抽象为接口，以后可以接入付费数据源（如 Polygon、Tiingo）而不影响上层代码。
@@ -290,17 +291,29 @@ class Strategy(ABC):
 | `backtest_equity` | run_id, date, equity, drawdown | 净值曲线 |
 | `system_flags` | key, value | 如 `trading_enabled` |
 
+实现补充（#14，`src/quant/db/models.py`，初始迁移见 `src/quant/db/migrations/versions/`）：
+
+- `orders`、`fills`、两张快照表增加 `mode` 列（sim / paper / live），模拟盘与实盘数据在同一个库中不混淆；快照表按 `(日期, mode[, symbol])` 唯一。
+- `orders` 增加 `reference_price`（下单时参考价）、`filled_qty`、`avg_fill_price`、`reason`，用于评估延迟行情下的执行偏差（#3）。
+- `signals` 按 `(strategy, signal_date)` 唯一。状态、方向、模式等字段用 CHECK 约束限定取值。
+- 初始迁移写入 `trading_enabled = false`：熔断开关默认关闭，需人工打开。
+
 ---
 
 ## 8. 每日运行流程
 
 所有时间为美东时间，由 APScheduler 按 `America/New_York` 调度，自动处理夏令时。非交易日不运行，半日市按实际收盘时间调整。
 
+- 常规交易时段 09:30–16:00 ET；半日市（如感恩节次日、平安夜）13:00 收盘，`daily_data` 相应提前到 13:30 后。交易日、半日市一律以 `exchange_calendars` 的 `XNYS` 为准，不硬编码。
+- `daily_execute` 只在常规交易时段内下单，不做盘前盘后；超过收盘前 30 分钟仍未完成则撤单并告警。
+- 执行时间默认 09:50：模拟盘阶段用约 15 分钟延迟行情（6.3 第 8 条），09:35 拿到的是开盘前的价格；09:50 时延迟价已反映开盘后成交，同时避开开盘最初几分钟的剧烈波动。买实时行情后可改回 09:35。
+- 北京时间对照（仅供人工查看，代码不使用）：夏令时（3 月第二个周日至 11 月第一个周日）开盘为 21:30，冬令时为 22:30；美国与中国的时差在夏令时切换日会变化。
+
 | 时间（ET） | 任务 | 内容 |
 |---|---|---|
 | 收盘后 16:30 | `daily_data` | 拉取当日日线入库 → 校验 → 失败则告警并终止当日后续任务 |
 | 17:00 | `daily_signal` | 运行策略 → 写入 `signals` → 推送"明日计划调仓"通知 |
-| 次日 09:35 | `daily_execute` | 熔断检查 → 对账 → 生成订单 → 风控 → 下单 → 跟踪成交 |
+| 次日 09:50（可配置） | `daily_execute` | 熔断检查 → 对账 → 生成订单 → 风控 → 下单 → 跟踪成交 |
 | 执行完成后 | `daily_report` | 持仓与账户快照 → 再次对账 → 推送日报 |
 
 **幂等设计**
@@ -357,6 +370,8 @@ class Strategy(ABC):
 - 老虎的 `tiger_id`、私钥、账户号只通过环境变量或服务器上权限为 600 的文件提供。
 - `.env`、私钥文件、`*.properties` 必须加入 `.gitignore`，仓库中只保留 `.env.example`。
 - 实盘密钥只存在于服务器，Mac 上最多配置模拟账户。
+- 配置由 `core/settings.py` 加载：`configs/base.yaml` → 按模式叠加 `dev/paper/live.yaml` → `QUANT_` 前缀环境变量覆盖。`TRADING_MODE` 只能来自环境变量，写在 YAML 中会拒绝启动；Mac 上设置 `live` 会拒绝启动。
+- 向券商下单前统一调用 `core/safety.py` 的 `check_order_allowed`：`paper` 只允许模拟账户，`live` 只允许实盘账户且不能在开发机上运行。
 - GitHub Secrets 中只存部署所需的 SSH 私钥和服务器地址。
 
 ---
@@ -429,9 +444,9 @@ class Strategy(ABC):
 **0.1 实现提示**
 
 - 安装：`uv add tigeropen`（Python SDK 要求 3.8 以上）。
-- 开发者注册后获得 `tiger_id`、RSA 私钥（Python SDK 使用 PKCS#1 格式）和账户号；模拟账户有独立的账户号。
-- SDK 中有 `TigerOpenClientConfig`、`QuoteClient`、`TradeClient` 等类。**具体方法名和参数以官方文档为准**，不要凭记忆调用：https://quant.itiger.com/openapi/zh/python/overview/introduction.html
-- 配置从环境变量读取：`TIGER_ID`、`TIGER_ACCOUNT`、`TIGER_PRIVATE_KEY_PATH`；脚本启动时若检测到的不是模拟账户，必须拒绝执行下单步骤。
+- 开发者注册后获得 `tiger_id`、RSA 私钥（官方推荐 PKCS#8，兼容 PKCS#1）、`license` 和账户号；模拟账户有独立的账户号（17 位数字），`tiger_id` 与私钥实盘、模拟共用。
+- SDK 中有 `TigerOpenClientConfig`、`QuoteClient`、`TradeClient` 等类。**具体方法名和参数以官方文档为准**，不要凭记忆调用：https://docs.itigerup.com/docs/prepare
+- 配置使用开发者中心导出的 `tiger_openapi_config.properties`（权限 600，放在仓库外），通过环境变量 `TIGER_PROPS_PATH` 指定所在目录；脚本启动时若检测到的不是模拟账户，必须拒绝执行下单步骤。
 
 ### Phase 1：项目骨架
 
@@ -469,10 +484,10 @@ yfinance 与老虎数据提供者、Parquet 存储、数据校验、回测引擎
 
 ## 16. 待确认事项
 
-- [ ] 老虎 API 实时行情是否需要单独购买，费用多少
-- [ ] 老虎 API 历史日线可回溯年限与频率限制
+- [x] 老虎 API 实时行情是否需要单独购买，费用多少：需单独购买，Nasdaq Basic USD 35/月；模拟盘阶段用延迟行情（#3）
+- [x] 老虎 API 历史日线可回溯年限与频率限制：见 Phase 0 报告 0.2；回测以 yfinance 含分红复权价为准
 - [ ] 账户是否适用 PDT 规则（取决于账户所属持牌主体）
-- [ ] 是否支持碎股交易
+- [x] 是否支持碎股交易：文档注明仅综合账户支持，模拟账户不支持；按整股设计
 - [ ] 美股佣金与最低收费，写入回测成本模型
 - [ ] 服务器地域与配置（取决于 Phase 0 任务 0.5、0.6）
 - [ ] 告警渠道使用飞书还是企业微信

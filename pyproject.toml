@@ -6,7 +6,18 @@ authors = [
     { name = "wanlinruo", email = "394688215@qq.com" }
 ]
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "alembic>=1.20.1",
+    "numpy>=2.5.4",
+    "pandas>=3.1.0",
+    "psycopg[binary]>=3",
+    "pydantic-settings>=2.16.2",
+    "pyyaml>=6.0.3",
+    "sqlalchemy>=2",
+    "streamlit>=1.66.1",
+    "tigeropen>=3.8.0",
+    "yfinance>=1.7.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]
@@ -15,8 +26,10 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "mypy>=2.4.0",
+    "pandas-stubs>=3.0.5.260914",
     "pytest>=9.2.0",
     "ruff>=0.17.3",
+    "types-pyyaml>=6.0.12.20260906",
 ]
 
 [tool.ruff]
@@ -26,6 +39,12 @@ src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
+# 中文注释、文案中的全角标点是正常写法
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# Alembic 自动生成的迁移保留原样的长 SQL 字面量
+"src/quant/db/migrations/versions/*" = ["E501"]
 
 [tool.ruff.format]
 # 设计文档中的代码块是示意，不参与格式化
@@ -34,9 +53,15 @@ exclude = ["*.md"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["src", "tests"]  # scripts/ 有 .py 后加入
+files = ["src", "tests", "scripts"]
 mypy_path = "src"
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["tigeropen.*", "yfinance.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+markers = ["db: 需要 PostgreSQL（设置 QUANT_TEST_DATABASE_URL，否则跳过）"]

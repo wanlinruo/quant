@@ -1,0 +1,35 @@
+# 所有环境共用的配置。按 TRADING_MODE 叠加 dev.yaml / paper.yaml / live.yaml，
+# 再由环境变量覆盖（QUANT_ 前缀，嵌套用 __，如 QUANT_EXECUTOR__CASH_BUFFER=0.03）。
+# 交易模式只能用环境变量 TRADING_MODE 设置，不能写在配置文件里。
+# 不得在配置文件中写入密钥、账户号。
+
+market:
+  timezone: America/New_York
+  calendar: XNYS
+
+# 美东时间，见 PROJECT_PLAN 第 8 章
+schedule:
+  daily_data: "16:30"
+  daily_signal: "17:00"
+  # 模拟盘阶段用约 15 分钟延迟行情，执行不早于开盘后 20 分钟
+  daily_execute: "09:50"
+
+# 见 PROJECT_PLAN 6.3
+executor:
+  cash_buffer: 0.02
+  limit_offset: 0.002
+  min_trade_usd: 100
+  min_weight_diff: 0.02
+
+# 见 PROJECT_PLAN 6.4
+risk:
+  symbol_whitelist: [SPY, QQQ, TLT, GLD, SHY]
+  max_symbol_weight: 1.0
+  max_total_weight: 1.0
+
+# 回测成本，见 PROJECT_PLAN 第 9 章
+costs:
+  # 老虎美股佣金【待确认】（issue #5），确认后填写；未填写时回测拒绝运行
+  # commission_per_share: "..."
+  # min_commission: "..."
+  slippage: "0.0005"

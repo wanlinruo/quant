@@ -1,0 +1,2 @@
+# TRADING_MODE=live：老虎实盘，只在服务器上使用，切换前需要用户明确确认（PROJECT_PLAN Phase 5）
+broker: tiger
