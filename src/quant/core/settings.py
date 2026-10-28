@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import stat
 import sys
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -72,6 +73,17 @@ class RiskSettings(_Section):
     max_total_weight: float = Field(1.0, gt=0, le=1)
 
 
+class CostSettings(_Section):
+    """回测成本模型（PROJECT_PLAN 第 9 章）。
+
+    老虎美股佣金【待确认】（issue #5），确认前不设默认值；未配置时 SimBroker 拒绝构造。
+    """
+
+    commission_per_share: Decimal | None = Field(None, ge=0)
+    min_commission: Decimal | None = Field(None, ge=0)
+    slippage: Decimal = Field(Decimal("0.0005"), ge=0, lt=Decimal("0.1"))
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="QUANT_",
@@ -90,6 +102,7 @@ class Settings(BaseSettings):
     schedule: ScheduleSettings = ScheduleSettings()
     executor: ExecutorSettings = ExecutorSettings()
     risk: RiskSettings = RiskSettings()
+    costs: CostSettings = CostSettings()
 
     @field_validator("tiger_props_path")
     @classmethod
