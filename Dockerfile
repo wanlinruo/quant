@@ -19,6 +19,7 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY README.md ./
 COPY src ./src
 COPY configs ./configs
+COPY alembic.ini ./
 RUN uv sync --locked --no-dev
 
 RUN useradd --create-home --uid 1000 quant

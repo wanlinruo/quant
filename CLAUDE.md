@@ -31,6 +31,7 @@ make format    # 自动修复并格式化
 make up        # 本地启动 postgres + dashboard（http://localhost:8501，强制 TRADING_MODE=sim）
 make down      # 停止本地服务（保留数据卷）
 make logs      # 查看本地服务日志
+make migrate   # 本地数据库执行迁移；表结构只能通过 Alembic 迁移修改
 make sync-data # 从服务器同步 Parquet 数据（Phase 4 起）
 ```
 
