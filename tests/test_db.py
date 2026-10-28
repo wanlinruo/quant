@@ -162,3 +162,34 @@ def test_money_roundtrip_exact(engine: Engine) -> None:
             text("SELECT limit_price FROM orders WHERE client_order_id LIKE '%-2'")
         ).scalar_one()
     assert got == Decimal("0.1")
+
+
+@pytest.mark.db
+@needs_db
+def test_backtest_run_roundtrip(engine: Engine) -> None:
+    import pandas as pd
+    from sqlalchemy.orm import Session
+
+    from quant.db.backtests import complete_run, create_run, fail_run
+    from quant.db.models import BacktestEquity, BacktestRun
+
+    eq = pd.Series([100.0, 110.0, 99.0], index=pd.bdate_range("2026-10-26", periods=3))
+    dd = eq / eq.cummax() - 1
+    with Session(engine) as s, s.begin():
+        rid = create_run(
+            s, "etf_momentum", {"lookback": 126}, date(2026, 10, 26), date(2026, 10, 28)
+        )
+        complete_run(s, rid, {"cagr": 0.1, "calmar": None}, eq, dd)
+        complete_run(s, rid, {"cagr": 0.1, "calmar": None}, eq, dd)  # 重复写入不重复插行
+        bad = create_run(s, "etf_momentum", {}, date(2026, 10, 26), date(2026, 10, 28))
+        fail_run(s, bad, "boom")
+    with Session(engine) as s:
+        run = s.get(BacktestRun, rid)
+        assert (
+            run is not None
+            and run.status == "done"
+            and run.metrics == {"cagr": 0.1, "calmar": None}
+        )
+        assert s.query(BacktestEquity).filter_by(run_id=rid).count() == 3
+        failed = s.get(BacktestRun, bad)
+        assert failed is not None and failed.status == "failed" and failed.error == "boom"

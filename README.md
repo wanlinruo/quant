@@ -12,6 +12,8 @@
 make install   # 安装依赖
 make check     # lint + test，与 CI 相同
 make help      # 全部命令
+uv run quant backtest --start 2016-10-28 --commission-per-share 0.005 --min-commission 1 --no-db
+               # 命令行回测（数据缓存在 data/parquet，首次运行从 yfinance 拉取并校验）
 make up        # Docker 启动 postgres + 面板 http://localhost:8501（需 Docker/OrbStack，.env 中设置 POSTGRES_PASSWORD）
 ```
 
