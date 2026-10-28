@@ -1,0 +1,60 @@
+name: CI
+
+# 分支模型：feat/* fix/* chore/* docs/* refactor/* --merge--> test（测试环境）--PR--> main（正式环境）
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [test, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  branch-policy:
+    name: Branch policy
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only test may open PRs into main
+        env:
+          HEAD: ${{ github.head_ref }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          echo "PR: $HEAD -> $BASE"
+          if [ "$BASE" = "main" ] && [ "$HEAD" != "test" ]; then
+            echo "::error::main 只接受来自 test 的 PR（当前来自 $HEAD）"
+            exit 1
+          fi
+
+  check:
+    name: Lint & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TRADING_MODE: sim
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Ruff lint
+        run: uv run ruff check
+
+      - name: Ruff format
+        run: uv run ruff format --check
+
+      - name: Mypy
+        run: uv run mypy
+
+      - name: Pytest
+        run: uv run pytest
