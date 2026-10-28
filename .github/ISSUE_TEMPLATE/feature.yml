@@ -1,0 +1,50 @@
+name: 需求 / 任务
+description: 新功能、开发任务、调研验证
+title: "[Phase X] "
+labels: []
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: 类型
+      options:
+        - 新功能
+        - 开发任务 / 重构
+        - 调研 / 可行性验证
+        - 文档
+    validations:
+      required: true
+  - type: input
+    id: plan-ref
+    attributes:
+      label: 对应 PROJECT_PLAN 章节 / 任务编号
+      placeholder: 例如：第 15 章 任务 0.1
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景与目标
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 范围
+      description: 用任务清单列出要做的事；明确不做的事也写上
+      value: |
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 可验证的完成条件
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 安全检查
+      options:
+        - label: 涉及下单 / 交易模式 / 密钥（如勾选，请加 `safety` 标签）
+        - label: 含【待确认】事项（如勾选，请加 `needs-confirmation` 标签，确认前不得实施）
