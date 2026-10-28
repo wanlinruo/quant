@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import Engine, create_engine, delete, update
+from sqlalchemy import Engine, create_engine, delete, select, update
 from sqlalchemy.orm import Session
 
 from quant.db.models import BacktestEquity, BacktestRun
@@ -66,3 +66,24 @@ def fail_run(session: Session, run_id: int, error: str) -> None:
         .where(BacktestRun.id == run_id)
         .values(status="failed", error=error[:4000], finished_at=datetime.now(UTC))
     )
+
+
+def claim_next(session: Session) -> BacktestRun | None:
+    """领取最早的 queued 任务并标记为 running。
+
+    SELECT ... FOR UPDATE SKIP LOCKED：多个 worker 并发时，已被其他事务锁定的行直接跳过，
+    同一任务不会被重复领取。调用方需在事务中调用，并在返回后提交。
+    """
+    run = session.scalars(
+        select(BacktestRun)
+        .where(BacktestRun.status == "queued")
+        .order_by(BacktestRun.created_at, BacktestRun.id)
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    ).first()
+    if run is None:
+        return None
+    run.status = "running"
+    run.started_at = datetime.now(UTC)
+    session.flush()
+    return run
