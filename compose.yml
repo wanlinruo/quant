@@ -1,0 +1,39 @@
+# 服务定义（服务器与本地共用）。本地用 make up 叠加 compose.dev.yml。
+# 变量来自同目录 .env（不提交）；POSTGRES_PASSWORD 必须设置。
+name: quant
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: quant
+      POSTGRES_DB: quant
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?需要在 .env 中设置 POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quant -d quant"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  dashboard:
+    image: ${QUANT_IMAGE:-quant:local}
+    build: .
+    restart: unless-stopped
+    environment:
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      QUANT_DATABASE_URL: postgresql+psycopg://quant:${POSTGRES_PASSWORD}@postgres:5432/quant
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    # 服务器上不对公网开放端口；访问方式见 PROJECT_PLAN 13.2（Tailscale），Phase 4 配置
+
+volumes:
+  pgdata:

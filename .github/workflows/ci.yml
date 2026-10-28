@@ -58,3 +58,18 @@ jobs:
 
       - name: Pytest
         run: uv run pytest
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image（只验证 Dockerfile，不推送；部署由 Phase 4 的 deploy.yml 负责）
+        run: docker build --tag quant:ci .
+
+      - name: Smoke test
+        run: |
+          docker run --rm -e TRADING_MODE=sim quant:ci \
+            python -c "from quant.core.settings import load_settings; s = load_settings(); assert s.trading_mode == 'sim', s; print('ok', s.broker)"

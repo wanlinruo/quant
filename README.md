@@ -12,6 +12,7 @@
 make install   # 安装依赖
 make check     # lint + test，与 CI 相同
 make help      # 全部命令
+make up        # Docker 启动 postgres + 面板 http://localhost:8501（需 Docker/OrbStack，.env 中设置 POSTGRES_PASSWORD）
 ```
 
 连接老虎模拟账户（可选）：

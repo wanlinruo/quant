@@ -1,4 +1,4 @@
-.PHONY: help install lint format test check up sync-data
+.PHONY: help install lint format test check up down logs sync-data
 
 help: ## 列出可用命令
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -20,8 +20,16 @@ test: ## 运行单元测试（TRADING_MODE=sim）
 
 check: lint test ## 与 CI 相同的全部检查
 
-up: ## docker compose 本地启动（#13 实现）
-	@echo "尚未实现：Docker 与 compose 见 issue #13" >&2; exit 1
+COMPOSE_DEV = docker compose -f compose.yml -f compose.dev.yml
+
+up: ## 本地启动 postgres + dashboard（http://localhost:8501，TRADING_MODE=sim）
+	$(COMPOSE_DEV) up -d --build --wait
+
+down: ## 停止本地服务（保留数据卷）
+	$(COMPOSE_DEV) down
+
+logs: ## 查看本地服务日志
+	$(COMPOSE_DEV) logs -f --tail=100
 
 sync-data: ## 从服务器同步 Parquet 数据（Phase 4 实现）
 	@echo "尚未实现：服务器部署后提供（Phase 4）" >&2; exit 1
