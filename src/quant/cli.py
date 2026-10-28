@@ -14,23 +14,24 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from quant.broker.sim import CostModel
 from quant.core.calendar import get_calendar
-from quant.core.settings import ConfigError, CostSettings, Settings, load_settings
-from quant.data.pipeline import DataValidationError, ensure_bars
+from quant.core.settings import ConfigError, Settings, load_settings
+from quant.data.pipeline import DataValidationError
 from quant.data.providers.base import DataProvider
-from quant.data.providers.yfinance import YFinanceProvider
-from quant.data.store import ParquetStore
-from quant.engine.backtester import Backtester, BacktestResult
+from quant.engine.backtester import BacktestResult
 from quant.engine.metrics import Metrics
-from quant.engine.orders import OrderPlanParams
-from quant.strategies import STRATEGIES, get_strategy
-
-BENCHMARK = "SPY"
+from quant.engine.runner import (
+    BENCHMARK,
+    BacktestSpec,
+    costs_with_overrides,
+    run_spec,
+    save_result,
+)
+from quant.strategies import STRATEGIES
 
 
 def _parse_param(text: str) -> tuple[str, Any]:
@@ -69,18 +70,6 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--refresh-data", action="store_true", help="忽略本地数据，重新拉取")
     bt.add_argument("--no-db", action="store_true", help="不写入数据库")
     return parser
-
-
-def _costs(args: argparse.Namespace, settings: Settings) -> CostModel:
-    c = settings.costs
-    merged = CostSettings(
-        commission_per_share=args.commission_per_share
-        if args.commission_per_share is not None
-        else c.commission_per_share,
-        min_commission=args.min_commission if args.min_commission is not None else c.min_commission,
-        slippage=args.slippage if args.slippage is not None else c.slippage,
-    )
-    return CostModel.from_settings(merged)
 
 
 def _pct(x: float) -> str:
@@ -126,30 +115,12 @@ def run_backtest(
     provider: DataProvider | None = None,
     out: Any = sys.stdout,
 ) -> BacktestResult:
-    cal = get_calendar()
-    strategy = get_strategy(args.strategy)
-    params = dict(args.param)
-    end = args.end or cal.last_completed_trading_day(datetime.now(UTC))
-    if args.start >= end:
-        raise ValueError(f"start {args.start} 必须早于 end {end}")
-    costs = _costs(args, settings)
-
-    symbols = sorted({*strategy.symbols(params), BENCHMARK})
-    # 交易日 ≈ 自然日 × 252/365，再多留余量
-    data_start = args.start - timedelta(days=int(strategy.warmup_days(params) * 1.5) + 10)
-    store = ParquetStore(settings.data_dir)
-    bars = ensure_bars(
-        store, provider or YFinanceProvider(), cal, symbols, data_start, end, args.refresh_data
+    end = args.end or get_calendar().last_completed_trading_day(datetime.now(UTC))
+    costs = costs_with_overrides(
+        settings, args.commission_per_share, args.min_commission, args.slippage
     )
-
-    ex = settings.executor
-    plan = OrderPlanParams(
-        cash_buffer=Decimal(str(ex.cash_buffer)),
-        min_trade_usd=Decimal(str(ex.min_trade_usd)),
-        min_weight_diff=Decimal(str(ex.min_weight_diff)),
-    )
-    bt = Backtester(strategy, bars, cal, costs, args.cash, plan, params, BENCHMARK)
-    result = bt.run(args.start, end)
+    spec = BacktestSpec(args.strategy, args.start, end, costs, args.cash, dict(args.param))
+    result = run_spec(spec, settings, provider, args.refresh_data)
     print_report(result, out)
 
     if args.no_db or settings.database_url is None:
@@ -157,25 +128,14 @@ def run_backtest(
         return result
     from sqlalchemy.orm import Session
 
-    from quant.db.backtests import complete_run, create_run, make_engine
+    from quant.db.backtests import create_run, make_engine
 
-    stored_params = {
-        **params,
-        "_costs": {
-            "commission_per_share": str(costs.commission_per_share),
-            "min_commission": str(costs.min_commission),
-            "slippage": str(costs.slippage),
-        },
-        "_cash": str(args.cash),
-    }
-    metrics = {
-        **result.metrics.to_dict(),
-        "benchmark": result.benchmark.to_dict() if result.benchmark else None,
-    }
     engine = make_engine(settings.database_url.get_secret_value())
     with Session(engine) as session, session.begin():
-        run_id = create_run(session, strategy.name, stored_params, args.start, end, "running")
-        complete_run(session, run_id, metrics, result.equity, result.drawdown)
+        run_id = create_run(
+            session, spec.strategy, spec.stored_params(), spec.start, spec.end, "running"
+        )
+        save_result(session, run_id, result)
     engine.dispose()
     print(f"已写入数据库：backtest_runs.id = {run_id}", file=out)
     return result
