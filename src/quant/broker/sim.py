@@ -1,7 +1,9 @@
 """SimBroker：回测用模拟撮合（PROJECT_PLAN 6.1、第 9 章）。
 
 撮合规则：
-- 下单后不立即成交，在下一根日线（on_bar）的开盘价撮合；同一根日线内先卖后买。
+- 下单后不立即成交，在下一根日线（on_bar / open_session）的开盘价撮合；同一根日线内先卖后买。
+- 开盘后（open_session 与 close_session 之间）提交的订单可用 match_open 按当日开盘价撮合，
+  用于“卖单成交后再按实际现金计算买单”。
 - 成交价 = 开盘价 × (1 ± 滑点)，买入上浮、卖出下浮。
 - 限价单为当日有效：滑点后的成交价劣于限价则不成交，状态为 EXPIRED。
 - 佣金 = max(股数 × 每股佣金, 单笔最低佣金)。
@@ -76,6 +78,7 @@ class SimBroker(Broker):
         self._costs = costs
         self._today = start
         self._last_bar_day: date | None = None
+        self._bars_today: dict[str, Bar] | None = None  # 开盘后、收盘前的当日日线
         self._seq = 0
         self._qty: dict[str, int] = {}
         self._cost_basis: dict[str, Decimal] = {}  # 持仓总成本（不含佣金）
@@ -93,20 +96,38 @@ class SimBroker(Broker):
 
     def on_bar(self, day: date, bars: dict[str, Bar]) -> list[Fill]:
         """推进到交易日 day：按开盘价撮合待成交订单，再用收盘价更新市值。返回当日成交。"""
+        fills = self.open_session(day, bars)
+        self.close_session()
+        return fills
+
+    def open_session(self, day: date, bars: dict[str, Bar]) -> list[Fill]:
+        """开盘：推进到 day，按开盘价撮合此前提交的订单。之后可以继续下单并调用 match_open。"""
         if self._last_bar_day is not None and day <= self._last_bar_day:
             raise ValueError(f"日期必须递增：{day} ≤ {self._last_bar_day}")
         for sym, bar in bars.items():
             if bar.symbol != sym or bar.date != day:
                 raise ValueError(f"日线与键或日期不一致：{sym} {bar.symbol} {bar.date}")
         self._today = self._last_bar_day = day
+        self._bars_today = dict(bars)
+        return self.match_open()
+
+    def match_open(self) -> list[Fill]:
+        """按当日开盘价撮合全部待成交订单，先卖后买（PROJECT_PLAN 6.3）。"""
+        if self._bars_today is None:
+            raise RuntimeError("尚未开盘：先调用 open_session")
         pending = [self._orders[oid] for oid in self._pending]
         self._pending = []
-        # 先卖后买（PROJECT_PLAN 6.3）
         pending.sort(key=lambda o: 0 if o.side is Side.SELL else 1)
-        new_fills = [f for o in pending if (f := self._match(o, bars.get(o.symbol))) is not None]
-        for sym, bar in bars.items():
+        bars = self._bars_today
+        return [f for o in pending if (f := self._match(o, bars.get(o.symbol))) is not None]
+
+    def close_session(self) -> None:
+        """收盘：用收盘价更新估值。"""
+        if self._bars_today is None:
+            raise RuntimeError("尚未开盘：先调用 open_session")
+        for sym, bar in self._bars_today.items():
             self._last[sym] = bar.close
-        return new_fills
+        self._bars_today = None
 
     def _match(self, order: OrderStatus, bar: Bar | None) -> Fill | None:
         at = datetime.combine(self._today, MARKET_OPEN, ET)
