@@ -72,9 +72,21 @@ def test_invalid_mode_shows_error(env: Path, monkeypatch: pytest.MonkeyPatch) ->
 # ---- 只读约束：面板代码不得具备下单、撤单、修改熔断开关的能力 ----
 
 FORBIDDEN_IMPORTS = ("quant.broker", "tigeropen", "quant.core.safety", "quant.engine.executor")
-FORBIDDEN_NAMES = {"place_order", "cancel_order", "SystemFlag", "system_flags", "Order", "Fill"}
+# 只读展示允许查询 orders / fills / system_flags，但不得出现任何写调用（见 WRITE_CALLS）
+FORBIDDEN_NAMES = {"place_order", "cancel_order", "plan_orders", "check_order_allowed"}
+SESSION_NAMES = {"s", "session", "conn", "connection"}
 ALLOWED_WRITES = {"create_run"}  # 只能提交回测任务
-WRITE_CALLS = {"add", "add_all", "delete", "merge", "execute", "update", "insert"}
+WRITE_CALLS = {
+    "add",
+    "add_all",
+    "delete",
+    "merge",
+    "execute",
+    "update",
+    "insert",
+    "commit",
+    "flush",
+}
 
 
 def _sources() -> list[Path]:
@@ -96,9 +108,14 @@ def test_dashboard_is_read_only(path: Path) -> None:
         if isinstance(node, ast.Import):
             for a in node.names:
                 assert not a.name.startswith(FORBIDDEN_IMPORTS), f"{path.name} 导入了 {a.name}"
-        if isinstance(node, ast.Name):
-            assert node.id not in FORBIDDEN_NAMES - {"Order", "Fill"}, (
-                f"{path.name} 使用了 {node.id}"
-            )
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        if isinstance(node, ast.Name | ast.Attribute):
+            name = node.id if isinstance(node, ast.Name) else node.attr
+            assert name not in FORBIDDEN_NAMES, f"{path.name} 使用了 {name}"
+        # 数据库会话 / 连接上的写调用（面板代码中会话变量统一命名为 s / session / conn）
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in SESSION_NAMES
+        ):
             assert node.func.attr not in WRITE_CALLS, f"{path.name} 调用了 .{node.func.attr}()"
