@@ -6,7 +6,9 @@ authors = [
     { name = "wanlinruo", email = "394688215@qq.com" }
 ]
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "tigeropen>=3.8.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]
@@ -26,6 +28,8 @@ src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
+# 中文注释、文案中的全角标点是正常写法
+ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.format]
 # 设计文档中的代码块是示意，不参与格式化
@@ -34,8 +38,12 @@ exclude = ["*.md"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["src", "tests"]  # scripts/ 有 .py 后加入
+files = ["src", "tests", "scripts"]
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["tigeropen.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

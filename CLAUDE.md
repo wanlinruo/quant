@@ -4,11 +4,11 @@
 
 ## 当前阶段
 
-Phase 0 可行性验证。第一个任务：`scripts/phase0/tiger_check.py`（见 PROJECT_PLAN.md 第 15 章任务 0.1）。
+Phase 0 可行性验证。任务 0.1（`scripts/phase0/tiger_check.py`）已完成，后续任务见 GitHub issue 与 Phase 0 里程碑。
 
 ## 关键约束
 
-- 券商：老虎证券 OpenAPI（`tigeropen`）。接口用法以官方文档为准：https://quant.itiger.com/openapi/zh/python/overview/introduction.html
+- 券商：老虎证券 OpenAPI（`tigeropen`）。接口用法以官方文档为准：https://docs.itigerup.com/docs/prepare （AI 可读索引：https://docs.itigerup.com/llms.txt，页面 URL 加 `.md` 得到 Markdown）
 - Mac 只做开发；服务器只运行 CI 部署的 Docker 镜像，不在服务器上改代码。
 - Broker 抽象为接口；策略只输出目标仓位权重，纯计算、无 I/O。
 - 回测与实盘共用同一个策略类。
