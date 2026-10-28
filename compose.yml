@@ -37,6 +37,24 @@ services:
       retries: 6
     # 服务器上不对公网开放端口；访问方式见 PROJECT_PLAN 13.2（Tailscale），Phase 4 配置
 
+  backtest-worker:
+    image: ${QUANT_IMAGE:-quant:local}
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "quant.jobs.backtest_worker"]
+    environment:
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      QUANT_DATABASE_URL: postgresql+psycopg://quant:${POSTGRES_PASSWORD}@postgres:5432/quant
+    volumes:
+      - parquet:/data/parquet
+    depends_on:
+      postgres:
+        condition: service_healthy
+    stop_grace_period: 2m  # 收到 SIGTERM 后处理完当前回测再退出
+    # 回测不得影响交易任务（PROJECT_PLAN 第 3 章）；具体数值待 #6 资源实测后调整
+    cpus: 1.0
+    mem_limit: 1536m
+
 volumes:
   pgdata:
   parquet:

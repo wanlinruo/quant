@@ -21,3 +21,10 @@ services:
       - --server.headless=true
       - --server.runOnSave=true
       - --browser.gatherUsageStats=false
+
+  backtest-worker:
+    environment:
+      TRADING_MODE: sim
+    volumes:
+      - ./src:/app/src:ro
+      - ./configs:/app/configs:ro
