@@ -1,4 +1,4 @@
-.PHONY: help install lint format test check up down logs sync-data
+.PHONY: help install lint format test check up down logs migrate sync-data
 
 help: ## 列出可用命令
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -27,6 +27,9 @@ up: ## 本地启动 postgres + dashboard（http://localhost:8501，TRADING_MODE=
 
 down: ## 停止本地服务（保留数据卷）
 	$(COMPOSE_DEV) down
+
+migrate: ## 在本地 postgres 上执行数据库迁移（alembic upgrade head）
+	$(COMPOSE_DEV) run --rm dashboard alembic upgrade head
 
 logs: ## 查看本地服务日志
 	$(COMPOSE_DEV) logs -f --tail=100

@@ -6,4 +6,5 @@
 !README.md
 !src/
 !configs/
+!alembic.ini
 **/__pycache__

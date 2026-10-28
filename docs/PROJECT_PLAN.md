@@ -291,6 +291,13 @@ class Strategy(ABC):
 | `backtest_equity` | run_id, date, equity, drawdown | 净值曲线 |
 | `system_flags` | key, value | 如 `trading_enabled` |
 
+实现补充（#14，`src/quant/db/models.py`，初始迁移见 `src/quant/db/migrations/versions/`）：
+
+- `orders`、`fills`、两张快照表增加 `mode` 列（sim / paper / live），模拟盘与实盘数据在同一个库中不混淆；快照表按 `(日期, mode[, symbol])` 唯一。
+- `orders` 增加 `reference_price`（下单时参考价）、`filled_qty`、`avg_fill_price`、`reason`，用于评估延迟行情下的执行偏差（#3）。
+- `signals` 按 `(strategy, signal_date)` 唯一。状态、方向、模式等字段用 CHECK 约束限定取值。
+- 初始迁移写入 `trading_enabled = false`：熔断开关默认关闭，需人工打开。
+
 ---
 
 ## 8. 每日运行流程
