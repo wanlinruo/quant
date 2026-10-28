@@ -363,6 +363,8 @@ class Strategy(ABC):
 - 老虎的 `tiger_id`、私钥、账户号只通过环境变量或服务器上权限为 600 的文件提供。
 - `.env`、私钥文件、`*.properties` 必须加入 `.gitignore`，仓库中只保留 `.env.example`。
 - 实盘密钥只存在于服务器，Mac 上最多配置模拟账户。
+- 配置由 `core/settings.py` 加载：`configs/base.yaml` → 按模式叠加 `dev/paper/live.yaml` → `QUANT_` 前缀环境变量覆盖。`TRADING_MODE` 只能来自环境变量，写在 YAML 中会拒绝启动；Mac 上设置 `live` 会拒绝启动。
+- 向券商下单前统一调用 `core/safety.py` 的 `check_order_allowed`：`paper` 只允许模拟账户，`live` 只允许实盘账户且不能在开发机上运行。
 - GitHub Secrets 中只存部署所需的 SSH 私钥和服务器地址。
 
 ---

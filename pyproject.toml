@@ -8,6 +8,8 @@ authors = [
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pandas>=3.1.0",
+    "pydantic-settings>=2.16.2",
+    "pyyaml>=6.0.3",
     "tigeropen>=3.8.0",
     "yfinance>=1.7.0",
 ]
@@ -22,6 +24,7 @@ dev = [
     "pandas-stubs>=3.0.5.260914",
     "pytest>=9.2.0",
     "ruff>=0.17.3",
+    "types-pyyaml>=6.0.12.20260906",
 ]
 
 [tool.ruff]
@@ -43,6 +46,7 @@ python_version = "3.12"
 strict = true
 files = ["src", "tests", "scripts"]
 mypy_path = "src"
+plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
 module = ["tigeropen.*", "yfinance.*"]

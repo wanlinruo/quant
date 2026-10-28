@@ -1,0 +1,2 @@
+# TRADING_MODE=sim：本地开发，回测 Broker，不连券商下单
+broker: sim
