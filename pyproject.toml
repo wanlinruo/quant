@@ -8,6 +8,7 @@ authors = [
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
+    "exchange-calendars>=4.13.2",
     "numpy>=2.5.4",
     "pandas>=3.1.0",
     "psycopg[binary]>=3",
@@ -58,10 +59,12 @@ mypy_path = "src"
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["tigeropen.*", "yfinance.*"]
+module = ["tigeropen.*", "yfinance.*", "exchange_calendars.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+# exchange_calendars 内部使用了 pandas 3.1 弃用的写法，与本项目代码无关
+filterwarnings = ["ignore:Series.values returning an ndarray:pandas.errors.Pandas4Warning"]
 markers = ["db: 需要 PostgreSQL（设置 QUANT_TEST_DATABASE_URL，否则跳过）"]
