@@ -8,7 +8,8 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
     PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
-    QUANT_CONFIG_DIR=/app/configs
+    QUANT_CONFIG_DIR=/app/configs \
+    QUANT_DATA_DIR=/data/parquet
 
 WORKDIR /app
 
@@ -22,7 +23,8 @@ COPY configs ./configs
 COPY alembic.ini ./
 RUN uv sync --locked --no-dev
 
-RUN useradd --create-home --uid 1000 quant
+RUN useradd --create-home --uid 1000 quant \
+    && mkdir -p /data/parquet && chown -R quant:quant /data
 USER quant
 
 EXPOSE 8501

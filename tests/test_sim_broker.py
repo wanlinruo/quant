@@ -226,3 +226,29 @@ class TestOrderManagement:
         assert set(q) == {"SPY"}
         assert q["SPY"].last == D("505")
         assert q["SPY"].bid is None
+
+
+class TestSessionSteps:
+    def test_buy_with_actual_cash_after_sell_at_same_open(self) -> None:
+        b = broker("6000")
+        b.place_order(req("SPY", Side.BUY, 10))
+        b.on_bar(D1, {"SPY": bar("SPY", D1, "500")})
+        b.place_order(req("SPY", Side.SELL, 10, day=D1))
+        # 开盘：卖单先成交，再按实际现金提交买单，于同一开盘价成交
+        fills = b.open_session(D2, {"SPY": bar("SPY", D2, "450"), "TLT": bar("TLT", D2, "100")})
+        assert [f.side for f in fills] == [Side.SELL]
+        cash = b.get_account().cash
+        qty = int(cash / D("100.06"))
+        b.place_order(req("TLT", Side.BUY, qty, day=D2))
+        buys = b.match_open()
+        assert [(f.symbol, f.qty, f.price) for f in buys] == [("TLT", qty, D("100.0500"))]
+        assert buys[0].filled_at.date() == D2
+        b.close_session()
+        assert b.get_account().cash >= 0
+
+    def test_steps_require_open_session(self) -> None:
+        b = broker()
+        with pytest.raises(RuntimeError):
+            b.match_open()
+        with pytest.raises(RuntimeError):
+            b.close_session()

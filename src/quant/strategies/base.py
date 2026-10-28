@@ -98,6 +98,14 @@ class Strategy(ABC):
     def target_weights(self, ctx: Context) -> dict[str, float]:
         """返回目标仓位权重，如 {"QQQ": 0.6, "TLT": 0.4}；权重和 ≤ 1，剩余为现金。"""
 
+    def symbols(self, params: Mapping[str, Any]) -> list[str]:
+        """该参数下需要的全部标的（用于准备数据）。"""
+        raise NotImplementedError(f"{type(self).__name__} 未声明所需标的")
+
+    def warmup_days(self, params: Mapping[str, Any]) -> int:
+        """回测开始前需要的历史交易日数。"""
+        return 0
+
     def run(self, ctx: Context) -> dict[str, float]:
         """调用方使用的入口：计算并校验权重。"""
         return validate_weights(self.target_weights(ctx))
