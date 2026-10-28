@@ -28,7 +28,9 @@ make check     # lint + test，与 CI 相同
 make lint      # ruff check + ruff format --check + mypy
 make test      # pytest（TRADING_MODE=sim）
 make format    # 自动修复并格式化
-make up        # docker compose 本地启动（#13 实现前不可用）
+make up        # 本地启动 postgres + dashboard（http://localhost:8501，强制 TRADING_MODE=sim）
+make down      # 停止本地服务（保留数据卷）
+make logs      # 查看本地服务日志
 make sync-data # 从服务器同步 Parquet 数据（Phase 4 起）
 ```
 
@@ -63,6 +65,6 @@ make sync-data # 从服务器同步 Parquet 数据（Phase 4 起）
 | `main` | 正式环境（Phase 4 起由 CI 部署），默认分支 | 只接受来自 `test` 的 PR，不直接 push |
 | `test` | 测试环境 | 功能分支直接 merge 进来；不直接在 `test` 上写代码 |
 
-**CI**（`.github/workflows/ci.yml`）：push 到 `test`/`main`、以及 PR 到 `main` 时运行 ruff check → ruff format --check → mypy → pytest；PR 上另有 `Branch policy` 检查只允许 `test` → `main`。
+**CI**（`.github/workflows/ci.yml`）：push 到 `test`/`main`、以及 PR 到 `main` 时运行 ruff check → ruff format --check → mypy → pytest，并构建 Docker 镜像做冒烟测试（`Docker build`）；PR 上另有 `Branch policy` 检查只允许 `test` → `main`。
 
 **分支保护**（仓库暂时公开以使用免费 CI）：`main` 必须经 PR 合入，`Lint & test` 与 `Branch policy` 必须通过，对管理员同样生效；`test` 禁止强推与删除。将来改回私有后（免费版不支持分支保护），以上规则靠 CI 检查与自觉遵守，不要绕过。仓库公开期间，更要确保不提交任何密钥、账户号。

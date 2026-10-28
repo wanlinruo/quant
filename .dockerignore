@@ -1,0 +1,9 @@
+# 只把构建镜像需要的文件发给 Docker；密钥类文件绝不进入镜像
+**
+!pyproject.toml
+!uv.lock
+!.python-version
+!README.md
+!src/
+!configs/
+**/__pycache__
