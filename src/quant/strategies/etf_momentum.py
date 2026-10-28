@@ -59,6 +59,14 @@ class EtfMomentum(Strategy):
     def __init__(self, calendar: TradingCalendar | None = None) -> None:
         self._cal = calendar or get_calendar()
 
+    def symbols(self, params: Mapping[str, Any]) -> list[str]:
+        p = MomentumParams.from_mapping(params)
+        return [*p.universe, p.safe_asset]
+
+    def warmup_days(self, params: Mapping[str, Any]) -> int:
+        p = MomentumParams.from_mapping(params)
+        return max(p.lookback + 1, p.sma_window) + 23  # 再留一个月，保证首个月末可计算
+
     def rebalance_day(self, as_of: date) -> date:
         """as_of 当天或之前最近的月末交易日。"""
         if self._cal.is_month_end(as_of):
