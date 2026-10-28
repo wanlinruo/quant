@@ -1,0 +1,38 @@
+name: 缺陷
+description: 程序行为不符合预期
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: 现象
+      description: 实际发生了什么，附日志（账户号、密钥务必脱敏）
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: TRADING_MODE
+      options:
+        - sim
+        - paper
+        - live
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / commit

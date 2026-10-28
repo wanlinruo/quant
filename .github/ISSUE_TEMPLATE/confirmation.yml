@@ -1,0 +1,21 @@
+name: 待确认事项
+description: PROJECT_PLAN 中标注【待确认】、需要用户确认或人工查询的事项
+title: "[待确认] "
+labels: ["needs-confirmation"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: 需要确认的问题
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影响范围
+      description: 哪些设计或任务依赖这个结论
+  - type: textarea
+    id: conclusion
+    attributes:
+      label: 结论
+      description: 确认后填写，并同步更新 PROJECT_PLAN 或 REPORT.md
