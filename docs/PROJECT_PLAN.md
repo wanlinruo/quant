@@ -429,9 +429,9 @@ class Strategy(ABC):
 **0.1 实现提示**
 
 - 安装：`uv add tigeropen`（Python SDK 要求 3.8 以上）。
-- 开发者注册后获得 `tiger_id`、RSA 私钥（Python SDK 使用 PKCS#1 格式）和账户号；模拟账户有独立的账户号。
-- SDK 中有 `TigerOpenClientConfig`、`QuoteClient`、`TradeClient` 等类。**具体方法名和参数以官方文档为准**，不要凭记忆调用：https://quant.itiger.com/openapi/zh/python/overview/introduction.html
-- 配置从环境变量读取：`TIGER_ID`、`TIGER_ACCOUNT`、`TIGER_PRIVATE_KEY_PATH`；脚本启动时若检测到的不是模拟账户，必须拒绝执行下单步骤。
+- 开发者注册后获得 `tiger_id`、RSA 私钥（官方推荐 PKCS#8，兼容 PKCS#1）、`license` 和账户号；模拟账户有独立的账户号（17 位数字），`tiger_id` 与私钥实盘、模拟共用。
+- SDK 中有 `TigerOpenClientConfig`、`QuoteClient`、`TradeClient` 等类。**具体方法名和参数以官方文档为准**，不要凭记忆调用：https://docs.itigerup.com/docs/prepare
+- 配置使用开发者中心导出的 `tiger_openapi_config.properties`（权限 600，放在仓库外），通过环境变量 `TIGER_PROPS_PATH` 指定所在目录；脚本启动时若检测到的不是模拟账户，必须拒绝执行下单步骤。
 
 ### Phase 1：项目骨架
 
