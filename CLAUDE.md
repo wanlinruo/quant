@@ -59,4 +59,6 @@ make sync-data # 从服务器同步 Parquet 数据
 | `main` | 正式环境（Phase 4 起由 CI 部署），默认分支 | 只接受来自 `test` 的 PR，不直接 push |
 | `test` | 测试环境 | 功能分支直接 merge 进来；不直接在 `test` 上写代码 |
 
-**CI**（`.github/workflows/ci.yml`）：push 到 `test`/`main`、以及 PR 到 `main` 时运行 ruff check → ruff format --check → mypy → pytest；PR 上另有 `Branch policy` 检查只允许 `test` → `main`。仓库为私有免费版，无法开启分支保护，以上规则靠 CI 检查与自觉遵守，不要绕过。
+**CI**（`.github/workflows/ci.yml`）：push 到 `test`/`main`、以及 PR 到 `main` 时运行 ruff check → ruff format --check → mypy → pytest；PR 上另有 `Branch policy` 检查只允许 `test` → `main`。
+
+**分支保护**（仓库暂时公开以使用免费 CI）：`main` 必须经 PR 合入，`Lint & test` 与 `Branch policy` 必须通过，对管理员同样生效；`test` 禁止强推与删除。将来改回私有后（免费版不支持分支保护），以上规则靠 CI 检查与自觉遵守，不要绕过。仓库公开期间，更要确保不提交任何密钥、账户号。
