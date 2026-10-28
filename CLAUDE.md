@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-Phase 0 可行性验证。任务 0.1（`scripts/phase0/tiger_check.py`）已完成，后续任务见 GitHub issue 与 Phase 0 里程碑。
+Phase 1 项目骨架（Phase 0 关键项 0.1–0.3 已通过，结果见 `scripts/phase0/REPORT.md`；0.4–0.6 待条件具备后补做）。任务见 GitHub issue 与对应里程碑。
 
 ## 关键约束
 
@@ -21,14 +21,18 @@ Phase 0 可行性验证。任务 0.1（`scripts/phase0/tiger_check.py`）已完�
 - 不得把密钥、账户号、`.env`、私钥文件提交到仓库或写入日志。
 - 遇到文档中标注【待确认】的事项，先问用户，不要自行假设。
 
-## 常用命令（Phase 1 起可用）
+## 常用命令
 
 ```
-make lint      # ruff + mypy
-make test      # pytest
-make up        # docker compose 本地启动
-make sync-data # 从服务器同步 Parquet 数据
+make check     # lint + test，与 CI 相同
+make lint      # ruff check + ruff format --check + mypy
+make test      # pytest（TRADING_MODE=sim）
+make format    # 自动修复并格式化
+make up        # docker compose 本地启动（#13 实现前不可用）
+make sync-data # 从服务器同步 Parquet 数据（Phase 4 起）
 ```
+
+业务时间一律用美东时间（`America/New_York`），交易日与半日市以 `exchange_calendars` 的 `XNYS` 为准，不硬编码；不在盘前盘后下单。
 
 ## 工作方式
 

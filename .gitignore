@@ -22,7 +22,7 @@ dist/
 build/
 
 # Data
-data/
+/data/
 *.parquet
 
 # Notebooks
