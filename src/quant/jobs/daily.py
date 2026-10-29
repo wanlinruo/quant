@@ -123,7 +123,16 @@ def daily_data(ctx: JobContext, d: date) -> str:
     start = _data_start(ctx, d)
     for attempt in range(DATA_RETRIES + 1):
         try:
-            ensure_bars(ctx.store, ctx.provider, ctx.calendar, symbols, start, d, refresh=True)
+            ensure_bars(
+                ctx.store,
+                ctx.provider,
+                ctx.calendar,
+                symbols,
+                start,
+                d,
+                refresh=True,
+                max_move=get_strategy(ctx.strategy_name).max_daily_move,
+            )
             break
         except DataValidationError as e:
             # 当日数据未出：只有“最新数据过期”与“缺少当日”两类问题
