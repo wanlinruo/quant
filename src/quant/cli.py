@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
@@ -69,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--slippage", type=_decimal)
     bt.add_argument("--refresh-data", action="store_true", help="忽略本地数据，重新拉取")
     bt.add_argument("--no-db", action="store_true", help="不写入数据库")
+    sub.add_parser("notify-test", help="发送一条测试通知（检查 QUANT_NOTIFY_WEBHOOK_URL 配置）")
     return parser
 
 
@@ -141,12 +143,28 @@ def run_backtest(
     return result
 
 
+def notify_test(settings: Settings, out: Any = None) -> None:
+    from quant.notify.base import Level
+    from quant.notify.wecom import make_notifier
+
+    notifier = make_notifier(settings)
+    notifier.send(
+        f"[{settings.trading_mode}] 测试通知",
+        "收到这条消息说明告警配置正确。\n时间：" + f"{datetime.now(UTC):%Y-%m-%d %H:%M} UTC",
+        Level.INFO,
+    )
+    print(f"已通过 {type(notifier).__name__} 发送测试通知（失败时见日志）", file=out or sys.stdout)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     try:
         settings = load_settings()
         if args.command == "backtest":
             run_backtest(args, settings)
+        elif args.command == "notify-test":
+            notify_test(settings)
     except (ConfigError, DataValidationError, ValueError) as e:
         print(f"错误：{e}", file=sys.stderr)
         return 1
