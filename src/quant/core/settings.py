@@ -83,6 +83,16 @@ class RiskSettings(_Section):
     max_daily_turnover: float = Field(2.2, gt=0, le=10)
 
 
+class DataSettings(_Section):
+    """每日任务的数据源（#41）：primary 提供含分红复权价，secondary 抽样比对收盘价。
+
+    服务器 IP 被 Yahoo 限流，paper/live 用 tiger（老虎日线 + 老虎分红记录计算复权价）+ sina。
+    """
+
+    primary: Literal["yfinance", "tiger"] = "yfinance"
+    secondary: Literal["none", "tiger", "sina"] = "none"
+
+
 class StrategySettings(_Section):
     """每日任务运行的策略（模拟盘 / 实盘）；参数为空时用策略默认值。"""
 
@@ -123,6 +133,7 @@ class Settings(BaseSettings):
     risk: RiskSettings = RiskSettings()
     costs: CostSettings = CostSettings()
     strategy: StrategySettings = StrategySettings()
+    data: DataSettings = DataSettings()
 
     @field_validator("tiger_props_path")
     @classmethod
