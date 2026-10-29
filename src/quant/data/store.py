@@ -121,7 +121,7 @@ class ParquetStore:
 
         签名与 Context 的 loader 一致，可直接注入策略。
         """
-        if field not in PRICE_COLUMNS:
+        if field not in (*PRICE_COLUMNS, "volume"):
             raise ValueError(f"非法字段：{field}")
         cols = {s: self.read_bars(s, start, end)[field] for s in symbols}
         df = pd.DataFrame(cols, columns=list(symbols))

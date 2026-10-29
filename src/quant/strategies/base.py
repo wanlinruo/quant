@@ -17,8 +17,14 @@ from typing import Any, ClassVar
 import numpy as np
 import pandas as pd
 
+from quant.strategies.events import EventCalendar
+
 # 数据加载函数：(symbols, start, end) → 以日期为索引的 DataFrame，包含 end 当日
 BarLoader = Callable[[Sequence[str], date | None, date], pd.DataFrame]
+# 指定字段的加载函数：(symbols, field, start, end) → 宽表；field 为 open/high/low/close/volume，
+# 价格为含分红复权口径（与回测撮合一致）
+FieldLoader = Callable[[Sequence[str], str, date | None, date], pd.DataFrame]
+FIELDS = ("open", "high", "low", "close", "volume")
 
 WEIGHT_TOLERANCE = 1e-9
 
@@ -52,6 +58,8 @@ class Context:
     as_of: date
     loader: BarLoader = field(repr=False)
     params: Mapping[str, Any] = field(default_factory=dict)
+    field_loader: FieldLoader | None = field(default=None, repr=False)
+    events: EventCalendar = field(default_factory=EventCalendar)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
@@ -63,6 +71,16 @@ class Context:
             return _truncate(raw(list(symbols), start, end), end)
 
         object.__setattr__(self, "loader", guarded)
+        raw_fields = self.field_loader
+        if raw_fields is not None:
+
+            def guarded_fields(
+                symbols: Sequence[str], name: str, start: date | None, end: date
+            ) -> pd.DataFrame:
+                end = min(end, as_of)
+                return _truncate(raw_fields(list(symbols), name, start, end), end)
+
+            object.__setattr__(self, "field_loader", guarded_fields)
 
     def bars(
         self, symbols: Sequence[str], start: date | None = None, end: date | None = None
@@ -73,6 +91,23 @@ class Context:
         if start is not None and start > end:
             raise ValueError(f"start {start} 晚于 end {end}")
         return self.loader(symbols, start, end)
+
+    def field(
+        self,
+        symbols: Sequence[str],
+        name: str,
+        start: date | None = None,
+        end: date | None = None,
+    ) -> pd.DataFrame:
+        """指定字段（open/high/low/close/volume）的宽表，同样截断到 as_of。"""
+        if self.field_loader is None:
+            raise ValueError("当前数据源不提供开高低收量（Context.field_loader 未设置）")
+        if name not in FIELDS:
+            raise ValueError(f"非法字段：{name}")
+        end = self.as_of if end is None else end
+        if end > self.as_of:
+            raise LookAheadError(f"请求截至 {end} 的数据，晚于信号日 {self.as_of}")
+        return self.field_loader(symbols, name, start, end)
 
 
 def validate_weights(weights: Mapping[str, float]) -> dict[str, float]:
@@ -93,6 +128,8 @@ def validate_weights(weights: Mapping[str, float]) -> dict[str, float]:
 
 class Strategy(ABC):
     name: ClassVar[str]
+    # 非 None 时替换订单计算的 min_weight_diff：持有型策略用较大的值，避免价格漂移触发来回调仓
+    min_weight_diff: ClassVar[float | None] = None
 
     @abstractmethod
     def target_weights(self, ctx: Context) -> dict[str, float]:
