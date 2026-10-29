@@ -208,7 +208,7 @@ def baseline(args: argparse.Namespace, settings: Settings, out: Any = None) -> i
     from sqlalchemy.orm import Session
 
     from quant.broker.tiger import TigerBroker
-    from quant.db.models import AccountSnapshotRow
+    from quant.db.models import AccountSnapshotRow, PositionSnapshot
     from quant.engine.executor import ET
     from quant.engine.reconcile import record_snapshot
 
@@ -220,7 +220,15 @@ def baseline(args: argparse.Namespace, settings: Settings, out: Any = None) -> i
     if broker.get_open_orders():
         print("券商有未完成订单，等其完成或撤销后再记录基准", file=out)
         return 1
-    day = datetime.now(UTC).astimezone(ET).date()
+    # 基准代表上一个收盘日结束时的持仓：快照日当天及之前的成交视为已包含在快照中，
+    # 所以不能记为今天，否则今天执行产生的成交不会计入对账
+    now = datetime.now(UTC)
+    cal = get_calendar()
+    today = now.astimezone(ET).date()
+    if cal.is_trading_day(today) and cal.session_open(today) <= now < cal.session_close(today):
+        print("交易时段内不能记录基准，请在收盘后或开盘前执行", file=out)
+        return 1
+    day = cal.last_completed_trading_day(now)
     with Session(engine) as s, s.begin():
         last = s.scalar(
             select(func.max(AccountSnapshotRow.snapshot_date)).where(
@@ -230,6 +238,11 @@ def baseline(args: argparse.Namespace, settings: Settings, out: Any = None) -> i
         if last is not None and not args.confirm:
             print(f"已有 {last} 的快照；确认要以券商当前持仓为准时加 --confirm", file=out)
             return 1
+        # 覆盖时删除更晚的快照，否则对账仍以更晚的快照为准
+        for table in (AccountSnapshotRow, PositionSnapshot):
+            s.query(table).filter(
+                table.mode == settings.trading_mode, table.snapshot_date > day
+            ).delete()
         account, positions = broker.get_account(), broker.get_positions()
         record_snapshot(s, settings.trading_mode, day, account, positions)
     held = ", ".join(f"{p.symbol} {p.qty}" for p in positions.values()) or "无持仓"
