@@ -190,6 +190,15 @@ class TestOrders:
         assert st.client_order_id == "2026-10-28-etf_momentum-SPY-BUY-1"
         assert (st.avg_fill_price is None) == (filled == 0)
 
+    @pytest.mark.parametrize(
+        ("fee", "expected"),
+        [(1.99, D("1.99")), (-1.99, D("1.99")), (None, None), (float("nan"), None)],
+    )
+    def test_commission(self, fee: Any, expected: Decimal | None) -> None:
+        b, trade = broker()
+        trade.orders[123] = tiger_order(commission=fee)
+        assert b.get_order("123").commission == expected
+
     def test_unknown_status_raises(self) -> None:
         b, trade = broker()
         trade.orders[123] = tiger_order(status=status("WEIRD"))

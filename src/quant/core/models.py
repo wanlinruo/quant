@@ -239,6 +239,8 @@ class OrderStatus:
     limit_price: Decimal | None = None
     avg_fill_price: Decimal | None = None
     reason: str = ""
+    # 该订单累计佣金与费用；券商未返回时为 None
+    commission: Decimal | None = None
 
     def __post_init__(self) -> None:
         _check_symbol(self.symbol)
@@ -248,6 +250,7 @@ class OrderStatus:
             raise ValueError(f"成交数量 {self.filled_qty} 超过委托数量 {self.qty}")
         _check_money("limit_price", self.limit_price, positive=True)
         _check_money("avg_fill_price", self.avg_fill_price, positive=True)
+        _check_money("commission", self.commission)
         _check_aware("updated_at", self.updated_at)
 
     @property

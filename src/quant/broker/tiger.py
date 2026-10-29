@@ -249,6 +249,8 @@ class TigerBroker(Broker):
         avg = _dec(o.avg_fill_price) if o.avg_fill_price else None
         limit = _dec(o.limit_price) if o.limit_price else None
         updated = getattr(o, "update_time", None) or o.trade_time or o.order_time
+        fee = getattr(o, "commission", None)
+        fee_dec = _dec(fee) if fee not in (None, "") else None
         return OrderStatus(
             order_id=str(o.id),
             client_order_id=getattr(o, "user_mark", None) or None,
@@ -261,6 +263,7 @@ class TigerBroker(Broker):
             limit_price=limit,
             avg_fill_price=avg if avg and avg > 0 else None,
             reason=str(o.reason or ""),
+            commission=abs(fee_dec) if fee_dec is not None and fee_dec.is_finite() else None,
         )
 
     def get_order(self, order_id: str) -> OrderStatus:

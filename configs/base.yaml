@@ -20,12 +20,20 @@ executor:
   limit_offset: 0.002
   min_trade_usd: 100
   min_weight_diff: 0.02
+  # 超时撤单重挂（#30 确认）
+  order_timeout_minutes: 5
+  max_retries: 3
+  poll_seconds: 10
+  stop_before_close_minutes: 30
 
 # 见 PROJECT_PLAN 6.4
 risk:
   symbol_whitelist: [SPY, QQQ, TLT, GLD, SHY]
   max_symbol_weight: 1.0
   max_total_weight: 1.0
+  # 当日成交额 / 净值；月度轮动一次全仓切换约 2（#30 确认）
+  max_daily_turnover: 2.2
+  # 单笔订单金额上限按账户在 paper.yaml / live.yaml 中配置
 
 # 回测成本，见 PROJECT_PLAN 第 9 章
 costs:
