@@ -1,0 +1,17 @@
+# 面板公网入口（#44）：HTTPS（Let's Encrypt 自动申请与续期）+ 登录密码，反向代理到 dashboard。
+# 域名、用户名、密码哈希来自 /opt/quant/.env：DASHBOARD_DOMAIN、DASHBOARD_USER、DASHBOARD_PASSWORD_HASH。
+# 密码用 /opt/quant/set_dashboard_password.sh 设置；未设置时为无人知道明文的占位哈希，无法登录。
+{$DASHBOARD_DOMAIN} {
+	encode zstd gzip
+	basic_auth {
+		{$DASHBOARD_USER} {$DASHBOARD_PASSWORD_HASH}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+	reverse_proxy dashboard:8501
+}
