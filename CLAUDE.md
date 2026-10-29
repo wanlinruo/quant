@@ -34,6 +34,7 @@ make logs      # 查看本地服务日志
 make migrate   # 本地数据库执行迁移；表结构只能通过 Alembic 迁移修改
 uv run quant backtest --start 2016-10-28 --commission-per-share 0.005 --min-commission 1 --no-db
                # 命令行回测；佣金待 #5 确认前必须显式传入，结果默认写入 QUANT_DATABASE_URL
+uv run quant notify-test  # 发送测试通知（企业微信，需配置 QUANT_NOTIFY_WEBHOOK_URL）
 make sync-data # 从服务器同步 Parquet 数据（Phase 4 起）
 ```
 
