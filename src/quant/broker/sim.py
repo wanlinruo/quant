@@ -6,7 +6,8 @@
   用于“卖单成交后再按实际现金计算买单”。
 - 成交价 = 开盘价 × (1 ± 滑点)，买入上浮、卖出下浮。
 - 限价单为当日有效：滑点后的成交价劣于限价则不成交，状态为 EXPIRED。
-- 佣金 = max(股数 × 每股佣金, 单笔最低佣金)。
+- 费用 = 佣金 max(股数 × 每股佣金, 最低佣金) + 平台费 max(股数 × 每股平台费, 最低平台费)，
+  两项各自不超过成交额 × max_fee_pct（老虎固定式套餐，见 CostSettings）。
 - 买入资金不足、卖出超过持仓（不做空）时拒绝（REJECTED）；当日该标的没有日线时 EXPIRED。
 - 只在本地内存中运行，不连接任何券商。
 """
@@ -45,12 +46,20 @@ class CostModel:
     commission_per_share: Decimal
     min_commission: Decimal
     slippage: Decimal = Decimal("0.0005")
+    platform_per_share: Decimal = Decimal(0)
+    platform_min: Decimal = Decimal(0)
+    max_fee_pct: Decimal | None = None
 
     def __post_init__(self) -> None:
-        for name in ("commission_per_share", "min_commission", "slippage"):
+        names = ("commission_per_share", "min_commission", "slippage", "platform_per_share",
+                 "platform_min")  # fmt: skip
+        for name in names:
             v = getattr(self, name)
             if not isinstance(v, Decimal) or not v.is_finite() or v < 0:
                 raise ValueError(f"{name} 必须是非负 Decimal：{v!r}")
+        cap = self.max_fee_pct
+        if cap is not None and (not isinstance(cap, Decimal) or not 0 < cap < 1):
+            raise ValueError(f"max_fee_pct 必须在 (0, 1) 之间：{cap!r}")
 
     @classmethod
     def from_settings(cls, costs: CostSettings) -> CostModel:
@@ -59,15 +68,41 @@ class CostModel:
                 "未配置佣金（costs.commission_per_share / costs.min_commission），"
                 "老虎实际费率待确认（issue #5）"
             )
-        return cls(costs.commission_per_share, costs.min_commission, costs.slippage)
+        return cls(
+            costs.commission_per_share,
+            costs.min_commission,
+            costs.slippage,
+            costs.platform_per_share,
+            costs.platform_min,
+            costs.max_fee_pct,
+        )
+
+    def to_settings(self) -> CostSettings:
+        return CostSettings(
+            commission_per_share=self.commission_per_share,
+            min_commission=self.min_commission,
+            slippage=self.slippage,
+            platform_per_share=self.platform_per_share,
+            platform_min=self.platform_min,
+            max_fee_pct=self.max_fee_pct,
+        )
 
     def exec_price(self, open_price: Decimal, side: Side) -> Decimal:
         factor = 1 + self.slippage if side is Side.BUY else 1 - self.slippage
         return (open_price * factor).quantize(_PRICE_STEP, ROUND_HALF_UP)
 
-    def commission(self, qty: int) -> Decimal:
-        fee = max(self.commission_per_share * qty, self.min_commission)
-        return fee.quantize(_CENT, ROUND_HALF_UP)
+    def commission(self, qty: int, notional: Decimal | None = None) -> Decimal:
+        """一笔订单的佣金 + 平台费；notional（成交额）给出时按 max_fee_pct 封顶。"""
+        parts = [
+            max(self.commission_per_share * qty, self.min_commission),
+            max(self.platform_per_share * qty, self.platform_min)
+            if self.platform_per_share or self.platform_min
+            else Decimal(0),
+        ]
+        if self.max_fee_pct is not None and notional is not None:
+            cap = notional * self.max_fee_pct
+            parts = [min(p, cap) for p in parts]
+        return sum(parts, Decimal(0)).quantize(_CENT, ROUND_HALF_UP)
 
 
 class SimBroker(Broker):
@@ -142,8 +177,8 @@ class SimBroker(Broker):
             self._finish(order, OrderState.EXPIRED, at, f"开盘成交价 {price} 劣于限价 {lmt}")
             return None
         qty = order.qty
-        fee = self._costs.commission(qty)
         gross = price * qty
+        fee = self._costs.commission(qty, gross)
         if order.side is Side.BUY:
             if gross + fee > self._cash:
                 self._finish(order, OrderState.REJECTED, at, "资金不足")

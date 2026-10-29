@@ -103,11 +103,18 @@ class StrategySettings(_Section):
 class CostSettings(_Section):
     """回测成本模型（PROJECT_PLAN 第 9 章）。
 
-    老虎美股佣金【待确认】（issue #5），确认前不设默认值；未配置时 SimBroker 拒绝构造。
+    老虎美股“固定式套餐”（#5，用户 2026-10-29 提供 App 截图）每笔订单收两项：
+    - 佣金：commission_per_share × 股数，不低于 min_commission
+    - 平台费：platform_per_share × 股数，不低于 platform_min
+    两项各自不超过成交额 × max_fee_pct。commission_per_share / min_commission 未配置时
+    SimBroker 拒绝构造。交收费、SEC / FINRA 规费未计入（截图未列出，待确认）。
     """
 
     commission_per_share: Decimal | None = Field(None, ge=0)
     min_commission: Decimal | None = Field(None, ge=0)
+    platform_per_share: Decimal = Field(Decimal(0), ge=0)
+    platform_min: Decimal = Field(Decimal(0), ge=0)
+    max_fee_pct: Decimal | None = Field(None, gt=0, lt=1)
     slippage: Decimal = Field(Decimal("0.0005"), ge=0, lt=Decimal("0.1"))
 
 
