@@ -66,7 +66,7 @@ class CostModel:
         if costs.commission_per_share is None or costs.min_commission is None:
             raise ValueError(
                 "未配置佣金（costs.commission_per_share / costs.min_commission），"
-                "老虎实际费率待确认（issue #5）"
+                "老虎费率见 configs/base.yaml（#5）"
             )
         return cls(
             costs.commission_per_share,

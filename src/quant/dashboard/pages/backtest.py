@@ -105,12 +105,12 @@ def _submit_form() -> None:
         commission = c3.text_input(
             "每股佣金",
             value="" if cfg.commission_per_share is None else str(cfg.commission_per_share),
-            placeholder="待 #5 确认",
+            placeholder="见 configs/base.yaml",
         )
         min_commission = c4.text_input(
             "单笔最低佣金",
             value="" if cfg.min_commission is None else str(cfg.min_commission),
-            placeholder="待 #5 确认",
+            placeholder="见 configs/base.yaml",
         )
         slippage = c5.text_input("滑点", value=str(cfg.slippage))
         submitted = st.form_submit_button("提交", type="primary")
