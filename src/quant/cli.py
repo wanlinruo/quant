@@ -81,6 +81,13 @@ def build_parser() -> argparse.ArgumentParser:
     base = sub.add_parser("baseline", help="把券商当前持仓记为对账基准（首次启用或人工核对后）")
     base.add_argument("--confirm", action="store_true", help="已有快照时覆盖当日快照")
 
+    ev = sub.add_parser("events", help="事件数据（财报反应日）")
+    ev_sub = ev.add_subparsers(dest="events_command", required=True)
+    sync = ev_sub.add_parser("sync-earnings", help="从 SEC EDGAR 同步历史财报反应日（研究用）")
+    sync.add_argument(
+        "--user-agent", required=True, help='SEC 要求的联系方式，如 "名称 邮箱"（不会写入仓库）'
+    )
+
     tr = sub.add_parser("trading", help="查看或人工切换熔断开关 trading_enabled")
     tr.add_argument("action", choices=["status", "enable", "disable"])
     tr.add_argument("--reason", default="人工关闭")
@@ -276,6 +283,22 @@ def trading(args: argparse.Namespace, settings: Settings, out: Any = None) -> in
     return 0
 
 
+def sync_earnings(args: argparse.Namespace, settings: Settings, out: Any = None) -> int:
+    from quant.data import events
+    from quant.data.providers import edgar
+
+    out = out or sys.stdout
+    data = {}
+    for sym in sorted(edgar.CIKS):
+        data[sym] = edgar.fetch_earnings(sym, args.user_agent)
+        last = data[sym][-1] if data[sym] else "无"
+        print(f"{sym}: {len(data[sym])} 次，最近 {last}", file=out)
+    path = settings.data_dir / "events" / "earnings.csv"
+    events.save_earnings(path, data)
+    print(f"已写入 {path}", file=out)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
@@ -291,6 +314,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return baseline(args, settings)
         elif args.command == "trading":
             return trading(args, settings)
+        elif args.command == "events":
+            return sync_earnings(args, settings)
     except (ConfigError, DataValidationError, ValueError) as e:
         print(f"错误：{e}", file=sys.stderr)
         return 1
