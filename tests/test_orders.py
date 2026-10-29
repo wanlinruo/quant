@@ -64,3 +64,12 @@ def test_validation() -> None:
         plan_orders({"QQQ": 1.0}, {}, P, D("100000"), D("100000"))
     with pytest.raises(ValueError, match="净值"):
         plan_orders({"SPY": 1.0}, {}, P, D("0"), D("0"))
+
+
+def test_new_position_ignores_weight_threshold() -> None:
+    # 持有型策略把 min_weight_diff 设为 0.10；新开仓目标 5% 仍应买入（与清仓一样不受该阈值限制）
+    params = OrderPlanParams(min_weight_diff=Decimal("0.10"))
+    orders = plan_orders(
+        {"AAA": 0.05}, {}, {"AAA": Decimal("100")}, Decimal("100000"), Decimal("100000"), params
+    )
+    assert [(o.symbol, o.side, o.qty) for o in orders] == [("AAA", Side.BUY, 49)]

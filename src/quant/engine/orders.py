@@ -4,7 +4,7 @@
 2. 与当前持仓做差得到买卖数量；先卖后买
 3. 调整金额 < min_trade_usd，或当前权重与有效目标权重（目标权重 × (1 − 现金缓冲)）
    相差 < min_weight_diff 时跳过；
-   但清仓（目标为 0）总是执行，避免残留碎仓
+   但清仓（目标为 0）总是执行，避免残留碎仓；新开仓（当前为 0）不受 min_weight_diff 限制
 4. 买单受可用资金约束：现有现金 + 预计卖出所得，按 价格 × (1 + price_margin) 估算成本
 """
 
@@ -75,12 +75,15 @@ def plan_orders(
         if diff == 0:
             continue
         closing = target == 0
+        opening = current == 0
         if not closing:
+            too_small = abs(diff) * price < params.min_trade_usd
             # 与扣除现金缓冲后的有效目标权重比较，否则满仓持有时会每天被判定为偏离
             current_w = Decimal(current) * price / net_liquidation
             effective_w = w * (_ONE - params.cash_buffer)
-            too_small = abs(diff) * price < params.min_trade_usd
-            if too_small or abs(effective_w - current_w) < params.min_weight_diff:
+            drift = abs(effective_w - current_w) < params.min_weight_diff
+            # 新开仓只受最小金额限制：权重阈值用于避免已有仓位来回微调，不能挡住小仓位进场
+            if too_small or (drift and not opening):
                 continue
         side = Side.BUY if diff > 0 else Side.SELL
         order = PlannedOrder(s, side, abs(diff), price)
