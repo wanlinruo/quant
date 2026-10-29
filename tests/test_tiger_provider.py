@@ -115,3 +115,80 @@ def test_errors_wrapped() -> None:
 def test_kline_quota() -> None:
     p, _ = make(FakeClient())
     assert p.kline_quota() == {"used": 5, "remain": 15}
+
+
+# ---- 分红复权（#41）----
+
+from quant.data.providers.tiger import dividend_adjusted  # noqa: E402
+
+DAYS = [date(2026, 3, d) for d in (16, 17, 18, 19, 20, 23)]
+
+
+def test_dividend_adjusted_matches_yfinance_formula() -> None:
+    close = pd.Series([100.0, 102.0, 101.0, 100.0, 99.0, 100.0], index=pd.DatetimeIndex(DAYS))
+    adj = dividend_adjusted(close, [(date(2026, 3, 20), 1.0)])  # 除息前一日收盘 100
+    assert adj.iloc[-2:].tolist() == [99.0, 100.0]  # 除息日及之后不变
+    assert np.allclose(adj.iloc[:4], close.iloc[:4] * 0.99)
+    # 除息日的复权收益 = (99 + 1) / 100 − 1 = 0
+    assert adj.iloc[4] / adj.iloc[3] == pytest.approx(1.0)
+
+
+def test_dividend_on_non_trading_day_and_out_of_window() -> None:
+    close = pd.Series(100.0, index=pd.DatetimeIndex(DAYS))
+    # 3-21 周六除息 → 作用于 3-23；窗口首日及之外的忽略
+    adj = dividend_adjusted(
+        close, [(date(2026, 3, 21), 2.0), (date(2026, 3, 16), 5.0), (date(2026, 4, 1), 5.0)]
+    )
+    assert adj.iloc[:5].tolist() == [98.0] * 5 and adj.iloc[5] == 100.0
+
+
+@pytest.mark.parametrize("amount", [0.0, -1.0, 15.0])
+def test_abnormal_dividend_rejected(amount: float) -> None:
+    close = pd.Series(100.0, index=pd.DatetimeIndex(DAYS))
+    with pytest.raises(DataUnavailableError, match="异常"):
+        dividend_adjusted(close, [(date(2026, 3, 18), amount)])
+
+
+class DivClient(FakeClient):
+    def __init__(self, result: Any, dividends: pd.DataFrame | None) -> None:
+        super().__init__(result)
+        self.div = dividends
+
+    def get_corporate_dividend(self, symbols: list[str], market: Any, b: str, e: str) -> Any:
+        self.calls.append(("dividend", {"symbols": symbols, "begin": b, "end": e}))
+        return self.div
+
+
+def test_daily_bars_with_dividends() -> None:
+    div = pd.DataFrame(
+        {"symbol": ["SPY", "SPY", "QQQ"], "execute_date": ["2026-03-20"] * 3,
+         "amount": [1.0, 1.0, 9.0], "currency": ["USD"] * 3}
+    )  # fmt: skip  # SPY 重复一条，QQQ 的不应计入
+    client = DivClient(tiger_frame(DAYS), div)
+    p = TigerProvider(client, clock=FakeClock(), sleep=lambda s: None, adjust_dividends=True)
+    bars = p.daily_bars("SPY", DAYS[0], DAYS[-1])
+    close = bars["close"]
+    expected = close.copy()
+    expected.iloc[:4] *= 1 - 1.0 / close.iloc[3]
+    assert np.allclose(bars["adj_close"], expected)
+    assert client.calls[-1] == (
+        "dividend", {"symbols": ["SPY"], "begin": "2026-03-16", "end": "2026-03-23"}
+    )  # fmt: skip
+
+
+def test_daily_bars_no_dividends_and_default_off() -> None:
+    client = DivClient(tiger_frame(DAYS), None)
+    p = TigerProvider(client, clock=FakeClock(), sleep=lambda s: None, adjust_dividends=True)
+    bars = p.daily_bars("GLD", DAYS[0], DAYS[-1])
+    assert (bars["adj_close"] == bars["close"]).all()
+    off = TigerProvider(DivClient(tiger_frame(DAYS), None), clock=FakeClock(), sleep=lambda s: None)
+    assert off.daily_bars("GLD", DAYS[0], DAYS[-1])["adj_close"].isna().all()
+
+
+def test_non_usd_dividend_rejected() -> None:
+    div = pd.DataFrame({"symbol": ["SPY"], "execute_date": ["2026-03-20"], "amount": [1.0],
+                        "currency": ["HKD"]})  # fmt: skip
+    p = TigerProvider(DivClient(tiger_frame(DAYS), div), clock=FakeClock(), sleep=lambda s: None,
+                      adjust_dividends=True)  # fmt: skip
+    with pytest.raises(DataUnavailableError, match="币种"):
+        p.daily_bars("SPY", DAYS[0], DAYS[-1])

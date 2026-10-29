@@ -55,6 +55,29 @@ services:
     cpus: 1.0
     mem_limit: 1536m
 
+  # 每日任务（数据 → 信号 → 执行 → 日报）。连接券商，只在服务器上启用：
+  # .env 中设置 COMPOSE_PROFILES=scheduler 与 TIGER_PROPS_DIR（老虎配置文件所在目录，权限 600，
+  # 属主 uid 须为 1000，与镜像内 quant 用户一致）
+  scheduler:
+    image: ${QUANT_IMAGE:-quant:local}
+    build: .
+    profiles: ["scheduler"]
+    restart: unless-stopped
+    command: ["python", "-m", "quant.jobs.scheduler"]
+    environment:
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      QUANT_DATABASE_URL: postgresql+psycopg://quant:${POSTGRES_PASSWORD}@postgres:5432/quant
+      QUANT_NOTIFY_WEBHOOK_URL: ${QUANT_NOTIFY_WEBHOOK_URL:-}
+      TIGER_PROPS_PATH: /run/tiger/
+    volumes:
+      - parquet:/data/parquet
+      - ${TIGER_PROPS_DIR:-/nonexistent}:/run/tiger:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 执行中被停止时，重启后会先恢复券商订单状态再继续（engine/executor.py）
+    stop_grace_period: 2m
+
 volumes:
   pgdata:
   parquet:

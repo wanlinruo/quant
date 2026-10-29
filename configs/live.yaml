@@ -1,2 +1,9 @@
 # TRADING_MODE=live：老虎实盘，只在服务器上使用，切换前需要用户明确确认（PROJECT_PLAN Phase 5）
 broker: tiger
+
+# risk.max_order_usd 未配置时执行器拒绝下单；切换实盘前（Phase 5）与用户确认后填写
+
+# 服务器 IP 被 Yahoo 限流：老虎日线 + 老虎分红计算复权价，新浪抽样比对（#41）
+data:
+  primary: tiger
+  secondary: sina

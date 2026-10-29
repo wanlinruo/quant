@@ -65,12 +65,39 @@ class ExecutorSettings(_Section):
     limit_offset: float = Field(0.002, ge=0, lt=0.1)
     min_trade_usd: float = Field(100, ge=0)
     min_weight_diff: float = Field(0.02, ge=0, le=1)
+    # 限价单超时未成交则撤单、按最新报价重挂；最多重试 max_retries 次（#30 确认：5 分钟、3 次）
+    order_timeout_minutes: float = Field(5, gt=0, le=60)
+    max_retries: int = Field(3, ge=0, le=10)
+    poll_seconds: float = Field(10, gt=0, le=300)
+    # 收盘前多少分钟仍未完成则撤单并告警（PROJECT_PLAN 第 8 章）
+    stop_before_close_minutes: int = Field(30, ge=0, le=120)
 
 
 class RiskSettings(_Section):
     symbol_whitelist: tuple[str, ...] = ()
     max_symbol_weight: float = Field(1.0, gt=0, le=1)
     max_total_weight: float = Field(1.0, gt=0, le=1)
+    # 单笔订单金额上限（美元）；paper/live 必须配置，未配置时拒绝执行（#30）
+    max_order_usd: Decimal | None = Field(None, gt=0)
+    # 单日换手上限：当日成交额 / 净值（#30 确认：2.2）
+    max_daily_turnover: float = Field(2.2, gt=0, le=10)
+
+
+class DataSettings(_Section):
+    """每日任务的数据源（#41）：primary 提供含分红复权价，secondary 抽样比对收盘价。
+
+    服务器 IP 被 Yahoo 限流，paper/live 用 tiger（老虎日线 + 老虎分红记录计算复权价）+ sina。
+    """
+
+    primary: Literal["yfinance", "tiger"] = "yfinance"
+    secondary: Literal["none", "tiger", "sina"] = "none"
+
+
+class StrategySettings(_Section):
+    """每日任务运行的策略（模拟盘 / 实盘）；参数为空时用策略默认值。"""
+
+    name: str = "etf_momentum"
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class CostSettings(_Section):
@@ -105,6 +132,8 @@ class Settings(BaseSettings):
     executor: ExecutorSettings = ExecutorSettings()
     risk: RiskSettings = RiskSettings()
     costs: CostSettings = CostSettings()
+    strategy: StrategySettings = StrategySettings()
+    data: DataSettings = DataSettings()
 
     @field_validator("tiger_props_path")
     @classmethod

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
@@ -31,6 +32,7 @@ from quant.engine.runner import (
     run_spec,
     save_result,
 )
+from quant.jobs.daily import JOBS
 from quant.strategies import STRATEGIES
 
 
@@ -69,6 +71,20 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--slippage", type=_decimal)
     bt.add_argument("--refresh-data", action="store_true", help="忽略本地数据，重新拉取")
     bt.add_argument("--no-db", action="store_true", help="不写入数据库")
+    sub.add_parser("notify-test", help="发送一条测试通知（检查 QUANT_NOTIFY_WEBHOOK_URL 配置）")
+
+    job = sub.add_parser("job", help="手动运行一个每日任务（遵守 job_runs 幂等）")
+    job.add_argument("name", choices=JOBS)
+    job.add_argument("--date", type=date.fromisoformat, help="交易日，默认今天（美东）")
+    job.add_argument("--rerun-failed", action="store_true", help="重跑已失败的任务（先确认原因）")
+
+    base = sub.add_parser("baseline", help="把券商当前持仓记为对账基准（首次启用或人工核对后）")
+    base.add_argument("--confirm", action="store_true", help="已有快照时覆盖当日快照")
+
+    tr = sub.add_parser("trading", help="查看或人工切换熔断开关 trading_enabled")
+    tr.add_argument("action", choices=["status", "enable", "disable"])
+    tr.add_argument("--reason", default="人工关闭")
+    tr.add_argument("--yes", action="store_true", help="确认开启交易")
     return parser
 
 
@@ -141,12 +157,127 @@ def run_backtest(
     return result
 
 
+def notify_test(settings: Settings, out: Any = None) -> None:
+    from quant.notify.base import Level
+    from quant.notify.wecom import make_notifier
+
+    notifier = make_notifier(settings)
+    notifier.send(
+        f"[{settings.trading_mode}] 测试通知",
+        "收到这条消息说明告警配置正确。\n时间：" + f"{datetime.now(UTC):%Y-%m-%d %H:%M} UTC",
+        Level.INFO,
+    )
+    print(f"已通过 {type(notifier).__name__} 发送测试通知（失败时见日志）", file=out or sys.stdout)
+
+
+def _engine(settings: Settings) -> Any:
+    if settings.database_url is None:
+        raise ConfigError("未配置 QUANT_DATABASE_URL")
+    from quant.db.backtests import make_engine
+
+    return make_engine(settings.database_url.get_secret_value())
+
+
+def run_job_command(args: argparse.Namespace, settings: Settings, out: Any = None) -> int:
+    from quant.engine.executor import ET
+    from quant.jobs.daily import JOB_FUNCS, QUIET, JobContext
+    from quant.jobs.runner import run_job
+    from quant.notify.wecom import make_notifier
+
+    engine = _engine(settings)
+    ctx = JobContext.from_settings(settings, engine, make_notifier(settings))
+    day = args.date or datetime.now(UTC).astimezone(ET).date()
+    fn = JOB_FUNCS[args.name]
+    result = run_job(
+        engine,
+        args.name,
+        day,
+        lambda: fn(ctx, day),
+        ctx.notifier,
+        rerun_failed=args.rerun_failed,
+        quiet=QUIET,
+    )
+    print(f"{args.name} {day}：{result}", file=out or sys.stdout)
+    engine.dispose()
+    return 0 if result in ("success", "skipped") else 1
+
+
+def baseline(args: argparse.Namespace, settings: Settings, out: Any = None) -> int:
+    """首次启用模拟盘（或人工核对后）把券商当前持仓写为当日快照，作为对账起点。"""
+    from sqlalchemy import func, select
+    from sqlalchemy.orm import Session
+
+    from quant.broker.tiger import TigerBroker
+    from quant.db.models import AccountSnapshotRow
+    from quant.engine.executor import ET
+    from quant.engine.reconcile import record_snapshot
+
+    out = out or sys.stdout
+    if settings.broker != "tiger":
+        raise ConfigError("baseline 只用于 paper / live（需要券商持仓）")
+    engine = _engine(settings)
+    broker = TigerBroker.from_settings(settings)
+    if broker.get_open_orders():
+        print("券商有未完成订单，等其完成或撤销后再记录基准", file=out)
+        return 1
+    day = datetime.now(UTC).astimezone(ET).date()
+    with Session(engine) as s, s.begin():
+        last = s.scalar(
+            select(func.max(AccountSnapshotRow.snapshot_date)).where(
+                AccountSnapshotRow.mode == settings.trading_mode
+            )
+        )
+        if last is not None and not args.confirm:
+            print(f"已有 {last} 的快照；确认要以券商当前持仓为准时加 --confirm", file=out)
+            return 1
+        account, positions = broker.get_account(), broker.get_positions()
+        record_snapshot(s, settings.trading_mode, day, account, positions)
+    held = ", ".join(f"{p.symbol} {p.qty}" for p in positions.values()) or "无持仓"
+    print(f"已记录 {day} 基准（账户 {broker.masked_account}）：{held}", file=out)
+    engine.dispose()
+    return 0
+
+
+def trading(args: argparse.Namespace, settings: Settings, out: Any = None) -> int:
+    from sqlalchemy.orm import Session
+
+    from quant.db.models import SystemFlag
+    from quant.engine.reconcile import HALT_REASON, enable_trading, halt_trading, trading_enabled
+
+    out = out or sys.stdout
+    engine = _engine(settings)
+    with Session(engine) as s, s.begin():
+        reason = s.get(SystemFlag, HALT_REASON)
+        if args.action == "disable":
+            halt_trading(s, args.reason)
+        elif args.action == "enable":
+            if not args.yes:
+                print("开启交易需加 --yes；请先确认对账一致、熔断原因已处理", file=out)
+                return 1
+            enable_trading(s)
+        enabled = trading_enabled(s)
+        print(f"trading_enabled={'true' if enabled else 'false'}", file=out)
+        if reason is not None:
+            print(f"上次熔断原因：{reason.value}", file=out)
+    engine.dispose()
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     try:
         settings = load_settings()
         if args.command == "backtest":
             run_backtest(args, settings)
+        elif args.command == "notify-test":
+            notify_test(settings)
+        elif args.command == "job":
+            return run_job_command(args, settings)
+        elif args.command == "baseline":
+            return baseline(args, settings)
+        elif args.command == "trading":
+            return trading(args, settings)
     except (ConfigError, DataValidationError, ValueError) as e:
         print(f"错误：{e}", file=sys.stderr)
         return 1
