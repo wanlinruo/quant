@@ -1,8 +1,8 @@
 """每日任务（PROJECT_PLAN 第 8 章）。时间一律为美东时间，交易日以 XNYS 日历为准。
 
-- daily_data（收盘后）：从 yfinance 拉取策略所需区间的日线（含分红复权价每天整体刷新，
-  分红后历史 adj_close 会变化）→ 写入 Parquet → 校验；当日数据未出时等待重试；
-  paper/live 模式另与老虎日线抽样比对。
+- daily_data（收盘后）：从主数据源（data.primary）拉取策略所需区间的日线（含分红复权价每天
+  整体刷新，分红后历史 adj_close 会变化）→ 写入 Parquet → 校验；当日数据未出时等待重试；
+  配置了 data.secondary 时抽样比对收盘价。服务器上为老虎 + 新浪（#41）。
 - daily_signal：当日数据任务成功后运行策略，写入 signals，推送“下一交易日计划”。
 - daily_execute（下一交易日开盘后）：Executor（engine/executor.py）。
 - daily_report（执行后）：对账 → 一致则写入当日快照 → 推送日报。
@@ -63,26 +63,22 @@ class JobContext:
 
     @classmethod
     def from_settings(cls, settings: Settings, engine: Engine, notifier: Notifier) -> JobContext:
-        from quant.data.providers.yfinance import YFinanceProvider
-
-        secondary: DataProvider | None = None
         factory: Callable[[], Broker] | None = None
         if settings.trading_mode in ("paper", "live"):
             from quant.broker.tiger import TigerBroker
-            from quant.data.providers.tiger import TigerProvider
-
-            secondary = TigerProvider.from_settings(settings)
 
             def factory() -> Broker:
                 return TigerBroker.from_settings(settings)
 
+        primary = make_provider(settings, settings.data.primary)
+        assert primary is not None
         return cls(
             settings,
             engine,
             notifier,
             ParquetStore(settings.data_dir),
-            YFinanceProvider(),
-            secondary,
+            primary,
+            make_provider(settings, settings.data.secondary),
             factory,
         )
 
@@ -93,6 +89,22 @@ class JobContext:
     @property
     def strategy_name(self) -> str:
         return self.settings.strategy.name
+
+
+def make_provider(settings: Settings, name: str) -> DataProvider | None:
+    if name == "yfinance":
+        from quant.data.providers.yfinance import YFinanceProvider
+
+        return YFinanceProvider()
+    if name == "tiger":
+        from quant.data.providers.tiger import TigerProvider
+
+        return TigerProvider.from_settings(settings, adjust_dividends=True)
+    if name == "sina":
+        from quant.data.providers.sina import SinaProvider
+
+        return SinaProvider()
+    return None
 
 
 def _symbols(ctx: JobContext) -> list[str]:
