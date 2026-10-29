@@ -1,0 +1,77 @@
+name: Deploy
+
+# main 的 CI 通过后：构建 linux/amd64 镜像推送到 GHCR → SSH 到服务器部署（PROJECT_PLAN 第 12 章）。
+# 所需 Secrets：DEPLOY_HOST、DEPLOY_USER、DEPLOY_SSH_KEY（部署专用私钥）、DEPLOY_KNOWN_HOSTS。
+# 服务器上的 .env、老虎配置文件由人工放置，不经过 CI。
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    name: Build & deploy
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+       && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ env.SHA }}
+            ghcr.io/${{ github.repository }}:main
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: SSH setup
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER_: ${{ secrets.DEPLOY_USER }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ghcr.io/${{ github.repository }}:${{ env.SHA }}
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -o BatchMode=yes"
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes compose.yml compose.server.yml \
+            deploy/remote_deploy.sh deploy/backup.sh "$USER_@$HOST:/opt/quant/"
+          # 临时登录 GHCR 拉取镜像，部署完立即登出，服务器上不保存凭据
+          printf '%s' "$TOKEN" | $SSH "$USER_@$HOST" \
+            "docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null"
+          $SSH "$USER_@$HOST" "bash /opt/quant/remote_deploy.sh '$IMAGE'; rc=\$?; docker logout ghcr.io >/dev/null; exit \$rc"
