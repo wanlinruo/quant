@@ -1,0 +1,306 @@
+"""每日任务与调度：计划时间（纯函数）+ 需要 PostgreSQL 的幂等与端到端流程。"""
+
+import os
+from collections.abc import Iterator
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import Engine, create_engine, select
+from sqlalchemy.orm import Session
+
+from fakes import Clock, FakeBroker, Notes
+from quant.core.calendar import get_calendar
+from quant.core.settings import ScheduleSettings, Settings
+from quant.data.pipeline import DataValidationError
+from quant.data.providers.base import DataProvider, normalize_bars
+from quant.data.store import ParquetStore
+from quant.db.models import AccountSnapshotRow, JobRun, PositionSnapshot, Signal, SystemFlag
+from quant.engine.executor import ET
+from quant.jobs import daily
+from quant.jobs.daily import JobContext, daily_data, daily_report, daily_signal
+from quant.jobs.runner import JobStopped, job_lock, run_job
+from quant.jobs.scheduler import Scheduler, day_plan
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_URL = os.environ.get("QUANT_TEST_DATABASE_URL")
+needs_db = pytest.mark.skipif(not DB_URL, reason="未设置 QUANT_TEST_DATABASE_URL")
+D = Decimal
+DAY = date(2026, 10, 28)  # 周三
+NEXT = date(2026, 10, 29)
+DRIFT = {"SPY": 0.0004, "QQQ": 0.0009, "TLT": 0.0001, "GLD": 0.0002, "SHY": 0.00008}
+
+
+def et(d: date, hh: int, mm: int) -> datetime:
+    return datetime(d.year, d.month, d.day, hh, mm, tzinfo=ET)
+
+
+# ---- 计划时间 ----
+
+
+def test_day_plan_regular() -> None:
+    plan = dict(day_plan(DAY, ScheduleSettings(), get_calendar()))
+    assert plan == {
+        "daily_execute": et(DAY, 9, 50),
+        "daily_report": et(DAY, 9, 50),
+        "daily_data": et(DAY, 16, 30),
+        "daily_signal": et(DAY, 17, 0),
+    }
+    names = [n for n, _ in day_plan(DAY, ScheduleSettings(), get_calendar())]
+    assert names.index("daily_execute") < names.index("daily_report")
+
+
+def test_day_plan_half_day_and_holiday() -> None:
+    cal = get_calendar()
+    half = date(2026, 11, 27)  # 感恩节次日，13:00 收盘
+    plan = dict(day_plan(half, ScheduleSettings(), cal))
+    assert plan["daily_data"] == et(half, 13, 30)
+    assert plan["daily_signal"] == et(half, 14, 0)
+    assert plan["daily_execute"] == et(half, 9, 50)
+    assert day_plan(date(2026, 11, 26), ScheduleSettings(), cal) == []  # 感恩节休市
+    assert day_plan(date(2026, 10, 31), ScheduleSettings(), cal) == []  # 周六
+
+
+def test_day_plan_execute_not_before_open() -> None:
+    plan = dict(day_plan(DAY, ScheduleSettings(daily_execute="09:00"), get_calendar()))
+    assert plan["daily_execute"] == et(DAY, 9, 30)
+
+
+# ---- 需要数据库 ----
+
+
+class SeriesProvider(DataProvider):
+    """固定起点生成的确定性日线；任意区间切片，结果一致。"""
+
+    source = "fake"
+
+    def __init__(self, scale: float = 1.0, last: date = DAY) -> None:
+        cal = get_calendar()
+        days = pd.DatetimeIndex(cal.trading_days(date(2023, 1, 3), last))
+        self.frames = {}
+        for sym, drift in DRIFT.items():
+            rng = np.random.default_rng(sum(map(ord, sym)))
+            px = 100 * np.cumprod(1 + rng.normal(drift, 0.005, len(days))) * scale
+            self.frames[sym] = normalize_bars(
+                pd.DataFrame(
+                    {
+                        "open": px,
+                        "high": px * 1.005,
+                        "low": px * 0.995,
+                        "close": px,
+                        "adj_close": px,
+                        "volume": np.full(len(days), 1000, dtype="int64"),
+                    },
+                    index=days,
+                )
+            )
+
+    def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        df = self.frames[symbol]
+        return df[(df.index >= pd.Timestamp(start)) & (df.index <= pd.Timestamp(end))]
+
+
+@pytest.fixture
+def engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
+    assert DB_URL
+    monkeypatch.setenv("QUANT_DATABASE_URL", DB_URL)
+    monkeypatch.setenv("TRADING_MODE", "paper")
+    cfg = Config(os.path.join(REPO, "alembic.ini"))
+    command.downgrade(cfg, "base")
+    command.upgrade(cfg, "head")
+    eng = create_engine(DB_URL)
+    with Session(eng) as s, s.begin():
+        s.get(SystemFlag, "trading_enabled").value = "true"  # type: ignore[union-attr]
+    yield eng
+    eng.dispose()
+
+
+def make_ctx(engine: Engine, tmp_path: Path, **kw: object) -> JobContext:
+    settings = Settings(
+        broker="tiger",
+        data_dir=tmp_path,
+        risk={"symbol_whitelist": list(DRIFT), "max_order_usd": "150000"},
+    )
+    args: dict[str, object] = {"provider": SeriesProvider(), "notifier": Notes(), **kw}
+    clock = args.pop("clock", None)
+    ctx = JobContext(settings, engine, store=ParquetStore(tmp_path), **args)  # type: ignore[arg-type]
+    if isinstance(clock, Clock):
+        ctx.now, ctx.sleep = clock.now, clock.sleep
+    else:
+        ctx.sleep = lambda s: None
+    return ctx
+
+
+def status(engine: Engine, name: str, d: date) -> str | None:
+    with Session(engine) as s:
+        return s.scalar(
+            select(JobRun.status).where(JobRun.job_name == name, JobRun.trade_date == d)
+        )
+
+
+@pytest.mark.db
+@needs_db
+class TestRunJob:
+    def test_success_then_skipped(self, engine: Engine) -> None:
+        calls: list[int] = []
+
+        def job() -> str:
+            calls.append(1)
+            return "ok"
+
+        n = Notes()
+        assert run_job(engine, "daily_data", DAY, job, n) == "success"
+        assert run_job(engine, "daily_data", DAY, job, n) == "skipped"
+        assert calls == [1] and status(engine, "daily_data", DAY) == "success"
+
+    def test_failure_notifies_and_needs_manual_rerun(self, engine: Engine) -> None:
+        n = Notes()
+
+        def boom() -> str:
+            raise RuntimeError("数据源超时")
+
+        assert run_job(engine, "daily_data", DAY, boom, n) == "failed"
+        assert "数据源超时" in n.sent[-1][1]
+        with Session(engine) as s:
+            row = s.scalars(select(JobRun)).one()
+            assert row.status == "failed" and "RuntimeError" in (row.error or "")
+        assert run_job(engine, "daily_data", DAY, lambda: "ok", n) == "skipped"
+        assert run_job(engine, "daily_data", DAY, lambda: "ok", n, rerun_failed=True) == "success"
+
+    def test_quiet_errors_not_notified_twice(self, engine: Engine) -> None:
+        n = Notes()
+
+        def stopped() -> str:
+            raise JobStopped("熔断")
+
+        assert run_job(engine, "daily_execute", DAY, stopped, n) == "failed"
+        assert n.sent == []
+
+    def test_stale_running_is_rerun(self, engine: Engine) -> None:
+        with Session(engine) as s, s.begin():
+            s.add(JobRun(job_name="daily_execute", trade_date=DAY, status="running",
+                         started_at=datetime.now(UTC)))  # fmt: skip
+        assert run_job(engine, "daily_execute", DAY, lambda: "ok", Notes()) == "success"
+
+    def test_locked(self, engine: Engine) -> None:
+        with job_lock(engine, "daily_execute", DAY) as got:
+            assert got
+            assert run_job(engine, "daily_execute", DAY, lambda: "ok", Notes()) == "locked"
+        assert status(engine, "daily_execute", DAY) is None
+
+
+@pytest.mark.db
+@needs_db
+class TestDailyJobs:
+    def test_data_then_signal(self, engine: Engine, tmp_path: Path) -> None:
+        ctx = make_ctx(engine, tmp_path)
+        run_job(engine, "daily_data", DAY, lambda: daily_data(ctx, DAY), ctx.notifier)
+        assert status(engine, "daily_data", DAY) == "success"
+        assert ParquetStore(tmp_path).read_bars("QQQ").index[-1].date() == DAY
+        text = daily_signal(ctx, DAY)
+        with Session(engine) as s:
+            sig = s.scalars(select(Signal)).one()
+        assert sig.signal_date == DAY and sig.data_as_of == DAY
+        assert sig.target_weights == {"QQQ": 1.0}  # 合成数据中 QQQ 动量最强
+        assert "QQQ 100%" in text
+        title, body, _ = ctx.notifier.sent[-1]  # type: ignore[attr-defined]
+        assert "信号" in title and f"{NEXT} 09:50 ET" in body
+
+    def test_signal_requires_data_job(self, engine: Engine, tmp_path: Path) -> None:
+        with pytest.raises(RuntimeError, match="daily_data 未成功"):
+            daily_signal(make_ctx(engine, tmp_path), DAY)
+
+    def test_data_waits_for_today(self, engine: Engine, tmp_path: Path) -> None:
+        # 第一次拉取还没有当日数据，等待后重试成功
+        early, full = SeriesProvider(last=date(2026, 10, 27)), SeriesProvider()
+
+        class Late(DataProvider):
+            source = "fake"
+            calls = 0
+
+            def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+                p = early if Late.calls < len(DRIFT) else full
+                Late.calls += 1
+                return p.daily_bars(symbol, start, end)
+
+        slept: list[float] = []
+        ctx = make_ctx(engine, tmp_path, provider=Late())
+        ctx.sleep = slept.append
+        daily_data(ctx, DAY)
+        assert slept == [daily.DATA_RETRY_SECONDS]
+
+    def test_data_source_mismatch_fails(self, engine: Engine, tmp_path: Path) -> None:
+        ctx = make_ctx(engine, tmp_path, secondary=SeriesProvider(scale=1.01))
+        with pytest.raises(DataValidationError, match="source_diff"):
+            daily_data(ctx, DAY)
+
+    def test_report_snapshot_when_consistent(self, engine: Engine, tmp_path: Path) -> None:
+        broker = FakeBroker(Clock(), "1000", {})
+        ctx = make_ctx(engine, tmp_path, broker_factory=lambda: broker)
+        assert daily_report(ctx, DAY).startswith("净值")
+        with Session(engine) as s:
+            assert s.scalars(select(AccountSnapshotRow)).one().snapshot_date == DAY
+
+    def test_report_mismatch_halts(self, engine: Engine, tmp_path: Path) -> None:
+        broker = FakeBroker(Clock(), "1000", {"SPY": 5})
+        ctx = make_ctx(engine, tmp_path, broker_factory=lambda: broker)
+        with pytest.raises(JobStopped):
+            daily_report(ctx, DAY)
+        _, body, _ = ctx.notifier.sent[-1]  # type: ignore[attr-defined]
+        assert "对账不一致" in body and "关（不下单）" in body
+        with Session(engine) as s:
+            assert s.scalars(select(PositionSnapshot)).all() == []
+
+    def test_sim_mode_skips_broker_jobs(self, engine: Engine, tmp_path: Path) -> None:
+        ctx = make_ctx(engine, tmp_path)
+        assert "跳过" in daily.daily_execute(ctx, DAY)
+        assert "跳过" in daily_report(ctx, DAY)
+
+
+@pytest.mark.db
+@needs_db
+def test_end_to_end_two_days(engine: Engine, tmp_path: Path) -> None:
+    """D 日收盘后：数据 → 信号；D+1 09:50：执行 → 日报。重复触发不会重复下单。"""
+    clock = Clock(et(DAY, 16, 31).astimezone(UTC))
+    broker = FakeBroker(clock, "100000", {})
+    broker.prices = {s: D("100") for s in DRIFT}
+    ctx = make_ctx(engine, tmp_path, clock=clock, broker_factory=lambda: broker)
+    sched = Scheduler(ctx)
+
+    assert sched.tick() == [("daily_data", "success")]  # 17:00 前不生成信号
+    clock.t = et(DAY, 17, 1).astimezone(UTC)
+    assert sched.tick() == [("daily_signal", "success")]
+    assert sched.tick() == []
+
+    clock.t = et(NEXT, 9, 51).astimezone(UTC)
+    broker.quote_time = clock.t
+    assert sched.tick() == [("daily_execute", "success"), ("daily_report", "success")]
+    assert [(o.symbol, o.side.value) for o in broker.placed] == [("QQQ", "BUY")]
+    assert broker.pos["QQQ"] > 0
+
+    # 进程重启（新 Scheduler）后同一天再次触发：job_runs 已成功，不会重复下单
+    assert Scheduler(ctx).tick() == [("daily_execute", "skipped"), ("daily_report", "skipped")]
+    assert len(broker.placed) == 1
+    with Session(engine) as s:
+        snap = s.scalars(select(PositionSnapshot)).one()
+        assert (snap.snapshot_date, snap.symbol, snap.qty) == (NEXT, "QQQ", broker.pos["QQQ"])
+
+
+@pytest.mark.db
+@needs_db
+def test_missed_execution_window(engine: Engine, tmp_path: Path) -> None:
+    clock = Clock(et(NEXT, 15, 45).astimezone(UTC))  # 已过 15:30 截止
+    broker = FakeBroker(clock, "100000", {})
+    ctx = make_ctx(engine, tmp_path, clock=clock, broker_factory=lambda: broker)
+    with Session(engine) as s, s.begin():
+        s.add(Signal(strategy="etf_momentum", signal_date=DAY, target_weights={"QQQ": 1.0},
+                     data_as_of=DAY))  # fmt: skip
+    assert Scheduler(ctx).tick() == []
+    assert broker.placed == [] and status(engine, "daily_execute", NEXT) is None
+    title, _, _ = ctx.notifier.sent[-1]  # type: ignore[attr-defined]
+    assert "错过执行" in title

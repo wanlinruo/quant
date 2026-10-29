@@ -125,7 +125,7 @@ class WeComNotifier:
 
 def make_notifier(settings: Settings) -> Notifier:
     """配置了 QUANT_NOTIFY_WEBHOOK_URL 时用企业微信，否则只写日志。"""
-    if settings.notify_webhook_url is None:
+    if settings.notify_webhook_url is None or not settings.notify_webhook_url.get_secret_value():
         log.warning("未配置 QUANT_NOTIFY_WEBHOOK_URL，通知只写入日志")
         return LogNotifier()
     return WeComNotifier(settings.notify_webhook_url.get_secret_value())

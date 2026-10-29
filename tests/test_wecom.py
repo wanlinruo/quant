@@ -124,6 +124,7 @@ def test_rate_limit_20_per_minute() -> None:
 
 def test_make_notifier() -> None:
     assert isinstance(make_notifier(Settings(broker="sim")), LogNotifier)
+    assert isinstance(make_notifier(Settings(broker="sim", notify_webhook_url="")), LogNotifier)
     s = Settings(broker="sim", notify_webhook_url=URL)
     assert isinstance(make_notifier(s), WeComNotifier)
     assert KEY not in repr(s)
