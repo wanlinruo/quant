@@ -43,6 +43,10 @@ echo "== 防火墙：只开放 SSH"
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow OpenSSH
+# 面板公网入口（Caddy，HTTPS + 登录密码，#44）。注意 Docker 发布的端口不经过 ufw，
+# 对外开放的只有 compose.server.yml 中 caddy 的 80/443；dashboard 只绑定 127.0.0.1
+ufw allow 80/tcp
+ufw allow 443
 ufw --force enable
 
 echo "== Docker Engine + Compose（官方 apt 源）"

@@ -1,6 +1,31 @@
-# 服务器覆盖：面板只监听本机 127.0.0.1，通过 SSH 隧道访问（不对公网开放）：
-#   ssh -N -L 8501:127.0.0.1:8501 ubuntu@<服务器>  然后打开 http://localhost:8501
+# 服务器覆盖。
+# - 面板只监听本机 127.0.0.1:8501，可用 SSH 隧道访问：
+#     ssh -N -L 8501:127.0.0.1:8501 ubuntu@<服务器>  然后打开 http://localhost:8501
+# - 公网经 Caddy 访问（#44）：https://<DASHBOARD_DOMAIN>，HTTPS + 登录密码（deploy/Caddyfile）
 services:
   dashboard:
     ports:
       - "127.0.0.1:8501:8501"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:?需要在 .env 中设置 DASHBOARD_DOMAIN}
+      DASHBOARD_USER: ${DASHBOARD_USER:?需要在 .env 中设置 DASHBOARD_USER}
+      # 未设置密码时使用占位哈希（明文随机生成后已丢弃），任何密码都无法登录
+      DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH:-$$2a$$14$$ekoh2rjkazxeTHgouYseMubC.rjW1fiFk/BIOs39vCoOAkXsc7fuS}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - dashboard
+
+volumes:
+  caddy_data:
+  caddy_config:

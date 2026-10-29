@@ -23,7 +23,7 @@ ssh ubuntu@<服务器> 'sudo nohup bash /tmp/server_init.sh > /tmp/server_init.l
 完成后若存在 `/var/run/reboot-required`，执行 `sudo systemctl reboot`。
 
 内容：时区 UTC；系统更新与自动安全更新；SSH 只允许密钥、禁止 root（`/etc/ssh/sshd_config.d/01-quant.conf`，
-须排在 cloud-init 的 `50-` 之前才生效）；ufw 只开放 SSH；Docker Engine + Compose；容器日志 5 × 20MB 轮转；
+须排在 cloud-init 的 `50-` 之前才生效）；ufw 只开放 SSH 与 80/443（面板经 Caddy）；Docker Engine + Compose；容器日志 5 × 20MB 轮转；
 journald 500MB；部署目录 `/opt/quant`。
 
 ## 3. 密钥与环境变量（人工放置，不经过仓库与 CI）
@@ -44,6 +44,9 @@ COMPOSE_PROFILES=scheduler
 TIGER_PROPS_DIR=/home/ubuntu/.config/quant/tiger
 POSTGRES_PASSWORD=<openssl rand -hex 24，在服务器上生成>
 QUANT_NOTIFY_WEBHOOK_URL=<企业微信机器人地址>
+DASHBOARD_DOMAIN=<面板域名>
+DASHBOARD_USER=<面板登录用户名>
+DASHBOARD_PASSWORD_HASH=<由 set_dashboard_password.sh 写入>
 QUANT_IMAGE=<由部署脚本写入>
 ```
 
@@ -68,7 +71,19 @@ docker compose exec -T postgres pg_restore -U quant -d quant --clean --if-exists
 docker run --rm -v quant_parquet:/data -v /opt/quant/backups:/b alpine tar -C /data -xzf /b/parquet-<时间>.tar.gz
 ```
 
-## 6. 访问面板（SSH 隧道）
+## 6. 访问面板
+
+公网（#44）：`https://<DASHBOARD_DOMAIN>`，Caddy 自动申请 HTTPS 证书，需输入用户名和密码。
+前提：子域名 A 记录指向服务器；腾讯云防火墙与 ufw 放行 80/443；`.env` 中设置 `DASHBOARD_DOMAIN`、`DASHBOARD_USER`。
+设置或修改密码（交互输入，密码不经过聊天、仓库或命令行参数）：
+
+```bash
+ssh -t ubuntu@<服务器> 'bash /opt/quant/set_dashboard_password.sh'
+```
+
+未设置密码时使用占位哈希，任何密码都无法登录。
+
+也可以用 SSH 隧道：
 
 ```bash
 ssh -N -L 8501:127.0.0.1:8501 ubuntu@<服务器>
