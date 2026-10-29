@@ -101,6 +101,7 @@ def run_spec(
         data_start,
         spec.end,
         refresh_data,
+        strategy.max_daily_move,
     )
     ex = settings.executor
     plan = OrderPlanParams(

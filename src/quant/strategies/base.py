@@ -130,6 +130,8 @@ class Strategy(ABC):
     name: ClassVar[str]
     # 非 None 时替换订单计算的 min_weight_diff：持有型策略用较大的值，避免价格漂移触发来回调仓
     min_weight_diff: ClassVar[float | None] = None
+    # 数据校验的单日涨跌阈值：超过即视为可疑数据（如未复权的拆股），停止运行
+    max_daily_move: ClassVar[float] = 0.15
 
     @abstractmethod
     def target_weights(self, ctx: Context) -> dict[str, float]:
