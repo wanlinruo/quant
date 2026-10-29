@@ -42,7 +42,12 @@ strategy:
 
 # 回测成本，见 PROJECT_PLAN 第 9 章
 costs:
-  # 老虎美股佣金【待确认】（issue #5），确认后填写；未填写时回测拒绝运行
-  # commission_per_share: "..."
-  # min_commission: "..."
+  # 老虎美股固定式套餐（#5，2026-10-29 App 截图）：
+  # 佣金 0.0039 美元/股；平台费 0.004 美元/股、每笔最低 1 美元；两项各自最多成交额的 0.5%
+  # 交收费、SEC / FINRA 规费未计入（待确认）
+  commission_per_share: "0.0039"
+  min_commission: "0"
+  platform_per_share: "0.004"
+  platform_min: "1"
+  max_fee_pct: "0.005"
   slippage: "0.0005"

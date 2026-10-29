@@ -5,7 +5,7 @@
 
 数据：先读 Parquet（settings.data_dir），不覆盖回测区间时从 yfinance 拉取并校验，校验失败即终止。
 结果：打印指标；配置了数据库（QUANT_DATABASE_URL）时写入 backtest_runs / backtest_equity。
-佣金：老虎实际费率待确认（issue #5），未在配置中填写时必须用参数显式给出。
+佣金：默认取配置（老虎固定式套餐，#5）；--commission-per-share / --min-commission 只覆盖佣金部分。
 """
 
 from __future__ import annotations
