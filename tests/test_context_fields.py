@@ -133,3 +133,12 @@ def test_store_prices_volume(tmp_path: Path) -> None:
     store.write_bars("SPY", _bars(pd.bdate_range("2024-05-01", "2024-05-10")), "test")
     vol = store.prices(["SPY"], field="volume")["SPY"]
     assert (vol == 1000).all()
+
+
+def test_event_calendar_picklable() -> None:
+    import pickle
+
+    ev = EventCalendar(earnings={"AAPL": (date(2024, 5, 3),)}, fomc=(date(2024, 9, 18),))
+    back = pickle.loads(pickle.dumps(ev))
+    assert back.next_earnings("AAPL", date(2024, 5, 1)) == date(2024, 5, 3)
+    assert back.is_fomc(date(2024, 9, 18))

@@ -24,6 +24,12 @@ class EventCalendar:
         object.__setattr__(self, "fomc", tuple(sorted(set(self.fomc))))
         object.__setattr__(self, "_fomc_set", frozenset(self.fomc))
 
+    def __reduce__(
+        self,
+    ) -> tuple[type[EventCalendar], tuple[dict[str, tuple[date, ...]], tuple[date, ...]]]:
+        # MappingProxyType 不能 pickle；多进程回测需要传给子进程
+        return (EventCalendar, (dict(self.earnings), self.fomc))
+
     def next_earnings(self, symbol: str, after: date) -> date | None:
         """第一个晚于 after 的反应日；没有记录时返回 None。"""
         days = self.earnings.get(symbol, ())
