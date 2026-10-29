@@ -70,7 +70,8 @@ jobs:
         run: |
           SSH="ssh -i ~/.ssh/deploy_key -o BatchMode=yes"
           scp -i ~/.ssh/deploy_key -o BatchMode=yes compose.yml compose.server.yml \
-            deploy/remote_deploy.sh deploy/backup.sh "$USER_@$HOST:/opt/quant/"
+            deploy/remote_deploy.sh deploy/backup.sh deploy/Caddyfile \
+            deploy/set_dashboard_password.sh "$USER_@$HOST:/opt/quant/"
           # 临时登录 GHCR 拉取镜像，部署完立即登出，服务器上不保存凭据
           printf '%s' "$TOKEN" | $SSH "$USER_@$HOST" \
             "docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null"
