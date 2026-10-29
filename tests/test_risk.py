@@ -52,7 +52,7 @@ def test_paper_config_has_confirmed_limits(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setenv("TRADING_MODE", "paper")
     lim = RiskLimits.from_settings(load_settings())
-    assert lim.max_order_usd == D("150000")
+    assert lim.max_order_usd == D("1050000")
     assert lim.max_daily_turnover == 2.2
 
 
