@@ -83,6 +83,13 @@ class RiskSettings(_Section):
     max_daily_turnover: float = Field(2.2, gt=0, le=10)
 
 
+class StrategySettings(_Section):
+    """每日任务运行的策略（模拟盘 / 实盘）；参数为空时用策略默认值。"""
+
+    name: str = "etf_momentum"
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
 class CostSettings(_Section):
     """回测成本模型（PROJECT_PLAN 第 9 章）。
 
@@ -115,6 +122,7 @@ class Settings(BaseSettings):
     executor: ExecutorSettings = ExecutorSettings()
     risk: RiskSettings = RiskSettings()
     costs: CostSettings = CostSettings()
+    strategy: StrategySettings = StrategySettings()
 
     @field_validator("tiger_props_path")
     @classmethod

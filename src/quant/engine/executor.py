@@ -408,14 +408,29 @@ class Executor:
         self._active = []
 
     def _abort(self) -> None:
-        """失败时尽力撤销本次运行的未完成订单；最终状态在下次运行的恢复步骤中同步。"""
-        for w in self._active:
-            if w.order_id is not None:
-                try:
-                    self._broker.cancel_order(w.order_id)
-                except Exception:
-                    log.exception("撤单 %s 失败", w.client_order_id)
+        """失败时尽力撤销本次运行的未完成订单，并在超时前同步其最终状态与成交，
+        使随后的日报对账能计入部分成交；仍未同步的在下次运行的恢复步骤中处理。"""
+        pending = [w.order_id for w in self._active if w.order_id is not None]
         self._active = []
+        for oid in pending:
+            try:
+                self._broker.cancel_order(oid)
+            except Exception:
+                log.exception("撤单 %s 失败", oid)
+        deadline = self._now() + self._timeout
+        while pending:
+            for oid in list(pending):
+                try:
+                    st = self._broker.get_order(oid)
+                    if st.state.is_terminal:
+                        self._sync(st)
+                        pending.remove(oid)
+                except Exception:
+                    log.exception("同步订单 %s 失败", oid)
+                    pending.remove(oid)
+            if not pending or self._now() >= deadline:
+                break
+            self._sleep(self._ex.poll_seconds)
 
     # ---- 恢复 ----
 

@@ -95,6 +95,11 @@ def halt_trading(session: Session, reason: str) -> None:
     _set_flag(session, HALT_REASON, f"{datetime.now(UTC):%Y-%m-%d %H:%M}Z {reason}"[:256])
 
 
+def enable_trading(session: Session) -> None:
+    """人工开启交易（只由 quant trading enable --yes 调用，自动流程不得调用）。"""
+    _set_flag(session, TRADING_ENABLED, "true")
+
+
 def trading_enabled(session: Session) -> bool:
     flag = session.get(SystemFlag, TRADING_ENABLED)
     return flag is not None and flag.value == "true"

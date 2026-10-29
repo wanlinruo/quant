@@ -85,7 +85,7 @@ GitHub
 | 数据库 | PostgreSQL 16，SQLAlchemy 2.x + psycopg 3，Alembic 管理迁移 |
 | 交易日历 | exchange_calendars（识别休市日、半日市） |
 | 时区 | 标准库 zoneinfo，业务时间统一用 `America/New_York` |
-| 调度 | APScheduler（在 scheduler 容器内，时区设为美东） |
+| 调度 | 自写的轻量调度循环（`jobs/scheduler.py`，scheduler 容器内）：按 XNYS 日历与美东时间触发；未用 APScheduler，因其 cron 触发器无法表达交易日与半日市（#32） |
 | 数据源 | yfinance（回测历史数据）、tigeropen（行情与交易） |
 | 快速研究 | vectorbt（可选，用于参数探索） |
 | 面板 | Streamlit + Plotly |
@@ -137,7 +137,7 @@ quant/
 │   │   ├── backtester.py    # 回测引擎
 │   │   └── reconcile.py     # 对账
 │   ├── jobs/
-│   │   ├── scheduler.py     # APScheduler 入口
+│   │   ├── scheduler.py     # 调度入口（按交易日历触发每日任务）
 │   │   ├── daily_data.py
 │   │   ├── daily_signal.py
 │   │   ├── daily_execute.py
@@ -302,7 +302,7 @@ class Strategy(ABC):
 
 ## 8. 每日运行流程
 
-所有时间为美东时间，由 APScheduler 按 `America/New_York` 调度，自动处理夏令时。非交易日不运行，半日市按实际收盘时间调整。
+所有时间为美东时间，由 `jobs/scheduler.py` 按 `America/New_York` 与 XNYS 日历调度，自动处理夏令时。非交易日不运行，半日市按实际收盘时间调整。
 
 - 常规交易时段 09:30–16:00 ET；半日市（如感恩节次日、平安夜）13:00 收盘，`daily_data` 相应提前到 13:30 后。交易日、半日市一律以 `exchange_calendars` 的 `XNYS` 为准，不硬编码。
 - `daily_execute` 只在常规交易时段内下单，不做盘前盘后；超过收盘前 30 分钟仍未完成则撤单并告警。
@@ -323,6 +323,12 @@ class Strategy(ABC):
 - 执行任务重启后，先查询券商的未完成订单和当日成交，再决定是否继续，不得盲目重新下单。
 
 **通知时机**：任务失败、风控拒绝、对账不一致、订单超时未成交、每日日报。
+
+**调度与人工操作**（#32）：
+- `job_runs` 中已成功的任务不再执行；失败的不自动重跑，人工确认后 `uv run quant job <任务> --date <交易日> --rerun-failed`；停留在 running 的（进程中途退出）重启后自动重跑。同一任务用 PostgreSQL advisory lock 防止并发。
+- 收盘后数据未出（缺当日、数据过期）时等待 15 分钟重试，最多 3 次。
+- scheduler 启动时已过当日执行时段则不再下单，有待执行的信号时提醒一次。
+- 首次启用模拟盘：先 `uv run quant baseline` 把券商当前持仓记为对账基准，再 `uv run quant trading enable --yes` 人工打开熔断开关。
 
 **执行器的恢复规则**（`engine/executor.py`，#30）：订单先写入 `orders` 再提交，拿到券商订单号后补写。重启时：本策略当日的未完成订单先撤销并同步成交，再按实际持仓重新计算（目标仓位模式天然幂等）；券商上有其他未完成订单、或本地有订单没有券商订单号（提交结果未知），一律熔断等人工处理，不盲目重新下单。
 
