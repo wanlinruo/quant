@@ -1,2 +1,6 @@
 # TRADING_MODE=paper：老虎模拟账户
 broker: tiger
+
+risk:
+  # 只防异常：略高于全仓一笔（模拟账户净值约 13.5 万美元，#30 确认）
+  max_order_usd: "150000"
