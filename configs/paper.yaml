@@ -4,8 +4,21 @@ broker: tiger
 risk:
   # 只防异常：略高于全仓一笔（模拟账户净值 100 万美元，2026-10-29 服务器实测；#30 确认）
   max_order_usd: "1050000"
+  # 组合策略（#47）：固定标的 = V2 仓（七姐妹 + MU）+ QQQ + 基准 SPY；
+  # 保留 TLT、GLD、SHY 以便切换日卖出 ETF 轮动的旧持仓
+  symbol_whitelist: [AAPL, MSFT, NVDA, GOOGL, AMZN, META, TSLA, MU, QQQ, SPY, TLT, GLD, SHY]
+  # 动量仓：白名单另加近 62 天内的标普 500 成分股
+  universe_whitelist: sp500
+  max_symbol_weight: 0.3
 
 # 服务器 IP 被 Yahoo 限流：老虎日线 + 老虎分红计算复权价，新浪抽样比对（#41）
 data:
   primary: tiger
   secondary: sina
+  # 动量仓候选池：新浪日 K + 老虎拆股记录（不占老虎历史日线额度）
+  universe: sina
+
+# 组合策略：40% 动量选股 + 60% 七姐妹 V2 + QQQ 波动率择时（#47，用户 2026-10-30 确认；
+# 研究报告 docs/research/2026-10-30-combo.md）
+strategy:
+  name: combo
