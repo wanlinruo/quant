@@ -134,8 +134,11 @@ def test_not_ready_raises_retryable_and_keeps_history(tmp_path: Path) -> None:
     prev = DAYS[-2]
     sync_universe_bars(store, FakeSina(), no_splits, CAL, m, START, prev)  # 前一交易日已同步
     # 当日数据还没出：新浪只返回到前一交易日
-    late = FakeSina()
-    late.daily_bars = lambda s, a, b: FakeSina.daily_bars(late, s, a, prev)  # type: ignore[method-assign]
+    class Late(FakeSina):
+        def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+            return super().daily_bars(symbol, start, prev)
+
+    late = Late()
     with pytest.raises(UniverseNotReady):
         sync_universe_bars(store, late, no_splits, CAL, m, START, END)
     assert sorted(store.symbols()) == m  # 历史数据没有被删除
