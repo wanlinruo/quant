@@ -304,3 +304,157 @@ def test_missed_execution_window(engine: Engine, tmp_path: Path) -> None:
     assert broker.placed == [] and status(engine, "daily_execute", NEXT) is None
     title, _, _ = ctx.notifier.sent[-1]  # type: ignore[attr-defined]
     assert "错过执行" in title
+
+
+# ---- 组合策略接入（#47 第二份计划任务 5） ----
+
+MONTH_END = date(2026, 10, 30)  # 10 月最后一个交易日
+COMBO_PARAMS = {
+    "swing": {"stocks": ["TLT", "GLD"], "trend_ma": 20, "support_ma": 5, "exit_ma": 3,
+              "replay_days": 60},
+}  # fmt: skip
+UNIVERSE_CSV = 'date,tickers\n2026-08-01,"AAA,BBB,CCC"\n'
+
+
+class TigerLike(SeriesProvider):
+    """主数据源（老虎）：日线 + 拆股记录 + 财报日历。"""
+
+    def __init__(self, last: date = DAY) -> None:
+        super().__init__(last=last)
+        self.earnings_calls = 0
+
+    def splits(
+        self, symbols: object, start: date, end: date
+    ) -> dict[str, list[tuple[date, float]]]:
+        return {}
+
+    def earnings_calendar(
+        self, symbols: object, start: date, end: date, cal: object
+    ) -> dict[str, list[date]]:
+        self.earnings_calls += 1
+        return {"TLT": [date(2026, 11, 20)]}
+
+
+class UniverseFake(DataProvider):
+    """候选池（新浪）：AAA 稳步上涨且放量，BBB 平，CCC 下跌。"""
+
+    source = "sina"
+
+    def __init__(self, last: date = DAY, fail: tuple[str, ...] = ()) -> None:
+        self.fail = set(fail)
+        self.calls: list[tuple[str, date]] = []
+        days = pd.DatetimeIndex(get_calendar().trading_days(date(2023, 1, 3), last))
+        t = np.arange(len(days))
+        drift = {"AAA": 0.003, "BBB": 0.0, "CCC": -0.001}
+        self.frames = {
+            s: normalize_bars(pd.DataFrame(
+                {"open": 50 * (1 + g) ** t, "high": 50 * (1 + g) ** t * 1.01,
+                 "low": 50 * (1 + g) ** t * 0.99, "close": 50 * (1 + g) ** t,
+                 "volume": np.linspace(1e6, 3e6, len(days)).astype("int64")},
+                index=days,
+            ))
+            for s, g in drift.items()
+        }  # fmt: skip
+
+    def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        from quant.data.providers.base import DataUnavailableError
+
+        self.calls.append((symbol, end))
+        if symbol in self.fail:
+            raise DataUnavailableError(symbol)
+        df = self.frames[symbol]
+        return df[(df.index >= pd.Timestamp(start)) & (df.index <= pd.Timestamp(end))].assign(
+            adj_close=float("nan")
+        )
+
+
+def combo_ctx(engine: Engine, tmp_path: Path, last: date = DAY, **kw: object) -> JobContext:
+    from quant.data.universe import constituents_path
+
+    path = constituents_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(UNIVERSE_CSV, encoding="utf-8")
+    settings = Settings(
+        broker="tiger",
+        data_dir=tmp_path,
+        data={"primary": "tiger", "universe": "sina"},
+        strategy={"name": "combo", "params": COMBO_PARAMS},
+        risk={"symbol_whitelist": list(DRIFT), "max_order_usd": "150000"},
+    )
+    args: dict[str, object] = {
+        "provider": TigerLike(last=last),
+        "universe_provider": UniverseFake(last=last),
+        "notifier": Notes(),
+        **kw,
+    }
+    ctx = JobContext(settings, engine, store=ParquetStore(tmp_path), **args)  # type: ignore[arg-type]
+    ctx.sleep = lambda s: None
+    return ctx
+
+
+def test_universe_requires_tiger_primary() -> None:
+    with pytest.raises(ValueError, match=r"data\.universe=sina 需要 data\.primary=tiger"):
+        Settings(broker="tiger", data={"primary": "yfinance", "universe": "sina"})
+    assert (
+        Settings(broker="tiger", data={"primary": "tiger", "universe": "sina"}).data.universe
+        == "sina"
+    )
+
+
+def test_store_field_loader_prefers_first_store(tmp_path: Path) -> None:
+    from quant.data.universe_bars import universe_store
+    from quant.engine.backtester import store_field_loader
+
+    main, uni = ParquetStore(tmp_path), universe_store(tmp_path)
+    p = SeriesProvider()
+    main.write_bars("SPY", p.daily_bars("SPY", date(2026, 10, 1), DAY), "fake")
+    uni.write_bars(
+        "SPY", SeriesProvider(scale=2.0).daily_bars("SPY", date(2026, 10, 1), DAY), "sina"
+    )
+    uni.write_bars("QQQ", p.daily_bars("QQQ", date(2026, 10, 1), DAY), "sina")
+    load = store_field_loader([main, uni])
+    close = load(["SPY", "QQQ", "ZZZ"], "close", date(2026, 10, 1), DAY)
+    assert list(close.columns) == ["SPY", "QQQ", "ZZZ"]
+    assert close["SPY"].iloc[-1] == pytest.approx(p.frames["SPY"]["adj_close"].iloc[-1])
+    assert close["QQQ"].notna().all() and close["ZZZ"].isna().all()
+
+
+@pytest.mark.db
+@needs_db
+class TestComboJobs:
+    def test_etf_momentum_unchanged(self, engine: Engine, tmp_path: Path) -> None:
+        uni = UniverseFake()
+        ctx = make_ctx(engine, tmp_path, universe_provider=uni)
+        daily_data(ctx, DAY)
+        assert uni.calls == []
+        assert not (tmp_path / "universe").exists()
+
+    def test_mid_month_syncs_to_previous_month_end(self, engine: Engine, tmp_path: Path) -> None:
+        ctx = combo_ctx(engine, tmp_path)
+        text = daily_data(ctx, DAY)
+        uni = ctx.universe_provider
+        assert {end for _, end in uni.calls} == {date(2026, 9, 30)}  # type: ignore[union-attr]
+        assert "覆盖率" in text
+        assert ctx.provider.earnings_calls == 1  # type: ignore[attr-defined]
+
+    def test_month_end_syncs_to_today(self, engine: Engine, tmp_path: Path) -> None:
+        ctx = combo_ctx(engine, tmp_path, last=MONTH_END)
+        daily_data(ctx, MONTH_END)
+        assert {end for _, end in ctx.universe_provider.calls} == {MONTH_END}  # type: ignore[union-attr]
+
+    def test_low_coverage_fails(self, engine: Engine, tmp_path: Path) -> None:
+        ctx = combo_ctx(engine, tmp_path, universe_provider=UniverseFake(fail=("BBB",)))
+        with pytest.raises(DataValidationError, match="覆盖率"):
+            daily_data(ctx, DAY)
+
+    def test_combo_signal_includes_momentum_stock(self, engine: Engine, tmp_path: Path) -> None:
+        ctx = combo_ctx(engine, tmp_path)
+        run_job(engine, "daily_data", DAY, lambda: daily_data(ctx, DAY), ctx.notifier)
+        daily_signal(ctx, DAY)
+        with Session(engine) as s:
+            sig = s.scalars(select(Signal)).one()
+        assert sig.strategy == "combo"
+        assert sig.target_weights["AAA"] == pytest.approx(
+            0.4 * 0.25
+        )  # 动量仓第一名，来自候选池目录
+        assert "BBB" not in sig.target_weights and "CCC" not in sig.target_weights

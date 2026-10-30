@@ -3,6 +3,8 @@
 - daily_data（收盘后）：从主数据源（data.primary）拉取策略所需区间的日线（含分红复权价每天
   整体刷新，分红后历史 adj_close 会变化）→ 写入 Parquet → 校验；当日数据未出时等待重试；
   配置了 data.secondary 时抽样比对收盘价。服务器上为老虎 + 新浪（#41）。
+  策略需要候选池时（组合策略，#47）另外同步：标普 500 成分名单、调仓日的候选池日线（新浪 + 老虎
+  拆股记录）；需要财报日时同步老虎财报日历。
 - daily_signal：当日数据任务成功后运行策略，写入 signals，推送“下一交易日计划”。
 - daily_execute（下一交易日开盘后）：Executor（engine/executor.py）。
 - daily_report（执行后）：对账 → 一致则写入当日快照 → 推送日报。
@@ -25,11 +27,20 @@ from sqlalchemy.orm import Session
 from quant.broker.base import Broker
 from quant.core.calendar import TradingCalendar, get_calendar
 from quant.core.settings import Settings
+from quant.data.events import live_earnings_path, load_events, sync_live_earnings
 from quant.data.pipeline import DataValidationError, ensure_bars
 from quant.data.providers.base import DataProvider
 from quant.data.store import ParquetStore
+from quant.data.universe import (
+    constituents_path,
+    load_constituents,
+    stale_warning,
+    sync_constituents,
+)
+from quant.data.universe_bars import sync_universe_bars, universe_store
 from quant.data.validate import Report, compare_sources
 from quant.db.models import Fill, Signal
+from quant.engine.backtester import store_field_loader
 from quant.engine.executor import ET, ExecutionError, Executor
 from quant.engine.reconcile import reconcile, record_snapshot, trading_enabled
 from quant.engine.runner import BENCHMARK
@@ -37,6 +48,7 @@ from quant.jobs.runner import JobStopped, job_status
 from quant.notify.base import Level, Notifier
 from quant.strategies import get_strategy
 from quant.strategies.base import Context
+from quant.strategies.momentum_select import rebalance_day
 
 log = logging.getLogger("quant.jobs")
 
@@ -44,6 +56,7 @@ JOBS = ("daily_data", "daily_signal", "daily_execute", "daily_report")
 DATA_RETRIES = 3
 DATA_RETRY_SECONDS = 15 * 60
 COMPARE_DAYS = 45
+UNIVERSE_HISTORY_DAYS = 450  # 动量排序要约 252 个交易日 + 预热
 
 
 @dataclass
@@ -57,6 +70,8 @@ class JobContext:
     secondary: DataProvider | None = None
     # 创建券商连接；sim 模式为 None
     broker_factory: Callable[[], Broker] | None = None
+    # 候选池数据源（data.universe）；未配置为 None
+    universe_provider: DataProvider | None = None
     calendar: TradingCalendar = field(default_factory=get_calendar)
     now: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
     sleep: Callable[[float], None] = time.sleep
@@ -80,6 +95,7 @@ class JobContext:
             primary,
             make_provider(settings, settings.data.secondary),
             factory,
+            make_provider(settings, settings.data.universe),
         )
 
     @property
@@ -146,6 +162,9 @@ def daily_data(ctx: JobContext, d: date) -> str:
                 "job=daily_data trade_date=%s 当日数据未出，%d 秒后重试", d, DATA_RETRY_SECONDS
             )
             ctx.sleep(DATA_RETRY_SECONDS)
+    extras, warnings = sync_strategy_extras(ctx, d)
+    if warnings:
+        ctx.notifier.send(f"[{ctx.mode}] 数据提示 {d}", "\n".join(warnings), Level.WARNING)
     if ctx.secondary is not None:
         report = Report()
         for s in symbols:
@@ -153,7 +172,51 @@ def daily_data(ctx: JobContext, d: date) -> str:
             report.extend(compare_sources(s, ctx.store.read_bars(s, start, d), other))
         if not report.ok:
             raise DataValidationError(report)
-    return f"{len(symbols)} 个标的截至 {d}"
+    return "；".join([f"{len(symbols)} 个标的截至 {d}", *extras])
+
+
+def sync_strategy_extras(ctx: JobContext, d: date) -> tuple[list[str], list[str]]:
+    """策略声明需要的额外数据：成分名单 + 候选池日线、实盘财报日。返回（摘要, 需要提示的问题）。"""
+    strategy = get_strategy(ctx.strategy_name)
+    params = ctx.settings.strategy.params
+    data_dir = ctx.settings.data_dir
+    summary: list[str] = []
+    warnings: list[str] = []
+    if strategy.uses_universe:
+        if ctx.universe_provider is None:
+            raise RuntimeError(f"策略 {ctx.strategy_name} 需要候选池数据，但 data.universe 未配置")
+        splits = None
+        if ctx.settings.data.universe == "sina":
+            splits = getattr(ctx.provider, "splits", None)
+            if splits is None:
+                raise RuntimeError("data.universe=sina 需要主数据源提供拆股记录（老虎）")
+        universe = sync_constituents(constituents_path(data_dir), d)
+        if (stale := stale_warning(universe, d)) is not None:
+            warnings.append(stale)
+        me = rebalance_day(ctx.calendar, d)
+        members = universe.members(me)
+        r = sync_universe_bars(
+            universe_store(data_dir), ctx.universe_provider, splits, ctx.calendar,
+            members, me - timedelta(days=UNIVERSE_HISTORY_DAYS), me,
+        )  # fmt: skip
+        summary.append(
+            f"候选池 {me}：{len(members)} 只，覆盖率 {r.coverage(len(members)):.1%}，"
+            f"新拉取 {len(r.fetched)}"
+        )
+        if r.missing:
+            warnings.append(f"候选池拿不到 {len(r.missing)} 只：{', '.join(r.missing[:20])}")
+        for sym, why in list(r.excluded.items())[:20]:
+            warnings.append(f"候选池排除 {sym}：{why}")
+    symbols = strategy.earnings_symbols(params)
+    calendar_fn = getattr(ctx.provider, "earnings_calendar", None)
+    if symbols and calendar_fn is not None:
+        got = sync_live_earnings(
+            live_earnings_path(data_dir),
+            lambda a, b: calendar_fn(symbols, a, b, ctx.calendar),
+            d,
+        )
+        summary.append(f"财报日 {sum(1 for s in symbols if s in got)}/{len(symbols)} 只")
+    return summary, warnings
 
 
 def daily_signal(ctx: JobContext, d: date) -> str:
@@ -167,7 +230,16 @@ def daily_signal(ctx: JobContext, d: date) -> str:
         last = bars.index[-1].date() if len(bars) else None
         if last != d:
             raise RuntimeError(f"{sym} 最新数据为 {last}，不是 {d}")
-    weights = strategy.run(Context(as_of=d, loader=ctx.store.prices, params=params))
+    data_dir = ctx.settings.data_dir
+    context = Context(
+        as_of=d,
+        loader=ctx.store.prices,
+        params=params,
+        field_loader=store_field_loader([ctx.store, universe_store(data_dir)]),
+        events=load_events(data_dir),
+        universe=load_constituents(constituents_path(data_dir)) if strategy.uses_universe else None,
+    )
+    weights = strategy.run(context)
     with Session(ctx.engine) as s, s.begin():
         prev = s.scalar(
             select(Signal.target_weights)

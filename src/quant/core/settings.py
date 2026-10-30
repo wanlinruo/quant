@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal, get_args
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 TradingMode = Literal["sim", "paper", "live"]
@@ -91,6 +91,14 @@ class DataSettings(_Section):
 
     primary: Literal["yfinance", "tiger"] = "yfinance"
     secondary: Literal["none", "tiger", "sina"] = "none"
+    # 候选池（组合策略的动量仓，约 500 只）：sina 不占老虎额度，拆股记录来自老虎（#47）
+    universe: Literal["none", "sina", "yfinance"] = "none"
+
+    @model_validator(mode="after")
+    def _universe_needs_tiger(self) -> DataSettings:
+        if self.universe == "sina" and self.primary != "tiger":
+            raise ValueError("data.universe=sina 需要 data.primary=tiger（拆股记录来自老虎）")
+        return self
 
 
 class StrategySettings(_Section):
