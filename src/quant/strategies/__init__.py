@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from quant.strategies.base import Strategy
 from quant.strategies.etf_momentum import EtfMomentum
+from quant.strategies.momentum_select import MomentumSelect
 from quant.strategies.swing_pullback import SwingPullback
 
 STRATEGIES: dict[str, type[Strategy]] = {
     EtfMomentum.name: EtfMomentum,
+    MomentumSelect.name: MomentumSelect,
     SwingPullback.name: SwingPullback,
 }
 
