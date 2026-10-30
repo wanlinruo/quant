@@ -124,3 +124,18 @@ def test_threshold_matches_backtest(tmp_path: Path) -> None:
     r = sync_universe_bars(store, JumpSina(), no_splits, CAL, m, START, END)
     assert "S900" not in r.excluded and "S900" in store.symbols()
     assert "S901" in r.excluded
+
+
+def test_not_ready_raises_retryable_and_keeps_history(tmp_path: Path) -> None:
+    from quant.data.universe_bars import UniverseNotReady
+
+    store = universe_store(tmp_path)
+    m = members(20)
+    prev = DAYS[-2]
+    sync_universe_bars(store, FakeSina(), no_splits, CAL, m, START, prev)  # 前一交易日已同步
+    # 当日数据还没出：新浪只返回到前一交易日
+    late = FakeSina()
+    late.daily_bars = lambda s, a, b: FakeSina.daily_bars(late, s, a, prev)  # type: ignore[method-assign]
+    with pytest.raises(UniverseNotReady):
+        sync_universe_bars(store, late, no_splits, CAL, m, START, END)
+    assert sorted(store.symbols()) == m  # 历史数据没有被删除

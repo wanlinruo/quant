@@ -38,6 +38,7 @@ from quant.data.universe import (
     sync_constituents,
 )
 from quant.data.universe_bars import (
+    UniverseNotReady,
     freeze_members,
     load_frozen_members,
     sync_universe_bars,
@@ -209,10 +210,19 @@ def sync_strategy_extras(ctx: JobContext, d: date) -> tuple[list[str], list[str]
             summary.append(f"候选池 {me} 已冻结（{len(frozen)} 只）")
         else:
             members = universe.members(me)
-            r = sync_universe_bars(
-                universe_store(data_dir), ctx.universe_provider, splits, ctx.calendar,
-                members, me - timedelta(days=UNIVERSE_HISTORY_DAYS), me,
-            )  # fmt: skip
+            for attempt in range(DATA_RETRIES + 1):
+                try:
+                    r = sync_universe_bars(
+                        universe_store(data_dir), ctx.universe_provider, splits, ctx.calendar,
+                        members, me - timedelta(days=UNIVERSE_HISTORY_DAYS), me,
+                    )  # fmt: skip
+                    break
+                except UniverseNotReady:
+                    # 调仓日收盘后数据源可能还没有当日日线：与主数据源一样等待重试
+                    if attempt == DATA_RETRIES:
+                        raise
+                    log.warning("候选池 %s 数据未出，%d 秒后重试", me, DATA_RETRY_SECONDS)
+                    ctx.sleep(DATA_RETRY_SECONDS)
             freeze_members(data_dir, me, members)
             summary.append(
                 f"候选池 {me}：{len(members)} 只，覆盖率 {r.coverage(len(members)):.1%}，"
