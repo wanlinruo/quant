@@ -133,6 +133,7 @@ def test_not_ready_raises_retryable_and_keeps_history(tmp_path: Path) -> None:
     m = members(20)
     prev = DAYS[-2]
     sync_universe_bars(store, FakeSina(), no_splits, CAL, m, START, prev)  # 前一交易日已同步
+
     # 当日数据还没出：新浪只返回到前一交易日
     class Late(FakeSina):
         def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
