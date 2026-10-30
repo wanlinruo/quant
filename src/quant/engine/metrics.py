@@ -72,3 +72,23 @@ def buy_and_hold(prices: pd.Series, initial: float = 1.0) -> pd.Series:
     """基准：首日买入持有（用含分红复权价）。"""
     p = prices.dropna().astype(float)
     return p / p.iloc[0] * initial if len(p) else p.astype(np.float64)
+
+
+def equal_weight_rebalanced(prices: pd.DataFrame, initial: float = 1.0) -> pd.Series:
+    """基准：等权持有一组标的，每月最后一个交易日收盘再平衡，不计成本。"""
+    px = prices.dropna(how="all").astype(float)
+    rets = px.pct_change(fill_method=None).fillna(0.0)
+    month = pd.Series(pd.DatetimeIndex(px.index).to_period("M"), index=px.index)
+    month_end = month != month.shift(-1)
+    values = []
+    weights = np.full(px.shape[1], 1.0 / px.shape[1])
+    nav = initial
+    for i, ts in enumerate(px.index):
+        if i > 0:
+            growth = weights * (1 + rets.iloc[i].to_numpy())
+            nav *= growth.sum()
+            weights = growth / growth.sum()
+        values.append(nav)
+        if month_end.loc[ts]:
+            weights = np.full(px.shape[1], 1.0 / px.shape[1])
+    return pd.Series(values, index=px.index, name="equity")

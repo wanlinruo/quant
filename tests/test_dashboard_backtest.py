@@ -98,7 +98,10 @@ def test_submit_execute_display(db_env: str) -> None:
     assert not at.exception
     assert any("还没有回测记录" in i.value for i in at.info)
 
-    # 未填佣金：拒绝提交
+    # 佣金默认取配置（老虎固定式套餐，#5）；清空后拒绝提交
+    inputs = {t.label: t for t in at.text_input}
+    assert inputs["每股佣金"].value == "0.0039"
+    inputs["每股佣金"].set_value("")
     at.button[0].click().run()
     assert any("佣金" in e.value for e in at.error)
 

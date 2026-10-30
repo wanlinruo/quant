@@ -10,7 +10,7 @@ import pandas as pd
 from quant.core.calendar import TradingCalendar
 from quant.data.providers.base import DataProvider
 from quant.data.store import ParquetStore
-from quant.data.validate import Report, validate_bars
+from quant.data.validate import DEFAULT_MAX_DAILY_MOVE, Report, validate_bars
 
 
 class DataValidationError(RuntimeError):
@@ -35,6 +35,7 @@ def ensure_bars(
     start: date,
     end: date,
     refresh: bool = False,
+    max_move: float = DEFAULT_MAX_DAILY_MOVE,
 ) -> dict[str, pd.DataFrame]:
     """保证每个标的在 [start, end] 有数据且通过校验，返回各标的日线。
 
@@ -49,10 +50,10 @@ def ensure_bars(
             store.write_bars(s, provider.daily_bars(s, start, end), provider.source)
             df = store.read_bars(s, start, end)
         if df.empty:
-            report.extend(validate_bars(s, df, cal, start, end).issues)
+            report.extend(validate_bars(s, df, cal, start, end, max_move=max_move).issues)
             continue
         first = max(start, pd.Timestamp(df.index[0]).date())
-        report.extend(validate_bars(s, df, cal, first, end).issues)
+        report.extend(validate_bars(s, df, cal, first, end, max_move=max_move).issues)
         out[s] = df
     if not report.ok:
         raise DataValidationError(report)

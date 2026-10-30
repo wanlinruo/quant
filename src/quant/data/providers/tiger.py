@@ -15,13 +15,14 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Sequence
 from datetime import date, datetime, timedelta
 from typing import Any, ClassVar
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from quant.core.calendar import TradingCalendar
 from quant.core.settings import Settings
 from quant.data.providers.base import DataProvider, DataUnavailableError, normalize_bars
 
@@ -31,6 +32,9 @@ MIN_CALL_INTERVAL = 1.1  # 秒，K 线 60 次/分钟
 PAGE_INTERVAL = 2  # 秒，get_bars_by_page 分页之间
 PAGE_SIZE = 1000  # 单次最多 1200 根
 MAX_BARS = 20000
+SPLIT_BATCH = 20  # get_corporate_split 每次最多 20 个代码（2026-10-30 实测）
+EARNINGS_SPAN_DAYS = 30
+AFTER_CLOSE = "盘后"
 
 
 def _ms(d: date) -> int:
@@ -133,6 +137,69 @@ class TigerProvider(DataProvider):
             if item.get("method") == "kline":
                 return {"used": int(item["used"]), "remain": int(item["remain"])}
         raise DataUnavailableError("未找到 kline 额度信息")
+
+    def splits(
+        self, symbols: Sequence[str], start: date, end: date
+    ) -> dict[str, list[tuple[date, float]]]:
+        """[start, end] 内的拆股 / 合股：{代码: [(除权日, 价格乘数 from_factor / to_factor)]}。
+
+        不占历史日线额度（2026-10-30 实测）。没有记录的代码不出现在结果中。
+        """
+        from tigeropen.common.consts import Market
+
+        out: dict[str, set[tuple[date, float]]] = {}
+        syms = list(dict.fromkeys(symbols))
+        for i in range(0, len(syms), SPLIT_BATCH):
+            batch = syms[i : i + SPLIT_BATCH]
+            self._throttle()
+            try:
+                raw = self._client.get_corporate_split(
+                    symbols=batch, market=Market.US,
+                    begin_date=start.isoformat(), end_date=end.isoformat(),
+                )  # fmt: skip
+            except Exception as e:
+                raise DataUnavailableError(
+                    f"老虎拉取拆股记录失败（{batch[0]} 等 {len(batch)} 个）：{e!r}"
+                ) from e
+            if raw is None or len(raw) == 0:
+                continue
+            for _, r in raw.iterrows():
+                d = pd.Timestamp(str(r["execute_date"])[:10]).date()
+                mult = float(r["from_factor"]) / float(r["to_factor"])
+                out.setdefault(str(r["symbol"]), set()).add((d, mult))
+        return {s: sorted(v) for s, v in out.items()}
+
+    def earnings_calendar(
+        self, symbols: Collection[str], start: date, end: date, cal: TradingCalendar
+    ) -> dict[str, list[date]]:
+        """[start, end] 内公布财报的反应日。
+
+        盘后公布 → 下一交易日；其余（盘前、盘中、未知）→ 当日（宁可早一天离场）。
+        """
+        from tigeropen.common.consts import Market
+
+        wanted = set(symbols)
+        out: dict[str, set[date]] = {}
+        seg = start
+        while seg <= end:
+            seg_end = min(seg + timedelta(days=EARNINGS_SPAN_DAYS - 1), end)
+            self._throttle()
+            try:
+                raw = self._client.get_corporate_earnings_calendar(
+                    market=Market.US, begin_date=seg.isoformat(), end_date=seg_end.isoformat()
+                )
+            except Exception as e:
+                raise DataUnavailableError(
+                    f"老虎拉取财报日历失败（{seg}~{seg_end}）：{type(e).__name__}: {e}"
+                ) from e
+            if raw is not None and len(raw):
+                for _, r in raw[raw["symbol"].isin(wanted)].iterrows():
+                    d = pd.Timestamp(str(r["report_date"])[:10]).date()
+                    if str(r.get("report_time") or "") == AFTER_CLOSE or not cal.is_trading_day(d):
+                        d = cal.next_trading_day(d)
+                    out.setdefault(str(r["symbol"]), set()).add(d)
+            seg = seg_end + timedelta(days=1)
+        return {s: sorted(v) for s, v in out.items()}
 
 
 def dividend_adjusted(close: pd.Series, dividends: list[tuple[date, float]]) -> pd.Series:

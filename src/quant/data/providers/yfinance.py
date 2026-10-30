@@ -60,7 +60,7 @@ class YFinanceProvider(DataProvider):
         for attempt in range(1, self._retries + 1):
             try:
                 raw = self._download(
-                    tickers=symbol,
+                    tickers=symbol.replace(".", "-"),  # 成分名单用 BRK.B，Yahoo 用 BRK-B
                     start=start.isoformat(),
                     end=(end + timedelta(days=1)).isoformat(),  # yfinance 的 end 不含当天
                     interval="1d",

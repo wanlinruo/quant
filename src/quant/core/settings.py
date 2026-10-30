@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal, get_args
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 TradingMode = Literal["sim", "paper", "live"]
@@ -81,6 +81,8 @@ class RiskSettings(_Section):
     max_order_usd: Decimal | None = Field(None, gt=0)
     # 单日换手上限：当日成交额 / 净值（#30 确认：2.2）
     max_daily_turnover: float = Field(2.2, gt=0, le=10)
+    # sp500：白名单另加近 62 天内的标普 500 成分股（组合策略的动量仓，#47）
+    universe_whitelist: Literal["none", "sp500"] = "none"
 
 
 class DataSettings(_Section):
@@ -91,6 +93,14 @@ class DataSettings(_Section):
 
     primary: Literal["yfinance", "tiger"] = "yfinance"
     secondary: Literal["none", "tiger", "sina"] = "none"
+    # 候选池（组合策略的动量仓，约 500 只）：sina 不占老虎额度，拆股记录来自老虎（#47）
+    universe: Literal["none", "sina", "yfinance"] = "none"
+
+    @model_validator(mode="after")
+    def _universe_needs_tiger(self) -> DataSettings:
+        if self.universe == "sina" and self.primary != "tiger":
+            raise ValueError("data.universe=sina 需要 data.primary=tiger（拆股记录来自老虎）")
+        return self
 
 
 class StrategySettings(_Section):
@@ -103,11 +113,18 @@ class StrategySettings(_Section):
 class CostSettings(_Section):
     """回测成本模型（PROJECT_PLAN 第 9 章）。
 
-    老虎美股佣金【待确认】（issue #5），确认前不设默认值；未配置时 SimBroker 拒绝构造。
+    老虎美股“固定式套餐”（#5，用户 2026-10-29 提供 App 截图）每笔订单收两项：
+    - 佣金：commission_per_share × 股数，不低于 min_commission
+    - 平台费：platform_per_share × 股数，不低于 platform_min
+    两项各自不超过成交额 × max_fee_pct。commission_per_share / min_commission 未配置时
+    SimBroker 拒绝构造。交收费、SEC / FINRA 规费未计入（截图未列出，待确认）。
     """
 
     commission_per_share: Decimal | None = Field(None, ge=0)
     min_commission: Decimal | None = Field(None, ge=0)
+    platform_per_share: Decimal = Field(Decimal(0), ge=0)
+    platform_min: Decimal = Field(Decimal(0), ge=0)
+    max_fee_pct: Decimal | None = Field(None, gt=0, lt=1)
     slippage: Decimal = Field(Decimal("0.0005"), ge=0, lt=Decimal("0.1"))
 
 

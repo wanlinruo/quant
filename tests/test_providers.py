@@ -116,3 +116,11 @@ def test_empty_bars_schema() -> None:
     df = empty_bars()
     assert tuple(df.columns) == BAR_COLUMNS
     assert len(df) == 0
+
+
+def test_yfinance_maps_dot_ticker() -> None:
+    # 标普成分名单用 BRK.B，Yahoo 用 BRK-B
+    p, fake, _ = provider([yf_frame(["2024-01-02"])])
+    df = p.daily_bars("BRK.B", date(2024, 1, 2), date(2024, 1, 2))
+    assert [c["tickers"] for c in fake.calls] == ["BRK-B"]
+    assert len(df) == 1

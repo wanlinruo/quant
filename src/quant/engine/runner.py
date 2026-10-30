@@ -41,9 +41,7 @@ class BacktestSpec:
         return {
             **self.params,
             COSTS_KEY: {
-                "commission_per_share": str(self.costs.commission_per_share),
-                "min_commission": str(self.costs.min_commission),
-                "slippage": str(self.costs.slippage),
+                k: str(v) for k, v in self.costs.to_settings().model_dump().items() if v is not None
             },
             CASH_KEY: str(self.cash),
         }
@@ -69,15 +67,15 @@ def costs_with_overrides(
     min_commission: Decimal | None = None,
     slippage: Decimal | None = None,
 ) -> CostModel:
+    """配置中的成本，命令行或面板给出的佣金、滑点覆盖对应项；平台费与封顶始终用配置。"""
     c = settings.costs
+    overrides = {
+        "commission_per_share": commission_per_share,
+        "min_commission": min_commission,
+        "slippage": slippage,
+    }
     return CostModel.from_settings(
-        CostSettings(
-            commission_per_share=commission_per_share
-            if commission_per_share is not None
-            else c.commission_per_share,
-            min_commission=min_commission if min_commission is not None else c.min_commission,
-            slippage=slippage if slippage is not None else c.slippage,
-        )
+        c.model_copy(update={k: v for k, v in overrides.items() if v is not None})
     )
 
 
@@ -103,6 +101,7 @@ def run_spec(
         data_start,
         spec.end,
         refresh_data,
+        strategy.max_daily_move,
     )
     ex = settings.executor
     plan = OrderPlanParams(

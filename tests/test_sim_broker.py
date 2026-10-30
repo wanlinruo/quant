@@ -44,6 +44,22 @@ class TestCostModel:
     def test_commission_min_applies(self) -> None:
         assert COSTS.commission(10) == D("1.00")  # 10 × 0.01 = 0.1 < 1
 
+    def test_tiger_fixed_plan(self) -> None:
+        # 佣金 0.0039/股 + 平台费 0.004/股（最低 1），各自不超过成交额 0.5%（#5）
+        c = CostModel(D("0.0039"), D("0"), D("0"), D("0.004"), D("1"), D("0.005"))
+        assert c.commission(100, D("50000")) == D("1.39")  # 0.39 + max(0.4, 1)
+        assert c.commission(2000, D("1000000")) == D("15.80")  # 7.8 + 8
+        # 低价股小单：平台费最低 1 美元被 0.5% 封顶（10 股 × 2 美元 = 20 → 封顶 0.1）
+        assert c.commission(10, D("20")) == D("0.14")  # 0.039 + 0.1
+        assert c.commission(100) == D("1.39")  # 未给成交额时不封顶
+
+    def test_config_matches_tiger_plan(self) -> None:
+        from quant.core.settings import load_settings
+
+        c = CostModel.from_settings(load_settings().costs)
+        assert c.commission(100, D("50000")) == D("1.39")
+        assert c.commission(2000, D("1000000")) == D("15.80")
+
     def test_commission_per_share(self) -> None:
         assert COSTS.commission(250) == D("2.50")
 

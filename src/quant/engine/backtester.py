@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
 
@@ -23,9 +23,12 @@ import pandas as pd
 from quant.broker.sim import CostModel, SimBroker
 from quant.core.calendar import TradingCalendar
 from quant.core.models import Bar, Fill, OrderRequest, OrderType, Side, make_client_order_id
+from quant.data.store import ParquetStore
 from quant.engine.metrics import Metrics, buy_and_hold, compute_metrics, drawdown
 from quant.engine.orders import OrderPlanParams, PlannedOrder, plan_orders
-from quant.strategies.base import Context, Strategy
+from quant.strategies.base import FIELDS, Context, FieldLoader, Strategy
+from quant.strategies.events import EventCalendar
+from quant.strategies.universe import Constituents
 
 _PRICE_STEP = Decimal("0.0001")
 
@@ -40,6 +43,43 @@ def adjusted_ohlc(bars: pd.DataFrame) -> pd.DataFrame:
         out[c] = bars[c] * factor
     out["close"] = bars["adj_close"]
     return out
+
+
+def field_loader_from_bars(bars: Mapping[str, pd.DataFrame]) -> FieldLoader:
+    """由各标的日线构造 FieldLoader：价格按 adjusted_ohlc 复权，成交量不调整。纯函数。"""
+    adj = {s: adjusted_ohlc(df) for s, df in bars.items()}
+    wide = {f: pd.DataFrame({s: df[f] for s, df in adj.items()}).sort_index() for f in FIELDS}
+
+    def load(symbols: Sequence[str], name: str, start: date | None, end: date) -> pd.DataFrame:
+        df = wide[name]
+        cols = [s for s in symbols if s in df.columns]
+        out = df.loc[: pd.Timestamp(end), cols]
+        if start is not None:
+            out = out.loc[pd.Timestamp(start) :]
+        out = out.reindex(columns=list(symbols))
+        out.index.name = "date"
+        return out
+
+    return load
+
+
+def store_field_loader(stores: Sequence[ParquetStore]) -> FieldLoader:
+    """由本地 Parquet 构造 FieldLoader（实盘每日任务用）：每个代码取第一个有数据的 store，
+    价格按 adjusted_ohlc 复权；所有 store 都没有的代码为整列 NaN。"""
+
+    def load(symbols: Sequence[str], name: str, start: date | None, end: date) -> pd.DataFrame:
+        cols: dict[str, pd.Series] = {}
+        for s in symbols:
+            for store in stores:
+                bars = store.read_bars(s, start, end)
+                if len(bars):
+                    cols[s] = adjusted_ohlc(bars)[name]
+                    break
+        out = pd.DataFrame(cols).sort_index().reindex(columns=list(symbols))
+        out.index.name = "date"
+        return out
+
+    return load
 
 
 def _dec(x: float) -> Decimal:
@@ -69,12 +109,21 @@ class Backtester:
         plan_params: OrderPlanParams | None = None,
         params: Mapping[str, object] | None = None,
         benchmark: str | None = "SPY",
+        events: EventCalendar | None = None,
+        universe: Constituents | None = None,
     ) -> None:
         self.strategy = strategy
         self.calendar = calendar
         self.costs = costs
         self.initial_cash = initial_cash
         self.plan_params = plan_params or OrderPlanParams()
+        if strategy.min_weight_diff is not None:
+            self.plan_params = replace(
+                self.plan_params, min_weight_diff=Decimal(str(strategy.min_weight_diff))
+            )
+        self.events = events or EventCalendar()
+        self.universe = universe
+        self._fields = field_loader_from_bars(bars)
         self.params = dict(params or {})
         self.benchmark = benchmark
         self._adj = {s: adjusted_ohlc(df) for s, df in bars.items()}
@@ -156,7 +205,14 @@ class Backtester:
             }
             if day == days[-1]:
                 break  # 最后一天提交的订单不会成交
-            ctx = Context(as_of=day, loader=self._loader, params=self.params)
+            ctx = Context(
+                as_of=day,
+                loader=self._loader,
+                params=self.params,
+                field_loader=self._fields,
+                events=self.events,
+                universe=self.universe,
+            )
             target = self.strategy.run(ctx)
             signals[day] = target
             quotes = broker.get_quotes(sorted(set(target) | set(positions)))

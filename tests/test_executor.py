@@ -4,6 +4,7 @@ import os
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from alembic import command
@@ -333,3 +334,49 @@ def test_foreign_open_order_halts(engine: Engine, broker: FakeBroker, clock: Clo
     report = make(engine, broker, clock).run(DAY)
     assert report.status == "halted" and "非本次运行" in report.message
     assert halted(engine) and broker.cancelled == []
+
+
+# ---- 组合策略：动态白名单与策略自己的调仓阈值（#47 第二份计划任务 6） ----
+
+
+def _signal(engine: Engine, strategy: str, weights: dict[str, float]) -> None:
+    with Session(engine) as s, s.begin():
+        s.add(Signal(strategy=strategy, signal_date=PREV, target_weights=weights,
+                     data_as_of=PREV))  # fmt: skip
+
+
+def test_universe_whitelist_allows_constituent(engine: Engine, broker: FakeBroker, clock: Clock,
+                                               tmp_path: Path) -> None:  # fmt: skip
+    path = tmp_path / "universe" / "sp500_history.csv"
+    path.parent.mkdir(parents=True)
+    path.write_text('date,tickers\n2026-08-03,"WDC,AAPL"\n', encoding="utf-8")
+    with Session(engine) as s, s.begin():
+        s.query(Signal).delete()
+    _signal(engine, STRATEGY, {"SPY": 0.5, "WDC": 0.4})
+    broker.prices["WDC"] = D("100")
+    cfg = Settings(broker="tiger", data_dir=tmp_path,
+                   risk={"symbol_whitelist": ["SPY", "QQQ"], "max_order_usd": "150000",
+                         "universe_whitelist": "sp500"})  # fmt: skip
+    report = Executor(engine, broker, cfg, Notes(), STRATEGY, now=clock.now,
+                      sleep=clock.sleep).run(DAY)  # fmt: skip
+    assert report.status == "done"
+    assert ("WDC", Side.BUY) in {(o.symbol, o.side) for o in broker.placed}
+
+
+def test_config_min_weight_diff_for_etf(engine: Engine, clock: Clock) -> None:
+    # 持有 SPY 160 股（净值 98000 中约 97.96%）；目标 0.969 → 扣现金缓冲后偏离约 3.0 个百分点
+    with Session(engine) as s, s.begin():
+        s.query(Signal).delete()
+    _signal(engine, STRATEGY, {"SPY": 0.969})
+    b = FakeBroker(clock, "2000", {"SPY": 160})
+    Executor(engine, b, settings(), Notes(), STRATEGY, now=clock.now, sleep=clock.sleep).run(DAY)
+    assert [(o.symbol, o.side) for o in b.placed] == [("SPY", Side.SELL)]  # 配置阈值 0.02
+
+
+def test_strategy_min_weight_diff_for_combo(engine: Engine, clock: Clock) -> None:
+    # 同样偏离 3 个百分点：combo 的阈值为 0.04（与回测一致），不调仓
+    _signal(engine, "combo", {"SPY": 0.969})
+    b = FakeBroker(clock, "2000", {"SPY": 160})
+    report = Executor(engine, b, settings(), Notes(), "combo", now=clock.now,
+                      sleep=clock.sleep).run(DAY)  # fmt: skip
+    assert report.status == "no_orders" and b.placed == []
