@@ -192,3 +192,76 @@ def test_non_usd_dividend_rejected() -> None:
                       adjust_dividends=True)  # fmt: skip
     with pytest.raises(DataUnavailableError, match="币种"):
         p.daily_bars("SPY", DAYS[0], DAYS[-1])
+
+
+class CorpClient:
+    """拆股记录与财报日历的假客户端。"""
+
+    def __init__(self, splits: pd.DataFrame | None = None, earnings: pd.DataFrame | None = None):
+        self.splits, self.earnings = splits, earnings
+        self.split_calls: list[list[str]] = []
+        self.earning_calls: list[tuple[str, str]] = []
+
+    def get_corporate_split(self, symbols: list[str], market: Any, begin_date: str,
+                            end_date: str) -> pd.DataFrame | None:  # fmt: skip
+        self.split_calls.append(list(symbols))
+        if self.splits is None:
+            return None
+        return self.splits[self.splits["symbol"].isin(symbols)]
+
+    def get_corporate_earnings_calendar(self, market: Any, begin_date: str,
+                                        end_date: str) -> pd.DataFrame | None:  # fmt: skip
+        self.earning_calls.append((begin_date, end_date))
+        return self.earnings
+
+
+def _provider(client: Any) -> TigerProvider:
+    clock = FakeClock()
+    return TigerProvider(client, clock=clock, sleep=clock.sleep)
+
+
+def test_splits_batches_of_20() -> None:
+    splits = pd.DataFrame(
+        {"symbol": ["NVDA", "WMT", "NVDA"], "action_type": "SPLIT",
+         "from_factor": [1.0, 1.0, 1.0], "to_factor": [10.0, 3.0, 10.0],
+         "execute_date": ["2024-06-10", "2024-02-26", "2024-06-10"]}
+    )  # fmt: skip
+    client = CorpClient(splits=splits)
+    syms = ["NVDA", "WMT", *[f"S{i}" for i in range(43)]]
+    got = _provider(client).splits(syms, date(2024, 1, 1), date(2024, 12, 31))
+    assert [len(c) for c in client.split_calls] == [20, 20, 5]
+    assert set(got) == {"NVDA", "WMT"}
+    assert got["NVDA"] == [(date(2024, 6, 10), 0.1)]
+    assert got["WMT"][0][0] == date(2024, 2, 26)
+    assert got["WMT"][0][1] == pytest.approx(1 / 3)
+
+
+def test_splits_error_wrapped() -> None:
+    class Bad(CorpClient):
+        def get_corporate_split(self, *a: Any, **k: Any) -> pd.DataFrame | None:
+            raise RuntimeError("boom")
+
+    with pytest.raises(DataUnavailableError, match="拆股"):
+        _provider(Bad()).splits(["NVDA"], date(2024, 1, 1), date(2024, 12, 31))
+
+
+def test_earnings_calendar_reaction_day() -> None:
+    from quant.core.calendar import TradingCalendar
+
+    earnings = pd.DataFrame(
+        {"symbol": ["MSFT", "AAPL", "AMZN", "XYZ"],
+         "report_date": ["2026-10-28", "2026-10-28", "2026-10-29", "2026-10-28"],
+         "report_time": ["盘后", "盘前", None, "盘后"]}
+    )  # fmt: skip
+    client = CorpClient(earnings=earnings)
+    got = _provider(client).earnings_calendar(
+        {"MSFT", "AAPL", "AMZN"}, date(2026, 9, 1), date(2026, 11, 9), TradingCalendar()
+    )
+    assert got == {
+        "MSFT": [date(2026, 10, 29)],  # 盘后 → 下一交易日
+        "AAPL": [date(2026, 10, 28)],  # 盘前 → 当日
+        "AMZN": [date(2026, 10, 29)],  # 未知 → 当日
+    }
+    assert len(client.earning_calls) == 3  # 70 天按 30 天分段
+    assert client.earning_calls[0][0] == "2026-09-01"
+    assert client.earning_calls[-1][1] == "2026-11-09"
