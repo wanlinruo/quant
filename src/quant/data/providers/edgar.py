@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import time
 import urllib.request
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -24,6 +24,7 @@ from quant.core.calendar import TradingCalendar, get_calendar
 
 ET = ZoneInfo("America/New_York")
 BASE = "https://data.sec.gov/submissions/"
+TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 START = date(2014, 1, 1)
 MIN_INTERVAL = 0.15
 
@@ -102,12 +103,13 @@ def fetch_earnings(
     fetch: Fetch | None = None,
     sleep: Callable[[float], None] = time.sleep,
     cal: TradingCalendar | None = None,
+    ciks: Sequence[int] | None = None,
 ) -> list[date]:
-    """symbol 自 2014 年起的财报反应日，升序、去重。"""
+    """symbol 自 2014 年起的财报反应日，升序、去重。ciks 为 None 时用 CIKS[symbol]。"""
     fetch = fetch or retrying(http_fetcher(user_agent), sleep=sleep)
     cal = cal or get_calendar()
     accepted: list[datetime] = []
-    for cik in CIKS[symbol]:
+    for cik in CIKS[symbol] if ciks is None else ciks:
         main = fetch(f"{BASE}CIK{cik:010d}.json")
         sleep(MIN_INTERVAL)
         accepted += parse_earnings_filings(main)
@@ -116,3 +118,13 @@ def fetch_earnings(
             sleep(MIN_INTERVAL)
     days = {reaction_day(a, cal) for a in accepted}
     return sorted(d for d in days if d >= START)
+
+
+def fetch_cik_map(user_agent: str, fetch: Fetch | None = None) -> dict[str, int]:
+    """SEC 当前上市公司的代码 → CIK（代码中的 - 换成 .，与标普成分名单一致）。
+
+    只含当前代码：已退市或改过代码的公司查不到；代码被重新使用时可能对应到别的公司。
+    """
+    fetch = fetch or retrying(http_fetcher(user_agent))
+    doc = fetch(TICKERS_URL)
+    return {str(v["ticker"]).replace("-", "."): int(v["cik_str"]) for v in doc.values()}
