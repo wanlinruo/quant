@@ -1,5 +1,6 @@
 """momentum_select 月度动量选股（#47 Task 4）。合成数据，不访问网络。"""
 
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import date
 
@@ -61,7 +62,7 @@ def test_rank_liquidity_cut() -> None:
 
 def test_rank_requires_history() -> None:
     close = make_close()
-    close.iloc[: N - 200, close.columns.get_loc("B")] = np.nan  # B 只有 200 个交易日
+    close.loc[IDX[: N - 200], "B"] = np.nan  # B 只有 200 个交易日
     assert rank_momentum(close, make_volume(), {"A", "B", "C"}, P) == ["A", "C"]
 
 
@@ -89,7 +90,7 @@ def _bars(close: pd.DataFrame, volume: pd.DataFrame) -> dict[str, pd.DataFrame]:
 
 def ctx(
     as_of: date,
-    params: dict[str, object],
+    params: Mapping[str, object],
     close: pd.DataFrame | None = None,
     members: frozenset[str] = frozenset({"A", "B", "C", "E", "F"}),
     events: EventCalendar | None = None,
