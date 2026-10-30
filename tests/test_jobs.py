@@ -517,3 +517,30 @@ class TestComboReviewFixes:
         daily_data(ctx, DAY)
         bodies = [body for _, body, _ in ctx.notifier.sent]  # type: ignore[attr-defined]
         assert any("TLT" in b and "GLD" in b and "财报日" in b for b in bodies)
+
+
+class LateUniverse(UniverseFake):
+    """第一轮只有前一交易日的数据（当日未出），之后完整。"""
+
+    def __init__(self, last: date) -> None:
+        super().__init__(last=last)
+        self.rounds = 0
+
+    def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        if symbol == "AAA":
+            self.rounds += 1
+        if self.rounds <= 1:
+            end = get_calendar().previous_trading_day(end)
+        return super().daily_bars(symbol, start, end)
+
+
+@pytest.mark.db
+@needs_db
+class TestUniverseNotReady:
+    def test_waits_for_today_on_rebalance_day(self, engine: Engine, tmp_path: Path) -> None:
+        ctx = combo_ctx(engine, tmp_path, last=MONTH_END, universe_provider=LateUniverse(MONTH_END))
+        slept: list[float] = []
+        ctx.sleep = slept.append
+        text = daily_data(ctx, MONTH_END)
+        assert daily.DATA_RETRY_SECONDS in slept
+        assert "覆盖率 100.0%" in text

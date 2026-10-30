@@ -56,12 +56,17 @@ def load_frozen_members(data_dir: Path, rebalance: date) -> frozenset[str] | Non
     )
 
 
+class UniverseNotReady(DataValidationError):
+    """多数缺失是因为数据源还没有截至 end 的数据（当日未出）：可稍后重试。"""
+
+
 @dataclass
 class UniverseSync:
     fetched: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
     excluded: dict[str, str] = field(default_factory=dict)
+    not_ready: list[str] = field(default_factory=list)  # 最新数据早于 end；计入 missing
 
     def coverage(self, n_members: int) -> float:
         if n_members == 0:
@@ -97,6 +102,11 @@ def sync_universe_bars(
             result.missing.append(s)
     recorded = splits(sorted(todo), start, end) if splits is not None and todo else {}
     for s, raw in todo.items():
+        if raw.empty or pd.Timestamp(raw.index[-1]).date() < end:
+            # 当日数据未出：不校验、不删除本地历史，记为缺失
+            result.not_ready.append(s)
+            result.missing.append(s)
+            continue
         bars = split_adjust(raw, recorded.get(s, [])) if splits is not None else raw
         first = max(start, pd.Timestamp(bars.index[0]).date())
         report = validate_bars(s, bars, cal, first, end, max_move=max_move)
@@ -112,5 +122,7 @@ def sync_universe_bars(
         report.extend(
             [Issue("候选池", "coverage", end, f"覆盖率 {cov:.1%} 低于 {min_coverage:.0%}")]
         )
+        if len(result.not_ready) * 2 >= len(result.missing) + len(result.excluded):
+            raise UniverseNotReady(report)
         raise DataValidationError(report)
     return result
