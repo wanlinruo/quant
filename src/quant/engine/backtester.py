@@ -27,6 +27,7 @@ from quant.engine.metrics import Metrics, buy_and_hold, compute_metrics, drawdow
 from quant.engine.orders import OrderPlanParams, PlannedOrder, plan_orders
 from quant.strategies.base import FIELDS, Context, FieldLoader, Strategy
 from quant.strategies.events import EventCalendar
+from quant.strategies.universe import Constituents
 
 _PRICE_STEP = Decimal("0.0001")
 
@@ -89,6 +90,7 @@ class Backtester:
         params: Mapping[str, object] | None = None,
         benchmark: str | None = "SPY",
         events: EventCalendar | None = None,
+        universe: Constituents | None = None,
     ) -> None:
         self.strategy = strategy
         self.calendar = calendar
@@ -100,6 +102,7 @@ class Backtester:
                 self.plan_params, min_weight_diff=Decimal(str(strategy.min_weight_diff))
             )
         self.events = events or EventCalendar()
+        self.universe = universe
         self._fields = field_loader_from_bars(bars)
         self.params = dict(params or {})
         self.benchmark = benchmark
@@ -188,6 +191,7 @@ class Backtester:
                 params=self.params,
                 field_loader=self._fields,
                 events=self.events,
+                universe=self.universe,
             )
             target = self.strategy.run(ctx)
             signals[day] = target

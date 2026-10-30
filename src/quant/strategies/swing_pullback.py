@@ -51,6 +51,7 @@ class SwingParams:
     earnings_no_entry_days: int = 5
     fomc_exit: bool = False
     replay_days: int = 250
+    use_inverse: bool = True  # False：不用反向 ETF 表达纳指空头（组合策略的 V2 仓）
 
     @classmethod
     def from_mapping(cls, params: Mapping[str, Any]) -> SwingParams:
@@ -70,7 +71,7 @@ class SwingParams:
 
     @property
     def symbols(self) -> list[str]:
-        return [*self.stocks, self.index, self.inverse]
+        return [*self.tradables, self.inverse] if self.use_inverse else self.tradables
 
 
 @dataclass(frozen=True)
@@ -113,7 +114,8 @@ def compute_inputs(frames: Mapping[str, pd.DataFrame], p: SwingParams) -> Inputs
     )  # fmt: skip
     trend = c.rolling(p.trend_ma, min_periods=p.trend_ma).mean()
     score = c / trend - 1
-    score[p.inverse] = 1 - c[q] / trend[q]
+    if p.use_inverse:
+        score[p.inverse] = 1 - c[q] / trend[q]
     return Inputs(
         open=o,
         close=c,
@@ -251,7 +253,7 @@ def _candidates(
             if r is not None and r <= horizon:
                 continue
         cands.append((v.num(v.score, i, s), s))
-    if p.inverse not in holdings and v.short_sig[i]:
+    if p.use_inverse and p.inverse not in holdings and v.short_sig[i]:
         cands.append((v.num(v.score, i, p.inverse), p.inverse))
     cands = [(sc, s) for sc, s in cands if sc == sc]
     cands.sort(key=lambda x: (-x[0], x[1]))

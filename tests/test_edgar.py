@@ -13,6 +13,7 @@ from quant.core.calendar import TradingCalendar
 from quant.data.events import load_earnings, save_earnings
 from quant.data.providers.edgar import (
     CIKS,
+    fetch_cik_map,
     fetch_earnings,
     parse_earnings_filings,
     reaction_day,
@@ -156,3 +157,32 @@ def test_retrying_fetch() -> None:
         assert "down" in str(e)
     else:
         raise AssertionError("应抛出最后一次的错误")
+
+
+def test_fetch_cik_map() -> None:
+    payload = {
+        "0": {"cik_str": 1067983, "ticker": "BRK-B", "title": "x"},
+        "1": {"cik_str": 320193, "ticker": "AAPL", "title": "y"},
+    }
+    seen: list[str] = []
+
+    def fake(url: str) -> dict[str, Any]:
+        seen.append(url)
+        return payload
+
+    assert fetch_cik_map("ua", fetch=fake) == {"BRK.B": 1067983, "AAPL": 320193}
+    assert seen == ["https://www.sec.gov/files/company_tickers.json"]
+
+
+def test_fetch_earnings_with_explicit_ciks() -> None:
+    recent = _recent([("8-K", "2024-05-02T20:30:34.000Z", "2.02")])
+    doc = {"filings": {"recent": recent, "files": []}}
+    seen: list[str] = []
+
+    def fake(url: str) -> dict[str, Any]:
+        seen.append(url)
+        return doc
+
+    got = fetch_earnings("ZZZ", "a b@c.d", fetch=fake, sleep=lambda s: None, ciks=(123,))
+    assert got == [date(2024, 5, 3)]
+    assert seen == ["https://data.sec.gov/submissions/CIK0000000123.json"]

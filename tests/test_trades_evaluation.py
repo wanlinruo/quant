@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from quant.core.models import Fill, Side
-from quant.engine.evaluation import meets_criteria
+from quant.engine.evaluation import combo_checks, meets_criteria
 from quant.engine.metrics import Metrics, equal_weight_rebalanced
 from quant.engine.trades import round_trips, trade_stats
 
@@ -91,3 +91,35 @@ def test_nan_metrics_fail() -> None:
     qqq, eq = m(0.20, -0.35, 0.90), m(0.25, -0.40, 0.95)
     assert not meets_criteria(m(float("nan"), -0.2, 1.0), qqq, eq).passed
     assert np.isnan(float("nan"))
+
+
+def test_combo_checks_boundaries() -> None:
+    qqq = m(0.19, -0.35, 0.90)
+    full = m(0.22, -0.25, 1.1)  # 恰好在门槛上
+    ins, oos = m(0.2, -0.2, 1.0), m(0.3, -0.2, 1.5)
+    q_ins, q_oos = m(0.14, -0.35, 0.67), m(0.31, -0.23, 1.45)
+    ok = [m(0.2, -0.30, 1.0), m(0.25, -0.28, 1.2)]
+    got = combo_checks(full, qqq, ins, q_ins, oos, q_oos, ok)
+    assert got == {
+        "最大回撤 ≥ -25%": True,
+        "年化 ≥ QQQ + 3 个百分点": True,
+        "夏普 ≥ 1.1": True,
+        "两个区间夏普都高于 QQQ": True,
+        "相邻设置：回撤 ≥ -30% 且夏普 ≥ 1.0": True,
+    }
+    bad = combo_checks(full, qqq, ins, q_ins, oos, q_oos, [*ok, m(0.3, -0.31, 1.3)])
+    assert not bad["相邻设置：回撤 ≥ -30% 且夏普 ≥ 1.0"]
+    assert not combo_checks(full, qqq, ins, q_ins, oos, q_oos, [])[
+        "相邻设置：回撤 ≥ -30% 且夏普 ≥ 1.0"
+    ]
+
+
+def test_combo_checks_failures() -> None:
+    qqq = m(0.19, -0.35, 0.90)
+    q_ins, q_oos = m(0.14, -0.35, 0.67), m(0.31, -0.23, 1.45)
+    got = combo_checks(m(0.21, -0.26, 1.09), qqq, m(0.2, -0.2, 0.6), q_ins,
+                       m(0.3, -0.2, 1.5), q_oos, [m(0.2, -0.2, 1.0)])  # fmt: skip
+    assert got["最大回撤 ≥ -25%"] is False
+    assert got["年化 ≥ QQQ + 3 个百分点"] is False
+    assert got["夏普 ≥ 1.1"] is False
+    assert got["两个区间夏普都高于 QQQ"] is False

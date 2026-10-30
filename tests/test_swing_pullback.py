@@ -11,7 +11,7 @@ from quant.core.calendar import TradingCalendar
 from quant.data.providers.base import normalize_bars
 from quant.engine.backtester import field_loader_from_bars
 from quant.strategies import get_strategy
-from quant.strategies.base import Context
+from quant.strategies.base import FIELDS, Context
 from quant.strategies.events import EventCalendar
 from quant.strategies.swing_pullback import (
     Inputs,
@@ -254,3 +254,24 @@ def test_registered_and_params() -> None:
     assert s.warmup_days({}) == 120 + 250 + 30
     with pytest.raises(ValueError, match="bogus"):
         SwingParams.from_mapping({"bogus": 1})
+
+
+def test_inverse_disabled() -> None:
+    p = replace(P, use_inverse=False)
+    assert "PSQ" not in p.symbols
+    inp = make_inputs()
+    inp.short_sig.iloc[10] = True
+    inp.close.loc[IDX[10] :, "QQQ"] = 98.0  # QQQ 在 5 日线（99）下方，PSQ 不会立即离场
+    inp.score.loc[:, "PSQ"] = 0.5
+    assert "PSQ" not in held(inp, 12, params=p)
+    assert "PSQ" in held(inp, 12)  # 默认仍会买 PSQ
+
+
+def test_inverse_disabled_without_psq_data() -> None:
+    n = len(IDX)
+    p = replace(P, trend_ma=20, support_ma=5, exit_ma=3, replay_days=60, use_inverse=False)
+    bars = {s: _bars(100 * 1.002 ** np.arange(n)) for s in p.symbols}
+    load = field_loader_from_bars(bars)
+    frames = {f: load(p.symbols, f, None, DAYS[-1]) for f in FIELDS}
+    w = simulate(compute_inputs(frames, p), p, EventCalendar(), CAL, DAYS[-1])
+    assert "PSQ" not in w
