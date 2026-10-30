@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from quant.strategies.events import EventCalendar
+from quant.strategies.universe import Constituents
 
 # 数据加载函数：(symbols, start, end) → 以日期为索引的 DataFrame，包含 end 当日
 BarLoader = Callable[[Sequence[str], date | None, date], pd.DataFrame]
@@ -60,6 +61,8 @@ class Context:
     params: Mapping[str, Any] = field(default_factory=dict)
     field_loader: FieldLoader | None = field(default=None, repr=False)
     events: EventCalendar = field(default_factory=EventCalendar)
+    # 指数成分股快照（需要“当时成分股”的策略使用）；按日期查询，不需要截断
+    universe: Constituents | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
