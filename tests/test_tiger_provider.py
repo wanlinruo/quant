@@ -262,6 +262,9 @@ def test_earnings_calendar_reaction_day() -> None:
         "AAPL": [date(2026, 10, 28)],  # 盘前 → 当日
         "AMZN": [date(2026, 10, 29)],  # 未知 → 当日
     }
-    assert len(client.earning_calls) == 3  # 70 天按 30 天分段
+    assert len(client.earning_calls) == 3  # 70 天按 28 天分段
+    # 老虎要求每段不超过 1 个月（2026-10-30 实测 02-21~03-22 被拒）：每段最多 28 天
+    for a, b in client.earning_calls:
+        assert (date.fromisoformat(b) - date.fromisoformat(a)).days <= 27
     assert client.earning_calls[0][0] == "2026-09-01"
     assert client.earning_calls[-1][1] == "2026-11-09"

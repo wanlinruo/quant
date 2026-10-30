@@ -33,7 +33,7 @@ PAGE_INTERVAL = 2  # 秒，get_bars_by_page 分页之间
 PAGE_SIZE = 1000  # 单次最多 1200 根
 MAX_BARS = 20000
 SPLIT_BATCH = 20  # get_corporate_split 每次最多 20 个代码（2026-10-30 实测）
-EARNINGS_SPAN_DAYS = 30
+EARNINGS_SPAN_DAYS = 28  # 每段不能超过 1 个月（2026-10-30 实测：02-21~03-22 被拒）
 AFTER_CLOSE = "盘后"
 
 
