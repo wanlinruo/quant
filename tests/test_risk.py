@@ -2,6 +2,7 @@
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,7 @@ from quant.risk.rules import (
     check_quotes,
     check_signal_freshness,
     check_targets,
+    whitelist_extra,
 )
 
 D = Decimal
@@ -145,3 +147,48 @@ def test_limit_price_rounding() -> None:
     assert limit_price(D("100.01"), Side.BUY, off) == D("100.22")  # 100.21002 → 向上
     assert limit_price(D("100.01"), Side.SELL, off) == D("99.80")  # 99.80998 → 向下
     assert limit_price(D("0.5"), Side.SELL, off) == D("0.4990")
+
+
+# ---- 动态白名单（#47 第二份计划任务 6，safety） ----
+
+# 2026-08-01 起 WDC、OLD 在名单中；
+# 2026-08-20 OLD 被调出（距 DAY 70 天）；2026-09-19 GONE 被调出（距 DAY 40 天）
+UNIVERSE_CSV = (
+    "date,tickers\n"
+    '2026-08-01,"AAPL,WDC,OLD,GONE"\n'
+    '2026-08-20,"AAPL,WDC,GONE"\n'
+    '2026-09-19,"AAPL,WDC"\n'
+)
+
+
+def _settings(tmp_path: Path, mode: str = "sp500", write: bool = True) -> Settings:
+    if write:
+        path = tmp_path / "universe" / "sp500_history.csv"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(UNIVERSE_CSV, encoding="utf-8")
+    return Settings(
+        broker="tiger",
+        data_dir=tmp_path,
+        risk={"symbol_whitelist": ["QQQ"], "max_order_usd": "150000", "universe_whitelist": mode},
+    )
+
+
+def test_whitelist_extra_none(tmp_path: Path) -> None:
+    s = _settings(tmp_path, mode="none")
+    assert whitelist_extra(s, DAY) == frozenset()
+    limits = RiskLimits.from_settings(s, whitelist_extra(s, DAY))
+    assert rules(check_targets({"WDC": 0.1}, limits)) == ["whitelist"]  # 行为不变
+
+
+def test_whitelist_extra_sp500(tmp_path: Path) -> None:
+    s = _settings(tmp_path)
+    extra = whitelist_extra(s, DAY)
+    limits = RiskLimits.from_settings(s, extra)
+    assert check_targets({"WDC": 0.1, "QQQ": 0.5}, limits) == []
+    assert check_holdings({"GONE"}, limits) == []  # 40 天前调出：仍在白名单
+    assert rules(check_holdings({"OLD"}, limits)) == ["whitelist"]  # 70 天前调出
+
+
+def test_whitelist_extra_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="成分名单"):
+        whitelist_extra(_settings(tmp_path, write=False), DAY)

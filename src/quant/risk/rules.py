@@ -1,7 +1,7 @@
 """风控规则（PROJECT_PLAN 6.4）。纯函数：返回违规列表，任一违规即拒绝整批订单。
 
-本模块覆盖：标的白名单、单标的权重上限、总仓位上限（不用保证金）、单笔订单金额上限、
-单日换手上限、信号数据新鲜度、报价新鲜度。
+本模块覆盖：标的白名单（固定列表，可另加近期标普 500 成分股）、单标的权重上限、
+总仓位上限（不用保证金）、单笔订单金额上限、单日换手上限、信号数据新鲜度、报价新鲜度。
 对账一致性、熔断开关、交易模式保护由 Executor 在下单流程中检查
 （engine/reconcile.py、core/safety.py）。
 """
@@ -10,15 +10,18 @@ from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from quant.core.calendar import TradingCalendar
 from quant.core.models import OrderRequest, Quote, Side
 from quant.core.settings import ConfigError, Settings
+from quant.data.universe import constituents_path, load_constituents
 
 # 权重和允许的浮点误差
 _WEIGHT_EPS = 1e-9
+# 动态白名单回看天数：持有的动量股在月中被调出指数时仍可持有到下次调仓并卖出
+UNIVERSE_LOOKBACK_DAYS = 62
 
 
 @dataclass(frozen=True)
@@ -39,7 +42,8 @@ class RiskLimits:
     max_daily_turnover: float
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> RiskLimits:
+    def from_settings(cls, settings: Settings, extra_symbols: Collection[str] = ()) -> RiskLimits:
+        """白名单 = risk.symbol_whitelist ∪ extra_symbols（见 whitelist_extra）。"""
         r = settings.risk
         if not r.symbol_whitelist:
             raise ConfigError("risk.symbol_whitelist 为空，拒绝执行")
@@ -48,12 +52,26 @@ class RiskLimits:
                 f"TRADING_MODE={settings.trading_mode} 未配置 risk.max_order_usd，拒绝执行"
             )
         return cls(
-            whitelist=frozenset(r.symbol_whitelist),
+            whitelist=frozenset(r.symbol_whitelist) | frozenset(extra_symbols),
             max_symbol_weight=r.max_symbol_weight,
             max_total_weight=r.max_total_weight,
             max_order_usd=r.max_order_usd,
             max_daily_turnover=r.max_daily_turnover,
         )
+
+
+def whitelist_extra(settings: Settings, d: date) -> frozenset[str]:
+    """risk.universe_whitelist=sp500 时：[d − 62 天, d] 内任一时点的标普 500 成分股。
+
+    名单文件不存在时拒绝执行（ConfigError），不静默退化。
+    """
+    if settings.risk.universe_whitelist == "none":
+        return frozenset()
+    path = constituents_path(settings.data_dir)
+    if not path.exists():
+        raise ConfigError(f"risk.universe_whitelist=sp500 但成分名单不存在：{path}，拒绝执行")
+    universe = load_constituents(path)
+    return universe.all_symbols(d - timedelta(days=UNIVERSE_LOOKBACK_DAYS), d)
 
 
 def summarize(violations: Iterable[Violation]) -> str:

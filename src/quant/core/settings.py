@@ -81,6 +81,8 @@ class RiskSettings(_Section):
     max_order_usd: Decimal | None = Field(None, gt=0)
     # 单日换手上限：当日成交额 / 净值（#30 确认：2.2）
     max_daily_turnover: float = Field(2.2, gt=0, le=10)
+    # sp500：白名单另加近 62 天内的标普 500 成分股（组合策略的动量仓，#47）
+    universe_whitelist: Literal["none", "sp500"] = "none"
 
 
 class DataSettings(_Section):

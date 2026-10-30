@@ -62,7 +62,9 @@ from quant.risk.rules import (
     check_signal_freshness,
     check_targets,
     summarize,
+    whitelist_extra,
 )
+from quant.strategies import STRATEGIES
 
 log = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
@@ -120,6 +122,14 @@ def limit_price(ref: Decimal, side: Side, offset: Decimal) -> Decimal:
     return px
 
 
+def _min_weight_diff(strategy: str, configured: float) -> float:
+    """策略类声明了 min_weight_diff 时用策略的值（与 Backtester 一致），否则用配置值。"""
+    cls = STRATEGIES.get(strategy)
+    if cls is not None and cls.min_weight_diff is not None:
+        return cls.min_weight_diff
+    return configured
+
+
 class Executor:
     def __init__(
         self,
@@ -143,7 +153,8 @@ class Executor:
         self._cal = calendar or get_calendar()
         self._now = now or (lambda: datetime.now(UTC))
         self._sleep = sleep
-        self._limits = RiskLimits.from_settings(settings)
+        self._settings = settings
+        self._limits = RiskLimits.from_settings(settings)  # 构造时检查配置；run 时加上动态白名单
         ex = settings.executor
         self._ex = ex
         self._offset = Decimal(str(ex.limit_offset))
@@ -151,7 +162,7 @@ class Executor:
         self._plan_params = OrderPlanParams(
             cash_buffer=Decimal(str(ex.cash_buffer)),
             min_trade_usd=Decimal(str(ex.min_trade_usd)),
-            min_weight_diff=Decimal(str(ex.min_weight_diff)),
+            min_weight_diff=Decimal(str(_min_weight_diff(strategy, ex.min_weight_diff))),
             # 估算买入成本的余量须覆盖限价上浮，另留 0.3% 给佣金与价格变动
             price_margin=self._offset + Decimal("0.003"),
         )
@@ -168,6 +179,9 @@ class Executor:
         self._trade_date = trade_date
         self._active, self._done = [], []
         try:
+            self._limits = RiskLimits.from_settings(
+                self._settings, whitelist_extra(self._settings, trade_date)
+            )
             report = self._run(trade_date)
         except _Halted as e:
             report = self._report("halted", str(e))
