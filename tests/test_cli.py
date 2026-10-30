@@ -1,6 +1,7 @@
 """命令行回测端到端测试：假数据源 + 临时数据目录，不访问网络、不写数据库。"""
 
 import io
+import json
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -95,3 +96,39 @@ def test_main_reports_errors(
     monkeypatch.setenv("TRADING_MODE", "bogus")
     assert main(ARGS) == 1
     assert "TRADING_MODE" in capsys.readouterr().err
+
+
+# ---- quant preview（#47 第二份计划任务 7） ----
+
+
+def test_preview_combo_without_db(tmp_path: Path) -> None:
+    from quant.cli import preview
+    from quant.data.universe import constituents_path
+    from quant.jobs.daily import JobContext
+    from test_jobs import COMBO_PARAMS, DAY, UNIVERSE_CSV, TigerLike, UniverseFake
+
+    path = constituents_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(UNIVERSE_CSV, encoding="utf-8")
+    cfg = Settings(broker="tiger", data_dir=tmp_path, data={"primary": "tiger"},
+                   risk={"symbol_whitelist": ["QQQ"], "max_order_usd": "150000"})  # fmt: skip
+    args = build_parser().parse_args(
+        ["preview", "--strategy", "combo", "--date", DAY.isoformat(), "--sync",
+         "--universe", "sina", "--param", f"swing={json.dumps(COMBO_PARAMS['swing'])}"]
+    )  # fmt: skip
+    made: list[JobContext] = []
+
+    def factory(s: Settings, notifier: object) -> JobContext:
+        assert s.strategy.name == "combo" and s.data.universe == "sina"
+        ctx = JobContext(s, None, notifier, ParquetStore(tmp_path), TigerLike(),  # type: ignore[arg-type]
+                         universe_provider=UniverseFake())  # fmt: skip
+        ctx.sleep = lambda x: None
+        made.append(ctx)
+        return ctx
+
+    out = io.StringIO()
+    assert preview(args, cfg, out, ctx_factory=factory) == 0
+    text = out.getvalue()
+    assert "覆盖率" in text and "目标仓位" in text and "AAA" in text
+    assert "择时系数" in text and "动量排名" in text
+    assert made[0].engine is None  # 不连接数据库：不写 signals / job_runs

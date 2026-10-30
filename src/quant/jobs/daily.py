@@ -230,16 +230,7 @@ def daily_signal(ctx: JobContext, d: date) -> str:
         last = bars.index[-1].date() if len(bars) else None
         if last != d:
             raise RuntimeError(f"{sym} 最新数据为 {last}，不是 {d}")
-    data_dir = ctx.settings.data_dir
-    context = Context(
-        as_of=d,
-        loader=ctx.store.prices,
-        params=params,
-        field_loader=store_field_loader([ctx.store, universe_store(data_dir)]),
-        events=load_events(data_dir),
-        universe=load_constituents(constituents_path(data_dir)) if strategy.uses_universe else None,
-    )
-    weights = strategy.run(context)
+    weights = strategy.run(build_context(ctx, d))
     with Session(ctx.engine) as s, s.begin():
         prev = s.scalar(
             select(Signal.target_weights)
@@ -265,6 +256,20 @@ def daily_signal(ctx: JobContext, d: date) -> str:
         Level.INFO,
     )
     return text
+
+
+def build_context(ctx: JobContext, d: date) -> Context:
+    """信号日 d 的策略 Context：本地数据（主目录优先、其次候选池目录）、事件日历、成分名单。"""
+    strategy = get_strategy(ctx.strategy_name)
+    data_dir = ctx.settings.data_dir
+    return Context(
+        as_of=d,
+        loader=ctx.store.prices,
+        params=ctx.settings.strategy.params,
+        field_loader=store_field_loader([ctx.store, universe_store(data_dir)]),
+        events=load_events(data_dir),
+        universe=load_constituents(constituents_path(data_dir)) if strategy.uses_universe else None,
+    )
 
 
 def daily_execute(ctx: JobContext, d: date) -> str:

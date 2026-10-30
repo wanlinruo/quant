@@ -36,6 +36,8 @@ uv run quant backtest --start 2016-10-28 --no-db
                # 命令行回测；佣金默认取 configs/base.yaml（老虎固定式套餐，#5），结果默认写入 QUANT_DATABASE_URL
 uv run quant job daily_data --date 2026-10-28   # 手动运行每日任务（遵守 job_runs 幂等，失败的加 --rerun-failed）
 uv run quant baseline          # 把券商当前持仓记为对账基准（首次启用模拟盘）
+uv run quant preview --strategy combo --sync [--universe sina]
+               # 预览目标仓位（同步数据、不下单、不写数据库）；服务器上在 scheduler 容器内运行
 uv run quant trading status    # 熔断开关；enable --yes 只能人工执行
 uv run quant notify-test  # 发送测试通知（企业微信，需配置 QUANT_NOTIFY_WEBHOOK_URL）
 make sync-data # 从服务器同步 Parquet 数据（Phase 4 起）

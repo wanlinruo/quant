@@ -14,8 +14,8 @@ import argparse
 import json
 import logging
 import sys
-from collections.abc import Sequence
-from datetime import UTC, date, datetime
+from collections.abc import Callable, Sequence
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -33,7 +33,7 @@ from quant.engine.runner import (
     save_result,
 )
 from quant.jobs.daily import JOBS
-from quant.strategies import STRATEGIES
+from quant.strategies import STRATEGIES, get_strategy
 
 
 def _parse_param(text: str) -> tuple[str, Any]:
@@ -87,6 +87,13 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument(
         "--user-agent", required=True, help='SEC 要求的联系方式，如 "名称 邮箱"（不会写入仓库）'
     )
+
+    pv = sub.add_parser("preview", help="预览策略的目标仓位（不下单、不写数据库）")
+    pv.add_argument("--strategy", required=True, choices=sorted(STRATEGIES))
+    pv.add_argument("--date", type=date.fromisoformat, help="信号日，默认最近一个已收盘交易日")
+    pv.add_argument("--sync", action="store_true", help="先按 daily_data 同步数据（不写 job_runs）")
+    pv.add_argument("--universe", choices=["sina", "yfinance"], help="覆盖 data.universe")
+    pv.add_argument("--param", type=_parse_param, action="append", default=[], metavar="K=V")
 
     tr = sub.add_parser("trading", help="查看或人工切换熔断开关 trading_enabled")
     tr.add_argument("action", choices=["status", "enable", "disable"])
@@ -209,6 +216,76 @@ def run_job_command(args: argparse.Namespace, settings: Settings, out: Any = Non
     return 0 if result in ("success", "skipped") else 1
 
 
+class _PrintNotifier:
+    def __init__(self, out: Any) -> None:
+        self.out = out
+
+    def send(self, title: str, body: str, level: Any) -> None:
+        print(f"[{level}] {title}\n{body}", file=self.out)
+
+
+def preview(
+    args: argparse.Namespace,
+    settings: Settings,
+    out: Any = None,
+    ctx_factory: Callable[[Settings, Any], Any] | None = None,
+) -> int:
+    """按 daily_signal 的方式算出目标仓位并打印；不连接券商、不写数据库、不发通知。"""
+    from quant.core.settings import StrategySettings
+    from quant.engine.executor import ET
+    from quant.jobs.daily import JobContext, _weights_text, build_context, daily_data
+    from quant.strategies.combo import Combo, ComboParams, vol_factor
+    from quant.strategies.momentum_select import MomentumParams, rank_momentum, rebalance_day
+
+    out = out or sys.stdout
+    if args.param:
+        params: dict[str, Any] = dict(args.param)
+    elif args.strategy == settings.strategy.name:
+        params = dict(settings.strategy.params)
+    else:
+        params = {}
+    update: dict[str, Any] = {"strategy": StrategySettings(name=args.strategy, params=params)}
+    if args.universe:
+        update["data"] = settings.data.model_copy(update={"universe": args.universe})
+    cfg = settings.model_copy(update=update)
+    notifier = _PrintNotifier(out)
+
+    def default_factory(s: Settings, n: Any) -> JobContext:
+        return JobContext.from_settings(s, None, n)  # type: ignore[arg-type]  # 不使用数据库
+
+    ctx = (ctx_factory or default_factory)(cfg, notifier)
+    cal = get_calendar()
+    d = args.date or cal.last_completed_trading_day(datetime.now(UTC).astimezone(ET))
+    if args.sync:
+        print(f"数据：{daily_data(ctx, d)}", file=out)
+    context = build_context(ctx, d)
+    strategy = get_strategy(args.strategy)
+    weights = strategy.run(context)
+    print(f"信号日 {d}，策略 {args.strategy}", file=out)
+    print(f"目标仓位：{_weights_text(weights)}", file=out)
+    if isinstance(strategy, Combo):
+        p = ComboParams.from_mapping(params)
+        close = context.field([p.vol_symbol], "close", d - timedelta(days=60))[p.vol_symbol]
+        factor = vol_factor(close, p.vol_window, p.vol_threshold, p.vol_scale)
+        print(f"择时系数：{factor}（{p.vol_symbol} 近 {p.vol_window} 日波动率阈值 "
+              f"{p.vol_threshold:.0%}）", file=out)  # fmt: skip
+        mparams = p.momentum_params()
+    else:
+        mparams = params
+    if strategy.uses_universe and context.universe is not None:
+        me = rebalance_day(cal, d)
+        members = sorted(context.universe.members(me))
+        start = me - timedelta(days=450)
+        ranked = rank_momentum(
+            context.field(members, "close", start, me),
+            context.field(members, "volume", start, me),
+            members,
+            MomentumParams.from_mapping(mparams),
+        )
+        print(f"动量排名（{me}，{len(members)} 只成分股）前 10：{', '.join(ranked[:10])}", file=out)
+    return 0
+
+
 def baseline(args: argparse.Namespace, settings: Settings, out: Any = None) -> int:
     """首次启用模拟盘（或人工核对后）把券商当前持仓写为当日快照，作为对账起点。"""
     from sqlalchemy import func, select
@@ -314,6 +391,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return baseline(args, settings)
         elif args.command == "trading":
             return trading(args, settings)
+        elif args.command == "preview":
+            return preview(args, settings)
         elif args.command == "events":
             return sync_earnings(args, settings)
     except (ConfigError, DataValidationError, ValueError) as e:
