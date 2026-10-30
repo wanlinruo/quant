@@ -3,7 +3,7 @@
 - 数据源为新浪日 K（不占老虎历史日线额度）；新浪不做拆股调整，用老虎拆股记录换算到最新口径
   （adj_close = 调整后的收盘价，不含分红）。
 - 存放在单独的 Parquet 目录（universe_bars），不与老虎复权数据混在一起。
-- 拿不到的记入 missing；校验不通过的（如没有记录的拆股表现为单日 -50% 以上）记入 excluded
+- 拿不到的记入 missing；校验不通过的（单日涨跌超过 60%，如没有记录的合股）记入 excluded
   并删除本地数据，不参与排序。两者合计使覆盖率低于 min_coverage 时整体失败。
 """
 
@@ -24,12 +24,36 @@ from quant.data.store import ParquetStore
 from quant.data.validate import Issue, Report, validate_bars
 
 SplitSource = Callable[[Sequence[str], date, date], dict[str, list[tuple[date, float]]]]
-UNIVERSE_MAX_MOVE = 0.4
+# 与回测一致（scripts/research/combo.py MAX_MOVE）：真实财报跳空可达 40–60%；
+# 未记录的合股（价格 ×2 以上）仍会被识别。未记录的拆股表现为暴跌，只会让该股排名靠后，不会被误选。
+UNIVERSE_MAX_MOVE = 0.6
 MIN_COVERAGE = 0.95
 
 
 def universe_store(data_dir: Path) -> ParquetStore:
     return ParquetStore(data_dir / "universe_bars")
+
+
+def frozen_members_path(data_dir: Path, rebalance: date) -> Path:
+    return data_dir / "universe" / f"members_{rebalance.isoformat()}.txt"
+
+
+def freeze_members(data_dir: Path, rebalance: date, members: Collection[str]) -> None:
+    """调仓日候选池同步成功后冻结当日成分股：月内排序输入不再变化（与回测一致）。"""
+    path = frozen_members_path(data_dir, rebalance)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text("\n".join(sorted(members)) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def load_frozen_members(data_dir: Path, rebalance: date) -> frozenset[str] | None:
+    path = frozen_members_path(data_dir, rebalance)
+    if not path.exists():
+        return None
+    return frozenset(
+        line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    )
 
 
 @dataclass

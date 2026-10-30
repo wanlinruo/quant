@@ -458,3 +458,62 @@ class TestComboJobs:
             0.4 * 0.25
         )  # 动量仓第一名，来自候选池目录
         assert "BBB" not in sig.target_weights and "CCC" not in sig.target_weights
+
+
+class FailingEarnings(TigerLike):
+    def earnings_calendar(
+        self, symbols: object, start: date, end: date, cal: object
+    ) -> dict[str, list[date]]:
+        from quant.data.providers.base import DataUnavailableError
+
+        raise DataUnavailableError("老虎财报日历超时")
+
+
+class NoEarnings(TigerLike):
+    def earnings_calendar(
+        self, symbols: object, start: date, end: date, cal: object
+    ) -> dict[str, list[date]]:
+        return {}
+
+
+@pytest.mark.db
+@needs_db
+class TestComboReviewFixes:
+    def test_ranking_inputs_frozen_within_month(self, engine: Engine, tmp_path: Path) -> None:
+        from quant.data.universe import constituents_path
+        from quant.jobs.daily import build_context
+
+        ctx = combo_ctx(engine, tmp_path, last=NEXT)
+        daily_data(ctx, DAY)
+        # 数据集事后补录了 09-15 生效的 DDD（早于调仓日 09-30）
+        constituents_path(tmp_path).write_text(
+            UNIVERSE_CSV + '2026-09-15,"AAA,BBB,CCC,DDD"\n', encoding="utf-8"
+        )
+        uni = UniverseFake(last=NEXT)
+        ctx.universe_provider = uni
+        daily_data(ctx, NEXT)
+        assert uni.calls == []  # 月内不再拉取候选池
+        u = build_context(ctx, NEXT).universe
+        assert u is not None and u.members(date(2026, 9, 30)) == {"AAA", "BBB", "CCC"}
+
+    def test_earnings_failure_uses_local_file(self, engine: Engine, tmp_path: Path) -> None:
+        ctx = combo_ctx(engine, tmp_path, last=NEXT)
+        daily_data(ctx, DAY)  # 写入本地财报日
+        ctx.provider = FailingEarnings(last=NEXT)
+        daily_data(ctx, NEXT)  # 不失败
+        assert any("财报日历" in body for _, body, _ in ctx.notifier.sent)  # type: ignore[attr-defined]
+
+    def test_earnings_failure_without_local_file_fails(
+        self, engine: Engine, tmp_path: Path
+    ) -> None:
+        from quant.data.providers.base import DataUnavailableError
+
+        ctx = combo_ctx(engine, tmp_path, provider=FailingEarnings())
+        with pytest.raises(DataUnavailableError):
+            daily_data(ctx, DAY)
+
+    def test_missing_earnings_dates_warned(self, engine: Engine, tmp_path: Path) -> None:
+        ctx = combo_ctx(engine, tmp_path, provider=NoEarnings())
+        daily_data(ctx, DAY)
+        bodies = [body for _, body, _ in ctx.notifier.sent]  # type: ignore[attr-defined]
+        assert any("TLT" in b and "GLD" in b and "财报日" in b for b in bodies)

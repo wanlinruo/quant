@@ -87,12 +87,12 @@ def test_split_adjusted_when_recorded(tmp_path: Path) -> None:
     assert bars["adj_close"].iloc[0] == pytest.approx(50.0)
 
 
-def test_unrecorded_split_excluded(tmp_path: Path) -> None:
+def test_unrecorded_split_kept_but_not_a_momentum_pick(tmp_path: Path) -> None:
+    # 阈值 60% 后，未记录的 2 拆 1（-50%）不再被排除；它表现为暴跌，排序时自然靠后
     store = universe_store(tmp_path)
     m = members(40)
     r = sync_universe_bars(store, FakeSina(halved=["S001"]), no_splits, CAL, m, START, END)
-    assert "S001" in r.excluded
-    assert "S001" not in store.symbols()
+    assert "S001" not in r.excluded and "S001" in store.symbols()
 
 
 def test_skips_up_to_date(tmp_path: Path) -> None:
@@ -102,3 +102,25 @@ def test_skips_up_to_date(tmp_path: Path) -> None:
     sina = FakeSina()
     r = sync_universe_bars(store, sina, no_splits, CAL, m, START, END)
     assert sina.calls == [] and sorted(r.skipped) == m
+
+
+class JumpSina(FakeSina):
+    """S900 在 SPLIT_DAY 财报跳空 +52%（真实），S901 价格翻倍（未记录的 1 合 2）。"""
+
+    def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        df = super().daily_bars(symbol, start, end)
+        k = {"S900": 1.52, "S901": 2.0}.get(symbol)
+        if k:
+            m = df.index >= pd.Timestamp(SPLIT_DAY)
+            for c in ("open", "high", "low", "close"):
+                df.loc[m, c] = df.loc[m, c] * k
+        return df
+
+
+def test_threshold_matches_backtest(tmp_path: Path) -> None:
+    # 与回测一致的 60%：真实的 +52% 财报跳空保留；+100%（未记录的合股）排除
+    store = universe_store(tmp_path)
+    m = [*members(40), "S900", "S901"]
+    r = sync_universe_bars(store, JumpSina(), no_splits, CAL, m, START, END)
+    assert "S900" not in r.excluded and "S900" in store.symbols()
+    assert "S901" in r.excluded

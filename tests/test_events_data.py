@@ -72,3 +72,12 @@ def test_load_events(tmp_path: Path) -> None:
     ev = load_events(tmp_path)
     assert ev.earnings["AAPL"] == (date(2024, 5, 3), date(2026, 10, 31))
     assert ev.earnings["MU"] == (date(2026, 9, 24),)
+
+
+def test_sync_keeps_old_dates_when_symbol_missing_from_fetch(tmp_path: Path) -> None:
+    path = live_earnings_path(tmp_path)
+    first = {"MSFT": [date(2026, 10, 29)], "AAPL": [date(2026, 10, 31)]}
+    sync_live_earnings(path, lambda a, b: first, date(2026, 10, 1))
+    # 下一次接口漏返了 MSFT：保留其区间内的旧日期，而不是清空
+    got = sync_live_earnings(path, lambda a, b: {"AAPL": [date(2026, 10, 31)]}, date(2026, 10, 2))
+    assert got["MSFT"] == (date(2026, 10, 29),)

@@ -65,13 +65,14 @@ def sync_live_earnings(
     """拉取 [today - back_days, today + ahead_days] 的反应日并与本地文件合并保存。
 
     区间内以本次结果为准（公司改期时旧日期不残留）；区间外的旧日期保留（重放需要更早的历史）。
+    本次结果中完全没有的代码保留全部旧日期（接口漏返时不清空）。
     """
     start, end = today - timedelta(days=back_days), today + timedelta(days=ahead_days)
     fresh = fetch(start, end)
     old = load_earnings(path) if path.exists() else {}
     merged: dict[str, set[date]] = {}
     for sym, days in old.items():
-        merged[sym] = {d for d in days if d < start or d > end}
+        merged[sym] = {d for d in days if d < start or d > end} if fresh.get(sym) else set(days)
     for sym, new in fresh.items():
         merged.setdefault(sym, set()).update(new)
     out = {s: tuple(sorted(ds)) for s, ds in merged.items() if ds}
