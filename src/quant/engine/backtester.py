@@ -23,6 +23,7 @@ import pandas as pd
 from quant.broker.sim import CostModel, SimBroker
 from quant.core.calendar import TradingCalendar
 from quant.core.models import Bar, Fill, OrderRequest, OrderType, Side, make_client_order_id
+from quant.data.store import ParquetStore
 from quant.engine.metrics import Metrics, buy_and_hold, compute_metrics, drawdown
 from quant.engine.orders import OrderPlanParams, PlannedOrder, plan_orders
 from quant.strategies.base import FIELDS, Context, FieldLoader, Strategy
@@ -56,6 +57,25 @@ def field_loader_from_bars(bars: Mapping[str, pd.DataFrame]) -> FieldLoader:
         if start is not None:
             out = out.loc[pd.Timestamp(start) :]
         out = out.reindex(columns=list(symbols))
+        out.index.name = "date"
+        return out
+
+    return load
+
+
+def store_field_loader(stores: Sequence[ParquetStore]) -> FieldLoader:
+    """由本地 Parquet 构造 FieldLoader（实盘每日任务用）：每个代码取第一个有数据的 store，
+    价格按 adjusted_ohlc 复权；所有 store 都没有的代码为整列 NaN。"""
+
+    def load(symbols: Sequence[str], name: str, start: date | None, end: date) -> pd.DataFrame:
+        cols: dict[str, pd.Series] = {}
+        for s in symbols:
+            for store in stores:
+                bars = store.read_bars(s, start, end)
+                if len(bars):
+                    cols[s] = adjusted_ohlc(bars)[name]
+                    break
+        out = pd.DataFrame(cols).sort_index().reindex(columns=list(symbols))
         out.index.name = "date"
         return out
 

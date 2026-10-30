@@ -135,6 +135,8 @@ class Strategy(ABC):
     min_weight_diff: ClassVar[float | None] = None
     # 数据校验的单日涨跌阈值：超过即视为可疑数据（如未复权的拆股），停止运行
     max_daily_move: ClassVar[float] = 0.15
+    # 需要“当时成分股”与候选池日线（Context.universe）：每日任务另外同步成分名单与候选池数据
+    uses_universe: ClassVar[bool] = False
 
     @abstractmethod
     def target_weights(self, ctx: Context) -> dict[str, float]:
@@ -147,6 +149,10 @@ class Strategy(ABC):
     def warmup_days(self, params: Mapping[str, Any]) -> int:
         """回测开始前需要的历史交易日数。"""
         return 0
+
+    def earnings_symbols(self, params: Mapping[str, Any]) -> list[str]:
+        """需要财报日的标的（每日任务同步实盘财报日历）；默认不需要。"""
+        return []
 
     def run(self, ctx: Context) -> dict[str, float]:
         """调用方使用的入口：计算并校验权重。"""

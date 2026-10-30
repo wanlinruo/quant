@@ -43,6 +43,12 @@ class ParquetStore:
             m.group(1) for m in found if m and (self._daily / m.group(0) / "data.parquet").is_file()
         )
 
+    def delete(self, symbol: str) -> None:
+        """删除该代码的全部本地日线（不存在时什么都不做）。"""
+        path = self._path(symbol)
+        if path.is_file():
+            path.unlink()
+
     def _read_raw(self, symbol: str) -> pd.DataFrame | None:
         path = self._path(symbol)
         if not path.is_file():

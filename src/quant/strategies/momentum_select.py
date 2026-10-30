@@ -93,6 +93,7 @@ class MomentumSelect(Strategy):
     min_weight_diff: ClassVar[float | None] = 0.10
     # 个股财报跳空可达 40–50%（如 AMD 2016-04 +52%）
     max_daily_move: ClassVar[float] = 0.6
+    uses_universe: ClassVar[bool] = True
 
     def __init__(self, calendar: TradingCalendar | None = None) -> None:
         self._cal = calendar or get_calendar()

@@ -97,6 +97,7 @@ class Combo(Strategy):
     # 同时足够大，价格漂移不触发来回调仓（动量仓需涨约 40% 才触发）
     min_weight_diff: ClassVar[float | None] = 0.04
     max_daily_move: ClassVar[float] = 0.6
+    uses_universe: ClassVar[bool] = True
 
     def __init__(self, calendar: TradingCalendar | None = None) -> None:
         cal = calendar or get_calendar()
@@ -108,6 +109,11 @@ class Combo(Strategy):
         p = ComboParams.from_mapping(params)
         syms = self._swing.symbols(p.swing_params())
         return syms if p.vol_symbol in syms else [*syms, p.vol_symbol]
+
+    def earnings_symbols(self, params: Mapping[str, Any]) -> list[str]:
+        """V2 仓的个股（动量仓持有过财报，不需要财报日）。"""
+        p = ComboParams.from_mapping(params)
+        return self._swing.earnings_symbols(p.swing_params()) if p.swing_weight > 0 else []
 
     def warmup_days(self, params: Mapping[str, Any]) -> int:
         p = ComboParams.from_mapping(params)

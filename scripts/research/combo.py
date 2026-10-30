@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import pickle
 import time
-import urllib.request
 from collections.abc import Collection, Mapping
 from concurrent.futures import ProcessPoolExecutor
 from datetime import UTC, date, datetime, timedelta
@@ -36,7 +35,7 @@ from quant.data.providers import edgar
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.yfinance import YFinanceProvider
 from quant.data.store import ParquetStore
-from quant.data.universe import load_constituents
+from quant.data.universe import constituents_path, load_constituents, sync_constituents
 from quant.engine.backtester import Backtester, field_loader_from_bars
 from quant.engine.evaluation import combo_checks
 from quant.engine.metrics import Metrics, buy_and_hold, compute_metrics
@@ -49,10 +48,6 @@ from quant.strategies.universe import Constituents
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = ROOT / "docs" / "research" / "2026-10-30-combo.md"
-CONSTITUENTS_URL = (
-    "https://raw.githubusercontent.com/fja05680/sp500/master/"
-    "S%26P%20500%20Historical%20Components%20%26%20Changes%20(Updated).csv"
-)
 DATA_START = date(2013, 1, 2)  # 动量排序要 252 日历史；V2 要 120 日线 + 250 日重放
 UNIVERSE_START = date(2014, 6, 1)
 START = date(2015, 1, 2)
@@ -105,12 +100,6 @@ def split_metrics(equity: pd.Series, oos_start: date) -> tuple[Metrics, Metrics,
 
 
 # ---- 数据 ----
-
-
-def fetch_constituents(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(CONSTITUENTS_URL, timeout=60) as resp:  # 固定的 https 地址
-        path.write_bytes(resp.read())
 
 
 def load_all_bars(
@@ -364,11 +353,8 @@ def main() -> int:
     cal = get_calendar()
     end = args.end or cal.last_completed_trading_day(datetime.now(UTC))
 
-    path = args.constituents or settings.data_dir / "universe" / "sp500_history.csv"
-    if not path.exists():
-        print("下载成分名单…", flush=True)
-        fetch_constituents(path)
-    universe = load_constituents(path)
+    path = args.constituents or constituents_path(settings.data_dir)
+    universe = load_constituents(path) if path.exists() else sync_constituents(path, date.today())
 
     combo = Combo(cal)
     fixed = set(combo.symbols({})) | {"SPY"}

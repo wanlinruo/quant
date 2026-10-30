@@ -304,6 +304,9 @@ class SwingPullback(Strategy):
     def symbols(self, params: Mapping[str, Any]) -> list[str]:
         return SwingParams.from_mapping(params).symbols
 
+    def earnings_symbols(self, params: Mapping[str, Any]) -> list[str]:
+        return list(SwingParams.from_mapping(params).stocks)
+
     def warmup_days(self, params: Mapping[str, Any]) -> int:
         p = SwingParams.from_mapping(params)
         return p.trend_ma + p.replay_days + 30
