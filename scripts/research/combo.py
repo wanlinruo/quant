@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import pickle
 import time
 import urllib.request
 from collections.abc import Collection, Mapping
@@ -391,7 +392,7 @@ def main() -> int:
     print(f"回测 {len(runs)} 组，耗时 {time.time() - t0:.0f} 秒", flush=True)
     saved = settings.data_dir / "research" / "combo_runs.pkl"  # 报告出错时可复用，不入库
     saved.parent.mkdir(parents=True, exist_ok=True)
-    pd.to_pickle(runs, saved)
+    saved.write_bytes(pickle.dumps(runs))
 
     def px(s: str) -> pd.Series:
         a = bars[s]["adj_close"]
