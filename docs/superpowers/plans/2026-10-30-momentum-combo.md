@@ -1,18 +1,18 @@
-# 组合策略 combo（研究与回测阶段）Implementation Plan
+# 组合策略 combo（研究与回测阶段）实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **给执行者：** 必须使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 按任务逐个实施本计划。步骤用复选框（`- [ ]`）跟踪进度。
 
-**Goal:** 实现 `combo` 策略（40% 动量选股 + 60% 七姐妹 V2 + QQQ 波动率择时），用回测引擎在标普 500 历史成分股上正式评估，输出研究报告。
+**目标：** 实现 `combo` 策略（40% 动量选股 + 60% 七姐妹 V2 + QQQ 波动率择时），用回测引擎在标普 500 历史成分股上正式评估，输出研究报告。
 
-**Architecture:** 新增两个纯计算策略类：`momentum_select`（月度动量选股）和 `combo`（组合动量、`swing_pullback` 与波动率择时，输出合并后的目标权重）。“当时的成分股”作为纯数据对象 `Constituents` 经 `Context.universe` 注入。研究脚本在 Mac 上用 yfinance 与 fja05680/sp500 历史成分名单跑 10 组回测并按设计第 7 节判定。
+**架构：** 新增两个纯计算策略类：`momentum_select`（月度动量选股）和 `combo`（组合动量、`swing_pullback` 与波动率择时，输出合并后的目标权重）。“当时的成分股”作为纯数据对象 `Constituents` 经 `Context.universe` 注入。研究脚本在 Mac 上用 yfinance 与 fja05680/sp500 历史成分名单跑 10 组回测并按设计第 7 节判定。
 
-**Tech Stack:** Python 3.12、pandas、numpy、uv、pytest、ruff、mypy strict。
+**技术栈：** Python 3.12、pandas、numpy、uv、pytest、ruff、mypy strict。
 
-**Spec:** `docs/superpowers/specs/2026-10-30-momentum-combo-design.md`
+**设计文档：** `docs/superpowers/specs/2026-10-30-momentum-combo-design.md`
 
 **范围说明：** 单只上限 30%（风控 `max_symbol_weight`）属于风控配置，随替换上线一起改；按 40/60 与 V2 单仓上限 30%，合并后单只最多约 0.4 × 0.25 + 0.6 × 0.3 = 28%。另： 本计划覆盖设计第 4 节（规则）、5.1（回测数据）、第 6 节中策略 / Context / 研究脚本部分、第 7 节（评估）。**实盘数据通路**（新浪月度批量排序、成分股月度快照任务、动态白名单、`max_symbol_weight`、老虎额度核实、实盘财报日、`jobs/daily.py` 为策略提供 `field_loader` / `events` / `universe`）放到第二份计划，在研究通过且用户确认替换后再写——研究不通过时这些工作都用不上。
 
-## Global Constraints
+## 全局约束
 
 - 策略只输出目标权重，纯计算、无 I/O；回测与实盘同一个类（CLAUDE.md）。
 - 只买入；不用 PSQ / 反向 ETF、杠杆、期权、保证金。
@@ -26,25 +26,25 @@
 - 不提交密钥、账户号；SEC User-Agent 只经命令行参数传入，不写入仓库和日志。
 - 测试统一用 `TRADING_MODE=sim`；`make check` 与 CI 相同。
 
-## Review Focus
+## 评审重点（测试之外最容易出问题的输入）
 
-1. **成分股代码与 Yahoo 代码不一致**（`BRK.B` vs `BRK-B`）：下载不能静默失败，`BRK.B` 应能拿到数据——Task 2 的测试固定这一点。
-2. **月末当天的 as_of**：as_of 恰为月末交易日时应使用当天的新排名（次日调仓），而不是上个月的——Task 4 测试。
-3. **成分股名单早于第一条记录的日期**：`members()` 应报错，而不是返回空集合导致静默空仓——Task 1 测试。
-4. **择时数据不足**（QQQ 不足 21 个收盘价或含 NaN）：系数应为 1（不减仓），而不是 NaN 让权重校验失败——Task 5 测试。
-5. **两仓同一标的**（如 MU 同时在动量和 V2）：权重相加而不是覆盖——Task 5 测试。
+1. **成分股代码与 Yahoo 代码不一致**（`BRK.B` vs `BRK-B`）：下载不能静默失败，`BRK.B` 应能拿到数据——任务 2 的测试固定这一点。
+2. **月末当天的 as_of**：as_of 恰为月末交易日时应使用当天的新排名（次日调仓），而不是上个月的——任务 4 测试。
+3. **成分股名单早于第一条记录的日期**：`members()` 应报错，而不是返回空集合导致静默空仓——任务 1 测试。
+4. **择时数据不足**（QQQ 不足 21 个收盘价或含 NaN）：系数应为 1（不减仓），而不是 NaN 让权重校验失败——任务 5 测试。
+5. **两仓同一标的**（如 MU 同时在动量和 V2）：权重相加而不是覆盖——任务 5 测试。
 
 ---
 
-### Task 1: 成分股数据对象与 Context 注入
+### 任务 1： 成分股数据对象与 Context 注入
 
-**Files:**
-- Create: `src/quant/strategies/universe.py`、`src/quant/data/universe.py`
-- Modify: `src/quant/strategies/base.py`（`Context` 增加字段）、`src/quant/engine/backtester.py`（`Backtester.__init__` 增加 `universe` 参数并传入 Context）
-- Test: `tests/test_universe.py`
+**文件：**
+- 新建： `src/quant/strategies/universe.py`、`src/quant/data/universe.py`
+- 修改： `src/quant/strategies/base.py`（`Context` 增加字段）、`src/quant/engine/backtester.py`（`Backtester.__init__` 增加 `universe` 参数并传入 Context）
+- 测试： `tests/test_universe.py`
 
-**Interfaces:**
-- Produces:
+**接口：**
+- 提供：
   - `quant.strategies.universe.Constituents(snapshots: Mapping[date, frozenset[str]])`（frozen dataclass，可 pickle）
     - `members(d: date) -> frozenset[str]`：日期 ≤ d 的最近一条快照；d 早于第一条时抛 `ValueError`。
     - `all_symbols(start: date, end: date) -> frozenset[str]`：区间内（含 start 当时生效的那条）出现过的全部代码。
@@ -52,7 +52,7 @@
   - `quant.data.universe.load_constituents(path: Path) -> Constituents`
   - `Context.universe: Constituents | None = None`；`Backtester(..., universe: Constituents | None = None)`。
 
-- [ ] **Step 1: 写失败的测试**
+- [ ] **步骤 1： 写失败的测试**
 
 ```python
 TEXT = 'date,tickers\n2015-01-02,"AAA,BBB,CCC"\n2015-03-02,"AAA,CCC,DDD"\n'
@@ -79,32 +79,32 @@ def test_backtester_passes_universe_to_context() -> None:
     # 用一个记录 ctx.universe 的桩策略跑 3 个交易日的回测，断言收到的就是传入的对象
 ```
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **步骤 2： 运行，确认失败**
 
-Run: `TRADING_MODE=sim uv run pytest tests/test_universe.py -v`
-Expected: FAIL（`ModuleNotFoundError: quant.strategies.universe`）
+运行：`TRADING_MODE=sim uv run pytest tests/test_universe.py -v`
+预期：测试失败（`ModuleNotFoundError: quant.strategies.universe`）
 
-- [ ] **Step 3: 实现上述接口**；`Context.universe` 只是透传字段，不做截断（成分股快照本身按日期查询）。
+- [ ] **步骤 3： 实现上述接口**；`Context.universe` 只是透传字段，不做截断（成分股快照本身按日期查询）。
 
-- [ ] **Step 4: 运行通过**，再跑 `TRADING_MODE=sim uv run pytest -q` 确认原有测试不受影响。
+- [ ] **步骤 4： 运行通过**，再跑 `TRADING_MODE=sim uv run pytest -q` 确认原有测试不受影响。
 
-- [ ] **Step 5: 提交** `feat: 成分股快照数据对象并注入 Context（Refs #47）`
+- [ ] **步骤 5： 提交** `feat: 成分股快照数据对象并注入 Context（Refs #47）`
 
 ---
 
-### Task 2: 大范围标的的数据获取
+### 任务 2： 大范围标的的数据获取
 
-**Files:**
-- Modify: `src/quant/data/providers/yfinance.py`（下载时把代码中的 `.` 换成 `-`）、`src/quant/data/providers/edgar.py`
-- Test: `tests/test_providers.py`、`tests/test_edgar.py`
+**文件：**
+- 修改： `src/quant/data/providers/yfinance.py`（下载时把代码中的 `.` 换成 `-`）、`src/quant/data/providers/edgar.py`
+- 测试： `tests/test_providers.py`、`tests/test_edgar.py`
 
-**Interfaces:**
-- Produces:
+**接口：**
+- 提供：
   - `YFinanceProvider.daily_bars("BRK.B", ...)` 向 yfinance 请求 `BRK-B`，返回数据照常（存储仍用 `BRK.B`）。
   - `edgar.fetch_cik_map(user_agent: str, fetch: Fetch | None = None) -> dict[str, int]`：读 `https://www.sec.gov/files/company_tickers.json`，键为代码（`-` 换成 `.`）。
   - `edgar.fetch_earnings(symbol, user_agent, fetch=None, sleep=..., cal=None, ciks: Sequence[int] | None = None)`：`ciks` 为 None 时沿用 `CIKS[symbol]`。
 
-- [ ] **Step 1: 写失败的测试**
+- [ ] **步骤 1： 写失败的测试**
 
 ```python
 def test_yfinance_maps_dot_ticker() -> None:
@@ -124,29 +124,29 @@ def test_fetch_earnings_with_explicit_ciks() -> None:
 ```
 
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **步骤 2： 运行，确认失败**
 
-Run: `TRADING_MODE=sim uv run pytest tests/test_providers.py tests/test_edgar.py -v`
-Expected: 新增 3 个用例 FAIL
+运行：`TRADING_MODE=sim uv run pytest tests/test_providers.py tests/test_edgar.py -v`
+预期：新增 3 个用例失败
 
-- [ ] **Step 3: 实现**
+- [ ] **步骤 3： 实现**
 
-- [ ] **Step 4: 运行通过**
+- [ ] **步骤 4： 运行通过**
 
-- [ ] **Step 5: 提交** `feat: yfinance 代码映射与 SEC 代码 → CIK 映射（Refs #47）`
+- [ ] **步骤 5： 提交** `feat: yfinance 代码映射与 SEC 代码 → CIK 映射（Refs #47）`
 
 ---
 
-### Task 3: swing_pullback 可关闭 PSQ
+### 任务 3： swing_pullback 可关闭 PSQ
 
-**Files:**
-- Modify: `src/quant/strategies/swing_pullback.py`
-- Test: `tests/test_swing_pullback.py`
+**文件：**
+- 修改： `src/quant/strategies/swing_pullback.py`
+- 测试： `tests/test_swing_pullback.py`
 
-**Interfaces:**
-- Produces: `SwingParams.use_inverse: bool = True`。为 False 时：`symbols` 不含 PSQ；`simulate` 不产生 PSQ 候选；`compute_inputs` 在缺少 PSQ 数据时正常运行。默认行为不变。
+**接口：**
+- 提供： `SwingParams.use_inverse: bool = True`。为 False 时：`symbols` 不含 PSQ；`simulate` 不产生 PSQ 候选；`compute_inputs` 在缺少 PSQ 数据时正常运行。默认行为不变。
 
-- [ ] **Step 1: 写失败的测试**
+- [ ] **步骤 1： 写失败的测试**
 
 ```python
 def test_inverse_disabled() -> None:
@@ -161,35 +161,35 @@ def test_inverse_disabled() -> None:
 
 再加一个用例：`compute_inputs(frames, p)`，frames 中没有 PSQ 列，`use_inverse=False` 时不报错。
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **步骤 2： 运行，确认失败**
 
-Run: `TRADING_MODE=sim uv run pytest tests/test_swing_pullback.py -v -k inverse`
-Expected: FAIL（`SwingParams` 没有 `use_inverse`）
+运行：`TRADING_MODE=sim uv run pytest tests/test_swing_pullback.py -v -k inverse`
+预期：测试失败（`SwingParams` 没有 `use_inverse`）
 
-- [ ] **Step 3: 实现**
+- [ ] **步骤 3： 实现**
 
-- [ ] **Step 4: 运行 `tests/test_swing_pullback.py` 全部通过**
+- [ ] **步骤 4： 运行 `tests/test_swing_pullback.py` 全部通过**
 
-- [ ] **Step 5: 提交** `feat: swing_pullback 增加 use_inverse 参数（Refs #47）`
+- [ ] **步骤 5： 提交** `feat: swing_pullback 增加 use_inverse 参数（Refs #47）`
 
 ---
 
-### Task 4: momentum_select 策略
+### 任务 4： momentum_select 策略
 
-**Files:**
-- Create: `src/quant/strategies/momentum_select.py`
-- Modify: `src/quant/strategies/__init__.py`（注册）
-- Test: `tests/test_momentum_select.py`
+**文件：**
+- 新建： `src/quant/strategies/momentum_select.py`
+- 修改： `src/quant/strategies/__init__.py`（注册）
+- 测试： `tests/test_momentum_select.py`
 
-**Interfaces:**
-- Consumes: `Constituents`（Task 1）、`Context.universe`、`Context.field`、`Context.events`
-- Produces:
+**接口：**
+- 依赖： `Constituents`（任务 1）、`Context.universe`、`Context.field`、`Context.events`
+- 提供：
   - `MomentumParams`（frozen dataclass，`from_mapping` 拒绝未知参数，风格同 `SwingParams`）：`top_n=4, liquidity_top=200, min_price=5.0, min_history=252, trend_ma=120, lookback=126, dv_window=60, dv_short=20, dv_long=120, earnings_exit=False, earnings_exit_days=2`
   - `rank_momentum(close: pd.DataFrame, volume: pd.DataFrame, members: Collection[str], p: MomentumParams) -> list[str]`：输入为截至排序日（最后一行）的宽表；返回全部合格代码，按 `lookback` 日涨幅降序，同分按代码升序。过滤顺序：成员且有列 → 非空收盘数 ≥ `min_history` → 最后收盘 > `min_price` → `dv_window` 日平均成交额（收盘 × 成交量）非空，取前 `liquidity_top` → 最后收盘 > `trend_ma` 日均值 → `dv_short` 日均成交额 > `dv_long` 日均成交额 → 涨幅非空。价格用 `Context.field` 的含分红复权口径（与回测一致；实盘口径在第二份计划处理）。
   - `rebalance_day(cal: TradingCalendar, d: date) -> date`：d 是月末交易日时返回 d，否则返回上个月的最后一个交易日。
   - `MomentumSelect(Strategy)`：`name = "momentum_select"`，`min_weight_diff = 0.10`，`max_daily_move = 0.6`。`target_weights`：取 `rebalance_day(as_of)` 的成员与排名前 `top_n`，各 `1 / top_n`；`earnings_exit=True` 时去掉满足 `rebalance_day < r ≤ as_of 之后第 earnings_exit_days 个交易日` 的标的（r 为 `events.next_earnings(s, rebalance_day)`）。按 `(rebalance_day, params)` 在实例内缓存排名（纯计算的记忆化）。`ctx.universe` 为 None 时抛 `ValueError`。`symbols(params)` 返回 `[]`（候选池随时间变化，由调用方按 `Constituents.all_symbols` 准备数据）；`warmup_days` 返回 `min_history + 30`。
 
-- [ ] **Step 1: 写失败的测试**（合成数据：300 个交易日，6 只股票）
+- [ ] **步骤 1： 写失败的测试**（合成数据：300 个交易日，6 只股票）
 
 ```python
 # 构造：A 涨 60%、B 涨 40%、C 涨 20%（都放量、在 120 日线上）；
@@ -225,29 +225,29 @@ def test_requires_universe() -> None:
         MomentumSelect().target_weights(<universe=None 的 Context>)
 ```
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **步骤 2： 运行，确认失败**
 
-Run: `TRADING_MODE=sim uv run pytest tests/test_momentum_select.py -v`
-Expected: FAIL（模块不存在）
+运行：`TRADING_MODE=sim uv run pytest tests/test_momentum_select.py -v`
+预期：测试失败（模块不存在）
 
-- [ ] **Step 3: 实现**
+- [ ] **步骤 3： 实现**
 
-- [ ] **Step 4: 运行通过；`uv run mypy src` 无报错**
+- [ ] **步骤 4： 运行通过；`uv run mypy src` 无报错**
 
-- [ ] **Step 5: 提交** `feat: momentum_select 月度动量选股策略（Refs #47）`
+- [ ] **步骤 5： 提交** `feat: momentum_select 月度动量选股策略（Refs #47）`
 
 ---
 
-### Task 5: combo 策略
+### 任务 5： combo 策略
 
-**Files:**
-- Create: `src/quant/strategies/combo.py`
-- Modify: `src/quant/strategies/__init__.py`（注册）
-- Test: `tests/test_combo.py`
+**文件：**
+- 新建： `src/quant/strategies/combo.py`
+- 修改： `src/quant/strategies/__init__.py`（注册）
+- 测试： `tests/test_combo.py`
 
-**Interfaces:**
-- Consumes: `MomentumSelect`、`MomentumParams`（Task 4）、`SwingPullback`、`SwingParams.use_inverse`（Task 3）
-- Produces:
+**接口：**
+- 依赖： `MomentumSelect`、`MomentumParams`（任务 4）、`SwingPullback`、`SwingParams.use_inverse`（任务 3）
+- 提供：
   - `ComboParams`：`momentum_weight=0.4, swing_weight=0.6, vol_symbol="QQQ", vol_window=20, vol_threshold=0.30, vol_scale=0.5, momentum: Mapping = {}, swing: Mapping = V2_SWING`；`V2_SWING = {"trend_ma": 120, "slope_days": 10, "support_ma": 20, "confirm": "close_strength", "exit_ma": 10, "use_inverse": False}`，用户传入的 `swing` 覆盖其中同名键。`momentum_weight + swing_weight` 必须 ≤ 1，否则 `ValueError`。`ComboParams.from_mapping(params)` 拒绝未知参数；`ComboParams.swing_params() -> dict` 返回合并后的 swing 参数，`momentum_params() -> dict` 返回 momentum 参数。
   - `vol_factor(close: pd.Series, window: int, threshold: float, scale: float) -> float`：最近 `window` 个日收益率的标准差 × √252 > threshold 时返回 scale，否则 1.0；有效收益率不足 `window` 个时返回 1.0。
   - `merge_weights(momentum: Mapping[str, float], swing: Mapping[str, float], mw: float, sw: float, factor: float) -> dict[str, float]`：`(mw × m[s] + sw × w[s]) × factor`，同一标的相加。
@@ -255,7 +255,7 @@ Expected: FAIL（模块不存在）
 
   `min_weight_diff = 0.04` 的理由：择时把动量仓从 10% 减到 5%、V2 仓从 15% 减到 7.5%，阈值必须小于 0.05 才能执行减仓；同时保持足够大，避免价格漂移触发来回调仓（动量仓需涨约 40% 才触发）。
 
-- [ ] **Step 1: 写失败的测试**
+- [ ] **步骤 1： 写失败的测试**
 
 ```python
 def test_vol_factor() -> None:
@@ -284,54 +284,54 @@ def test_combo_end_to_end() -> None:
     # 断言：每天的目标权重和 ≤ 1；只有 momentum 时（swing_weight=0）结果与单独 MomentumSelect × 0.4 一致
 ```
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **步骤 2： 运行，确认失败**
 
-Run: `TRADING_MODE=sim uv run pytest tests/test_combo.py -v`
-Expected: FAIL（模块不存在）
+运行：`TRADING_MODE=sim uv run pytest tests/test_combo.py -v`
+预期：测试失败（模块不存在）
 
-- [ ] **Step 3: 实现**
+- [ ] **步骤 3： 实现**
 
-- [ ] **Step 4: 运行通过；`make check` 通过**
+- [ ] **步骤 4： 运行通过；`make check` 通过**
 
-- [ ] **Step 5: 提交** `feat: combo 组合策略（动量 + V2 + 波动率择时）（Refs #47）`
+- [ ] **步骤 5： 提交** `feat: combo 组合策略（动量 + V2 + 波动率择时）（Refs #47）`
 
 ---
 
-### Task 6: 通过标准判定
+### 任务 6： 通过标准判定
 
-**Files:**
-- Modify: `src/quant/engine/evaluation.py`
-- Test: `tests/test_trades_evaluation.py`
+**文件：**
+- 修改： `src/quant/engine/evaluation.py`
+- 测试： `tests/test_trades_evaluation.py`
 
-**Interfaces:**
-- Produces: `combo_checks(full: Metrics, qqq_full: Metrics, ins: Metrics, qqq_ins: Metrics, oos: Metrics, qqq_oos: Metrics, neighbors: Sequence[Metrics]) -> dict[str, bool]`，键与含义（边界用现有 `_ge` 容差）：
+**接口：**
+- 提供： `combo_checks(full: Metrics, qqq_full: Metrics, ins: Metrics, qqq_ins: Metrics, oos: Metrics, qqq_oos: Metrics, neighbors: Sequence[Metrics]) -> dict[str, bool]`，键与含义（边界用现有 `_ge` 容差）：
   - `"最大回撤 ≥ -25%"`：`full.max_drawdown ≥ -0.25`
   - `"年化 ≥ QQQ + 3 个百分点"`：`full.cagr ≥ qqq_full.cagr + 0.03`
   - `"夏普 ≥ 1.1"`：`full.sharpe ≥ 1.1`
   - `"两个区间夏普都高于 QQQ"`：`ins.sharpe > qqq_ins.sharpe and oos.sharpe > qqq_oos.sharpe`
   - `"相邻设置：回撤 ≥ -30% 且夏普 ≥ 1.0"`：neighbors 全部满足（空列表视为不满足）
 
-- [ ] **Step 1: 写失败的测试**：边界值恰好等于门槛时为 True（如 `max_drawdown=-0.25`、`cagr = qqq + 0.03`）；任一相邻设置回撤 -0.31 时最后一项为 False；neighbors 为空时为 False。
+- [ ] **步骤 1： 写失败的测试**：边界值恰好等于门槛时为 True（如 `max_drawdown=-0.25`、`cagr = qqq + 0.03`）；任一相邻设置回撤 -0.31 时最后一项为 False；neighbors 为空时为 False。
 
-- [ ] **Step 2: 运行，确认失败** `TRADING_MODE=sim uv run pytest tests/test_trades_evaluation.py -v`
+- [ ] **步骤 2： 运行，确认失败** `TRADING_MODE=sim uv run pytest tests/test_trades_evaluation.py -v`
 
-- [ ] **Step 3: 实现**
+- [ ] **步骤 3： 实现**
 
-- [ ] **Step 4: 运行通过**
+- [ ] **步骤 4： 运行通过**
 
-- [ ] **Step 5: 提交** `feat: combo 通过标准判定（Refs #47）`
+- [ ] **步骤 5： 提交** `feat: combo 通过标准判定（Refs #47）`
 
 ---
 
-### Task 7: 研究脚本与报告
+### 任务 7： 研究脚本与报告
 
-**Files:**
-- Create: `scripts/research/combo.py`、`docs/research/2026-10-30-combo.md`（由脚本生成）
-- Test: `tests/test_research_combo.py`
+**文件：**
+- 新建： `scripts/research/combo.py`、`docs/research/2026-10-30-combo.md`（由脚本生成）
+- 测试： `tests/test_research_combo.py`
 
-**Interfaces:**
-- Consumes: Task 1–6 的全部接口；`ensure_bars`、`ParquetStore`、`YFinanceProvider`、`compute_metrics`、`round_trips`、`trade_stats`、`load_earnings`、`save_earnings`、`load_fomc_dates`；`scripts/research/swing_pullback.py` 的进程池写法（`_init` 把 bars / events / universe 放进子进程全局）。
-- Produces（脚本内的纯函数，供测试）：
+**接口：**
+- 依赖： 任务 1–6 的全部接口；`ensure_bars`、`ParquetStore`、`YFinanceProvider`、`compute_metrics`、`round_trips`、`trade_stats`、`load_earnings`、`save_earnings`、`load_fomc_dates`；`scripts/research/swing_pullback.py` 的进程池写法（`_init` 把 bars / events / universe 放进子进程全局）。
+- 提供（脚本内的纯函数，供测试）：
   - `CONFIGS: dict[str, dict]`，键与参数严格为：
     - `"组合（持有过财报）"`: `{}`
     - `"组合（财报前离场）"`: `{"momentum": {"earnings_exit": True}}`
@@ -354,7 +354,7 @@ Expected: FAIL（模块不存在）
 5. 判定：`combo_checks` 用“组合（持有过财报）”与 6 组相邻设置；“财报前离场”只并列报告，交给用户选择。
 6. 报告：结论（通过 / 未通过及逐项）；全部 10 组的全区间、调参、样本外指标（年化、最大回撤、夏普、卡玛、波动、换手）；QQQ / SPY 基准；两种财报处理的对比与逐年收益；交易统计；数据缺失逐年比例、校验未通过列表、成分名单版本日期；已知局限（幸存者偏差、样本外已看过、新浪口径差异留待第二份计划）。
 
-- [ ] **Step 1: 写失败的测试**
+- [ ] **步骤 1： 写失败的测试**
 
 ```python
 def test_configs() -> None:
@@ -372,15 +372,15 @@ def test_split_metrics_continuous() -> None:
     # 合成净值：oos 段第一天收益来自前一交易日收盘，不丢失一天
 ```
 
-- [ ] **Step 2: 运行，确认失败** `TRADING_MODE=sim uv run pytest tests/test_research_combo.py -v`
+- [ ] **步骤 2： 运行，确认失败** `TRADING_MODE=sim uv run pytest tests/test_research_combo.py -v`
 
-- [ ] **Step 3: 实现脚本**
+- [ ] **步骤 3： 实现脚本**
 
-- [ ] **Step 4: 测试通过；`make check` 通过**
+- [ ] **步骤 4： 测试通过；`make check` 通过**
 
-- [ ] **Step 5: 在 Mac 上运行研究**（较慢，后台运行；数据下载约 20–40 分钟，SEC 财报约 30–40 分钟，回测约 10–20 分钟）
+- [ ] **步骤 5： 在 Mac 上运行研究**（较慢，后台运行；数据下载约 20–40 分钟，SEC 财报约 30–40 分钟，回测约 10–20 分钟）
 
-Run: `NO_PROXY=data.sec.gov,www.sec.gov no_proxy=data.sec.gov,www.sec.gov TRADING_MODE=sim uv run python scripts/research/combo.py --user-agent "<用户同意使用的邮箱>"`
-Expected: 生成 `docs/research/2026-10-30-combo.md`，含 10 组结果与判定。结果与快速试验（附录）差异较大时，先查原因（`min_weight_diff`、择时执行时点、成本），在报告中说明，不调参数去对齐。
+运行：`NO_PROXY=data.sec.gov,www.sec.gov no_proxy=data.sec.gov,www.sec.gov TRADING_MODE=sim uv run python scripts/research/combo.py --user-agent "<用户同意使用的邮箱>"`
+预期： 生成 `docs/research/2026-10-30-combo.md`，含 10 组结果与判定。结果与快速试验（附录）差异较大时，先查原因（`min_weight_diff`、择时执行时点、成本），在报告中说明，不调参数去对齐。
 
-- [ ] **Step 6: 提交** `docs: combo 研究报告（Refs #47）`，并在 #47 评论结论与两种财报处理的对比。
+- [ ] **步骤 6： 提交** `docs: combo 研究报告（Refs #47）`，并在 #47 评论结论与两种财报处理的对比。
