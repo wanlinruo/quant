@@ -14,11 +14,13 @@ sim 模式不连接券商：只运行 daily_data 与 daily_signal。
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import Engine, select
@@ -69,6 +71,7 @@ UNIVERSE_HISTORY_DAYS = 450  # 动量排序要约 252 个交易日 + 预热
 # 每只股票每季度都有财报：[d − 100 天, d + 45 天] 内应至少有一次
 EARNINGS_RECENT_DAYS = 100
 EARNINGS_AHEAD_DAYS = 45
+RESEND_DAYS = 7  # 同一条数据提示的重发间隔（#56）
 
 
 @dataclass
@@ -175,8 +178,11 @@ def daily_data(ctx: JobContext, d: date) -> str:
             )
             ctx.sleep(DATA_RETRY_SECONDS)
     extras, warnings = sync_strategy_extras(ctx, d)
-    if warnings:
-        ctx.notifier.send(f"[{ctx.mode}] 数据提示 {d}", "\n".join(warnings), Level.WARNING)
+    for w in warnings:
+        log.warning("job=daily_data trade_date=%s %s", d, w)
+    fresh = fresh_warnings(warnings_state_path(ctx.settings.data_dir), warnings, d)
+    if fresh:
+        ctx.notifier.send(f"[{ctx.mode}] 数据提示 {d}", "\n".join(fresh), Level.WARNING)
     if ctx.secondary is not None:
         report = Report()
         for s in symbols:
@@ -185,6 +191,29 @@ def daily_data(ctx: JobContext, d: date) -> str:
         if not report.ok:
             raise DataValidationError(report)
     return "；".join([f"{len(symbols)} 个标的截至 {d}", *extras])
+
+
+def warnings_state_path(data_dir: Path) -> Path:
+    return data_dir / "state" / "data_warnings.json"
+
+
+def fresh_warnings(path: Path, warnings: list[str], d: date) -> list[str]:
+    """需要发送的提示：上次发送距今 ≥ RESEND_DAYS 天、或从未发过、或同一交易日重跑的。
+    状态文件只保留本次仍存在的提示，问题消失后再出现时立即提示。"""
+    try:
+        sent = {k: date.fromisoformat(v) for k, v in json.loads(path.read_text("utf-8")).items()}
+    except (OSError, ValueError, AttributeError):
+        sent = {}
+    out = [
+        w for w in warnings
+        if w not in sent or sent[w] == d or (d - sent[w]).days >= RESEND_DAYS
+    ]  # fmt: skip
+    keep = {w: (d if w in out else sent[w]).isoformat() for w in warnings}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(keep, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+    return out
 
 
 def sync_strategy_extras(ctx: JobContext, d: date) -> tuple[list[str], list[str]]:
@@ -267,7 +296,8 @@ def _sync_earnings(ctx: JobContext, d: date, symbols: list[str]) -> tuple[list[s
     lacking = [s for s in symbols if not any(lo <= x <= hi for x in got.get(s, ()))]
     if lacking:
         warnings.append(
-            f"以下股票在 {lo} ~ {hi} 没有财报日（财报前离场可能不生效）：{', '.join(lacking)}"
+            f"以下股票在过去 {EARNINGS_RECENT_DAYS} 天至未来 {EARNINGS_AHEAD_DAYS} 天内没有财报日"
+            f"（财报前离场可能不生效）：{', '.join(lacking)}"
         )
     return [f"财报日 {len(symbols) - len(lacking)}/{len(symbols)} 只"], warnings
 

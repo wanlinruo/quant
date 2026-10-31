@@ -71,3 +71,23 @@ def test_paper_uses_tiger_and_sina(monkeypatch: pytest.MonkeyPatch) -> None:
     assert (s.data.primary, s.data.secondary) == ("tiger", "sina")
     monkeypatch.setenv("TRADING_MODE", "sim")
     assert load_settings().data.primary == "yfinance"
+
+
+def test_throttles_consecutive_symbols() -> None:
+    # 候选池约 500 只连续请求：相邻两次之间至少间隔 MIN_CALL_INTERVAL（#56）
+    from quant.data.providers.sina import MIN_CALL_INTERVAL
+
+    now = [0.0]
+    slept: list[float] = []
+
+    def sleep(s: float) -> None:
+        slept.append(s)
+        now[0] += s
+
+    p = SinaProvider(fetch=lambda s: TEXT, sleep=sleep, clock=lambda: now[0])
+    for sym in ("SPY", "QQQ", "TLT"):
+        p.daily_bars(sym, date(2026, 10, 1), date(2026, 10, 28))
+    assert slept == [pytest.approx(MIN_CALL_INTERVAL)] * 2
+    now[0] += 10
+    p.daily_bars("GLD", date(2026, 10, 1), date(2026, 10, 28))
+    assert len(slept) == 2  # 间隔已够，不再等待
