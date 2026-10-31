@@ -160,3 +160,21 @@ class BacktestSubmit(BaseModel):
 
 class SubmitResult(BaseModel):
     id: int
+
+
+class BacktestDefaults(BaseModel):
+    """提交表单的默认值（与原 Streamlit 表单一致）。"""
+
+    strategies: list[str]
+    universe_options: list[str]
+    universe: list[str]
+    safe_asset: str
+    lookback: int
+    top_k: int
+    sma_window: int
+    cash: Decimal
+    commission_per_share: str | None
+    min_commission: str | None
+    slippage: str
+    start: date
+    end: date

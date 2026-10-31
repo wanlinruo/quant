@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 
@@ -177,10 +178,8 @@ def backtest_equity(s: Session, run_ids: Sequence[int]) -> list[EquityPoint]:
 
 
 def queue_status(s: Session) -> QueueStatus:
-    counts = dict(
-        s.execute(select(BacktestRun.status, func.count()).group_by(BacktestRun.status)).all()
-    )
-    return QueueStatus(**{k: int(v) for k, v in counts.items() if k in QueueStatus.model_fields})
+    counts = Counter(s.scalars(select(BacktestRun.status)).all())
+    return QueueStatus(**{k: v for k, v in counts.items() if k in QueueStatus.model_fields})
 
 
 # ---- 系统 ----
