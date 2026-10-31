@@ -132,3 +132,66 @@ def test_preview_combo_without_db(tmp_path: Path) -> None:
     assert "覆盖率" in text and "目标仓位" in text and "AAA" in text
     assert "择时系数" in text and "动量排名" in text
     assert made[0].engine is None  # 不连接数据库：不写 signals / job_runs
+
+
+def test_preview_shows_strategy_own_ranking_and_factor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 预览直接用策略自己的排序与择时计算，不另算一遍（数据起点不一致会导致结果不同，#56）
+    from quant.strategies.combo import Combo
+    from quant.strategies.momentum_select import MomentumSelect
+
+    monkeypatch.setattr(MomentumSelect, "ranking", lambda self, ctx, me, p: ["ZZZ", "YYY"])
+    monkeypatch.setattr(Combo, "timing_factor", lambda self, ctx, p: 0.5)
+    out = _run_preview(tmp_path)
+    assert "前 10：ZZZ, YYY" in out and "择时系数：0.5" in out
+
+
+def _run_preview(tmp_path: Path) -> str:
+    from quant.cli import preview
+    from quant.data.universe import constituents_path
+    from quant.jobs.daily import JobContext
+    from test_jobs import COMBO_PARAMS, DAY, UNIVERSE_CSV, TigerLike, UniverseFake
+
+    path = constituents_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(UNIVERSE_CSV, encoding="utf-8")
+    cfg = Settings(broker="tiger", data_dir=tmp_path, data={"primary": "tiger"},
+                   risk={"symbol_whitelist": ["QQQ"], "max_order_usd": "150000"})  # fmt: skip
+    args = build_parser().parse_args(
+        ["preview", "--strategy", "combo", "--date", DAY.isoformat(), "--sync",
+         "--universe", "sina", "--param", f"swing={json.dumps(COMBO_PARAMS['swing'])}"]
+    )  # fmt: skip
+
+    def factory(s: Settings, notifier: object) -> JobContext:
+        ctx = JobContext(s, None, notifier, ParquetStore(tmp_path), TigerLike(),  # type: ignore[arg-type]
+                         universe_provider=UniverseFake())  # fmt: skip
+        ctx.sleep = lambda x: None
+        return ctx
+
+    out = io.StringIO()
+    assert preview(args, cfg, out, ctx_factory=factory) == 0
+    return out.getvalue()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError("策略 combo 需要候选池数据"), OSError("network down")],
+)
+def test_preview_errors_are_short(
+    error: Exception, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # 预览是人工排查用的命令：出错时给一行中文错误，不打印堆栈（#56）
+    import quant.cli
+    from quant.data.providers.base import DataUnavailableError
+
+    for e in (error, DataUnavailableError("新浪拉取 AAPL 失败")):
+
+        def boom(*a: object, _e: Exception = e, **k: object) -> int:
+            raise _e
+
+        monkeypatch.setattr(quant.cli, "preview", boom)
+        monkeypatch.setenv("TRADING_MODE", "sim")
+        assert main(["preview", "--strategy", "combo"]) == 1
+        err = capsys.readouterr().err
+        assert err.startswith("错误：") and str(e) in err and "Traceback" not in err

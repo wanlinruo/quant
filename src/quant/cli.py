@@ -15,14 +15,14 @@ import json
 import logging
 import sys
 from collections.abc import Callable, Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from quant.core.calendar import get_calendar
 from quant.core.settings import ConfigError, Settings, load_settings
 from quant.data.pipeline import DataValidationError
-from quant.data.providers.base import DataProvider
+from quant.data.providers.base import DataProvider, DataUnavailableError
 from quant.engine.backtester import BacktestResult
 from quant.engine.metrics import Metrics
 from quant.engine.runner import (
@@ -234,8 +234,8 @@ def preview(
     from quant.core.settings import StrategySettings
     from quant.engine.executor import ET
     from quant.jobs.daily import JobContext, _weights_text, build_context, daily_data
-    from quant.strategies.combo import Combo, ComboParams, vol_factor
-    from quant.strategies.momentum_select import MomentumParams, rank_momentum, rebalance_day
+    from quant.strategies.combo import Combo, ComboParams
+    from quant.strategies.momentum_select import MomentumParams, MomentumSelect, rebalance_day
 
     out = out or sys.stdout
     if args.param:
@@ -263,26 +263,20 @@ def preview(
     weights = strategy.run(context)
     print(f"信号日 {d}，策略 {args.strategy}", file=out)
     print(f"目标仓位：{_weights_text(weights)}", file=out)
+    momentum: MomentumSelect | None = None
     if isinstance(strategy, Combo):
         p = ComboParams.from_mapping(params)
-        close = context.field([p.vol_symbol], "close", d - timedelta(days=60))[p.vol_symbol]
-        factor = vol_factor(close, p.vol_window, p.vol_threshold, p.vol_scale)
+        factor = strategy.timing_factor(context, p)
         print(f"择时系数：{factor}（{p.vol_symbol} 近 {p.vol_window} 日波动率阈值 "
               f"{p.vol_threshold:.0%}）", file=out)  # fmt: skip
-        mparams = p.momentum_params()
-    else:
-        mparams = params
-    if strategy.uses_universe and context.universe is not None:
+        momentum, mparams = strategy.momentum, p.momentum_params()
+    elif isinstance(strategy, MomentumSelect):
+        momentum, mparams = strategy, params
+    if momentum is not None and context.universe is not None:
         me = rebalance_day(cal, d)
-        members = sorted(context.universe.members(me))
-        start = me - timedelta(days=450)
-        ranked = rank_momentum(
-            context.field(members, "close", start, me),
-            context.field(members, "volume", start, me),
-            members,
-            MomentumParams.from_mapping(mparams),
-        )
-        print(f"动量排名（{me}，{len(members)} 只成分股）前 10：{', '.join(ranked[:10])}", file=out)
+        n = len(context.universe.members(me))
+        ranked = momentum.ranking(context, me, MomentumParams.from_mapping(mparams))
+        print(f"动量排名（{me}，{n} 只成分股）前 10：{', '.join(ranked[:10])}", file=out)
     return 0
 
 
@@ -392,7 +386,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "trading":
             return trading(args, settings)
         elif args.command == "preview":
-            return preview(args, settings)
+            try:
+                return preview(args, settings)
+            except (DataUnavailableError, RuntimeError, OSError) as e:
+                # 人工排查用：给一行错误即可（数据源不可用、缺配置、网络等），不打印堆栈
+                print(f"错误：{type(e).__name__}: {e}", file=sys.stderr)
+                return 1
         elif args.command == "events":
             return sync_earnings(args, settings)
     except (ConfigError, DataValidationError, ValueError) as e:
