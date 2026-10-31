@@ -29,9 +29,8 @@ web-dev: ## 前端开发服务器（http://localhost:5173，/api 代理到 127.0
 web-check: ## 前端 lint + 类型检查 + 测试 + 构建
 	cd web && npm run lint && npm run typecheck && npm run test && npm run build
 
-api-types: ## 由后端 OpenAPI 重新生成前端接口类型
-	uv run python -m quant.api.openapi > web/src/api/openapi.json
-	cd web && npm run gen:types
+api-types: ## 由后端接口模型重新生成前端类型（web/src/api/types.ts）
+	uv run python -m quant.api.openapi --ts > web/src/api/types.ts
 
 COMPOSE_DEV = docker compose -f compose.yml -f compose.dev.yml
 
