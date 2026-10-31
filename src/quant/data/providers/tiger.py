@@ -9,6 +9,8 @@
   更早的分红记录有缺失，长期回测仍用 yfinance。
 - 频率限制：K 线接口 60 次/分钟。分页请求间隔 2 秒，相邻两次调用之间至少间隔 1.1 秒。
 - 历史行情额度：30 天内最多 20 个不同标的，只拉取确实需要的标的。
+- 延迟行情（get_stock_delay_briefs，约 15 分钟延迟）：免费、不占历史额度，单次最多 50 个代码，
+  10 次/分钟；收盘后的 open/high/low/close/volume 与新浪日 K 一致（2026-10-31 实测 50 只，#53）。
 - 只读，不涉及下单。
 """
 
@@ -33,6 +35,8 @@ PAGE_INTERVAL = 2  # 秒，get_bars_by_page 分页之间
 PAGE_SIZE = 1000  # 单次最多 1200 根
 MAX_BARS = 20000
 SPLIT_BATCH = 20  # get_corporate_split 每次最多 20 个代码（2026-10-30 实测）
+DELAY_BATCH = 50  # get_stock_delay_briefs 单次上限
+DELAY_CALL_INTERVAL = 6.1  # 秒，延迟行情 10 次/分钟
 EARNINGS_SPAN_DAYS = 28  # 每段不能超过 1 个月（2026-10-30 实测：02-21~03-22 被拒）
 AFTER_CLOSE = "盘后"
 
@@ -70,9 +74,9 @@ class TigerProvider(DataProvider):
     def from_settings(cls, settings: Settings, adjust_dividends: bool = False) -> TigerProvider:
         return cls(make_quote_client(settings), adjust_dividends=adjust_dividends)
 
-    def _throttle(self) -> None:
+    def _throttle(self, interval: float = MIN_CALL_INTERVAL) -> None:
         if self._last_call is not None:
-            wait = MIN_CALL_INTERVAL - (self._clock() - self._last_call)
+            wait = interval - (self._clock() - self._last_call)
             if wait > 0:
                 self._sleep(wait)
         self._last_call = self._clock()
@@ -168,6 +172,39 @@ class TigerProvider(DataProvider):
                 mult = float(r["from_factor"]) / float(r["to_factor"])
                 out.setdefault(str(r["symbol"]), set()).add((d, mult))
         return {s: sorted(v) for s, v in out.items()}
+
+    def delayed_bars(
+        self, symbols: Sequence[str], d: date, cal: TradingCalendar
+    ) -> dict[str, pd.DataFrame]:
+        """交易日 d 已收盘的当日 K 线（延迟行情）：{代码: 一行日线}。
+
+        只保留最近成交时间不早于 d 收盘时刻、且未停牌（halted == 0）的代码；其余不出现在结果中。
+        """
+        close_ms = int(cal.session_close(d).timestamp() * 1000)
+        out: dict[str, pd.DataFrame] = {}
+        syms = list(dict.fromkeys(symbols))
+        for i in range(0, len(syms), DELAY_BATCH):
+            batch = syms[i : i + DELAY_BATCH]
+            self._throttle(DELAY_CALL_INTERVAL)
+            try:
+                raw = self._client.get_stock_delay_briefs(batch)
+            except Exception as e:
+                raise DataUnavailableError(
+                    f"老虎拉取延迟行情失败（{batch[0]} 等 {len(batch)} 个）：{e!r}"
+                ) from e
+            if raw is None or len(raw) == 0:
+                continue
+            for _, r in raw.iterrows():
+                t = int(r["time"])
+                when = datetime.fromtimestamp(t / 1000, tz=ET).date()
+                if when != d or t < close_ms or float(r["halted"]) != 0:
+                    continue
+                df = pd.DataFrame(
+                    {c: [r[c]] for c in ("open", "high", "low", "close", "volume")},
+                    index=pd.DatetimeIndex([pd.Timestamp(d)]),
+                )
+                out[str(r["symbol"])] = normalize_bars(df, d, d)
+        return out
 
     def earnings_calendar(
         self, symbols: Collection[str], start: date, end: date, cal: TradingCalendar

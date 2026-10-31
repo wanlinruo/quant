@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
+import pandas as pd
 from sqlalchemy import Engine, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
@@ -38,6 +39,7 @@ from quant.data.universe import (
     sync_constituents,
 )
 from quant.data.universe_bars import (
+    TodaySource,
     UniverseNotReady,
     freeze_members,
     load_frozen_members,
@@ -196,10 +198,17 @@ def sync_strategy_extras(ctx: JobContext, d: date) -> tuple[list[str], list[str]
         if ctx.universe_provider is None:
             raise RuntimeError(f"策略 {ctx.strategy_name} 需要候选池数据，但 data.universe 未配置")
         splits = None
+        today: TodaySource | None = None
         if ctx.settings.data.universe == "sina":
             splits = getattr(ctx.provider, "splits", None)
             if splits is None:
                 raise RuntimeError("data.universe=sina 需要主数据源提供拆股记录（老虎）")
+            delayed = getattr(ctx.provider, "delayed_bars", None)
+            if delayed is not None:
+                # 新浪当日日线收盘后数小时才更新（#53）：当日一根用老虎延迟行情补齐
+                def today(symbols: Sequence[str], day: date) -> dict[str, pd.DataFrame]:
+                    return delayed(symbols, day, ctx.calendar)  # type: ignore[no-any-return]
+
         universe = sync_constituents(constituents_path(data_dir), d)
         if (stale := stale_warning(universe, d)) is not None:
             warnings.append(stale)
@@ -214,7 +223,7 @@ def sync_strategy_extras(ctx: JobContext, d: date) -> tuple[list[str], list[str]
                 try:
                     r = sync_universe_bars(
                         universe_store(data_dir), ctx.universe_provider, splits, ctx.calendar,
-                        members, me - timedelta(days=UNIVERSE_HISTORY_DAYS), me,
+                        members, me - timedelta(days=UNIVERSE_HISTORY_DAYS), me, today=today,
                     )  # fmt: skip
                     break
                 except UniverseNotReady:

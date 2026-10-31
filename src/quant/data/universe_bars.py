@@ -3,12 +3,15 @@
 - 数据源为新浪日 K（不占老虎历史日线额度）；新浪不做拆股调整，用老虎拆股记录换算到最新口径
   （adj_close = 调整后的收盘价，不含分红）。
 - 存放在单独的 Parquet 目录（universe_bars），不与老虎复权数据混在一起。
+- 新浪当日日线要收盘后数小时才陆续更新（2026-10-30 实测，#53）：新浪只到前一交易日时，
+  用 today（老虎延迟行情）补上当日一根，再做拆股调整与校验。
 - 拿不到的记入 missing；校验不通过的（单日涨跌超过 60%，如没有记录的合股）记入 excluded
   并删除本地数据，不参与排序。两者合计使覆盖率低于 min_coverage 时整体失败。
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import date
@@ -23,7 +26,11 @@ from quant.data.splits import split_adjust
 from quant.data.store import ParquetStore
 from quant.data.validate import Issue, Report, validate_bars
 
+log = logging.getLogger(__name__)
+
 SplitSource = Callable[[Sequence[str], date, date], dict[str, list[tuple[date, float]]]]
+# (代码, 交易日 d) → {代码: d 当日一行日线}；拿不到的代码不出现在结果中
+TodaySource = Callable[[Sequence[str], date], dict[str, pd.DataFrame]]
 # 与回测一致（scripts/research/combo.py MAX_MOVE）：真实财报跳空可达 40–60%；
 # 未记录的合股（价格 ×2 以上）仍会被识别。未记录的拆股表现为暴跌，只会让该股排名靠后，不会被误选。
 UNIVERSE_MAX_MOVE = 0.6
@@ -89,6 +96,7 @@ def sync_universe_bars(
     end: date,
     max_move: float = UNIVERSE_MAX_MOVE,
     min_coverage: float = MIN_COVERAGE,
+    today: TodaySource | None = None,
 ) -> UniverseSync:
     result = UniverseSync()
     todo: dict[str, pd.DataFrame] = {}
@@ -100,6 +108,8 @@ def sync_universe_bars(
             todo[s] = provider.daily_bars(s, start, end)
         except DataUnavailableError:
             result.missing.append(s)
+    if today is not None:
+        _fill_today(todo, today, cal.previous_trading_day(end), end)
     recorded = splits(sorted(todo), start, end) if splits is not None and todo else {}
     for s, raw in todo.items():
         if raw.empty or pd.Timestamp(raw.index[-1]).date() < end:
@@ -126,3 +136,19 @@ def sync_universe_bars(
             raise UniverseNotReady(report)
         raise DataValidationError(report)
     return result
+
+
+def _fill_today(todo: dict[str, pd.DataFrame], today: TodaySource, prev: date, end: date) -> None:
+    """只到前一交易日的代码追加 end 当日一根（中间缺数据的不拼接）。
+    today 出错时不补：这些代码仍记为当日未出，由调用方稍后重试。"""
+    late = [s for s, raw in todo.items() if len(raw) and pd.Timestamp(raw.index[-1]).date() == prev]
+    if not late:
+        return
+    try:
+        got = today(late, end)
+    except DataUnavailableError as e:
+        log.warning("候选池当日行情拉取失败：%s", e)
+        return
+    for s, bar in got.items():
+        if s in todo:
+            todo[s] = pd.concat([todo[s], bar])
