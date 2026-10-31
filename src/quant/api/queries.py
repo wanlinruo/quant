@@ -30,7 +30,7 @@ from quant.api.schemas import (
     SignalOut,
 )
 from quant.core.calendar import TradingCalendar
-from quant.data.store import ParquetStore
+from quant.data.store import ParquetStore, is_valid_symbol
 from quant.data.validate import validate_bars
 from quant.db.models import (
     AccountSnapshotRow,
@@ -266,6 +266,9 @@ def data_status(store: ParquetStore, cal: TradingCalendar, expected: date) -> li
 
 
 def bars(store: ParquetStore, symbol: str, start: date | None) -> list[Bar]:
+    """不合法或没有数据的代码返回空列表（个股页显示“暂无数据”）。"""
+    if not is_valid_symbol(symbol):
+        return []
     df = store.read_bars(symbol, start)
     return [
         Bar(date=d.date(), open=float(o), high=float(h), low=float(lo), close=float(c),

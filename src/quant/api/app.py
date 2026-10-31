@@ -9,9 +9,11 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from quant.api.errors import validation_error_handler
 from quant.api.routes import backtests, market, meta, portfolio, system
 
 
@@ -33,6 +35,7 @@ def _mount_web(app: FastAPI, static_dir: Path) -> None:
 def create_app(static_dir: Path | None = None) -> FastAPI:
     """static_dir 为空时读环境变量 QUANT_WEB_DIR；都没有则只提供接口。"""
     app = FastAPI(title="quant 面板", docs_url=None, redoc_url=None)
+    app.add_exception_handler(RequestValidationError, validation_error_handler)
     for r in (meta.router, portfolio.router, backtests.router, system.router, market.router):
         app.include_router(r, prefix="/api")
     web = static_dir or (

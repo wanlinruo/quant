@@ -67,6 +67,7 @@ def defaults() -> BacktestDefaults:
 
 @router.post("/backtests", status_code=201)
 def submit_backtest(req: BacktestSubmit, s: SessionDep) -> SubmitResult:
+    last = get_calendar().last_completed_trading_day(datetime.now(UTC))
     with s.begin():
-        run_id = submit(s, req, get_settings().costs)
+        run_id = submit(s, req, get_settings().costs, last)
     return SubmitResult(id=run_id)

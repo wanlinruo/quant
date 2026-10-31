@@ -22,6 +22,13 @@ import pandas as pd
 from quant.data.providers.base import BAR_COLUMNS, PRICE_COLUMNS, empty_bars, normalize_bars
 
 _SYMBOL_DIR_RE = re.compile(r"symbol=([A-Z][A-Z0-9.]{0,9})")
+
+
+def is_valid_symbol(symbol: str) -> bool:
+    """代码是否合法（大写字母开头，最多 10 位字母、数字或点）。"""
+    return _SYMBOL_DIR_RE.fullmatch(f"symbol={symbol}") is not None
+
+
 STORED_COLUMNS = ("date", *BAR_COLUMNS, "source", "ingested_at")
 
 
@@ -31,7 +38,7 @@ class ParquetStore:
         self._daily = self.root / "bars" / "daily"
 
     def _path(self, symbol: str) -> Path:
-        if not _SYMBOL_DIR_RE.fullmatch(f"symbol={symbol}"):
+        if not is_valid_symbol(symbol):
             raise ValueError(f"非法代码：{symbol!r}")
         return self._daily / f"symbol={symbol}" / "data.parquet"
 

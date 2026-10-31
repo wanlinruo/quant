@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router";
 import type { BacktestDefaults, BacktestRunOut, EquityPoint } from "../api/types";
 import { ApiState } from "../components/ApiState";
 import { DataTable } from "../components/DataTable";
@@ -29,9 +30,13 @@ export function BacktestPage() {
   const [drawer, setDrawer] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const { id: routeId } = useParams();
+  const navigate = useNavigate();
+  const { search } = useLocation();
+
   const list = runs.data ?? [];
   const firstDone = list.find((r) => r.status === "done") ?? list[0];
-  const defaultId = firstDone?.id;
+  const defaultId = list.find((r) => String(r.id) === routeId)?.id ?? firstDone?.id;
   const selected = useMemo(() => checked ?? (defaultId !== undefined ? [defaultId] : []), [checked, defaultId]);
   const current = list.find((r) => r.id === selected[0]);
   const equity = useApi<EquityPoint[]>(selected.length ? "/api/backtests/equity" : null, { ids: selected });
@@ -52,6 +57,12 @@ export function BacktestPage() {
     [equity.data, selected],
   );
 
+  /** 点行：设为当前查看（排在第一位），对比集合满 5 个时挤掉最后一个；同步网址。 */
+  function open(id: number) {
+    setChecked([id, ...selected.filter((x) => x !== id)].slice(0, MAX_COMPARE));
+    navigate({ pathname: `/backtest/${id}`, search });
+  }
+
   function toggle(id: number) {
     setChecked(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
   }
@@ -71,7 +82,7 @@ export function BacktestPage() {
                   {rs.map((r) => {
                     const on = selected.includes(r.id);
                     return (
-                      <div key={r.id} className={`run${r.id === current?.id ? " on" : ""}`} onClick={() => setChecked([r.id, ...selected.filter((x) => x !== r.id)])}>
+                      <div key={r.id} className={`run${r.id === current?.id ? " on" : ""}`} onClick={() => open(r.id)}>
                         <input
                           type="checkbox"
                           aria-label={`对比 #${r.id}`}

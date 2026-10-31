@@ -1,6 +1,8 @@
 import { screen } from "@testing-library/react";
+import { Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
-import { mockApi, renderPage } from "../test/utils";
+import { ShellContext } from "../shell";
+import { currentLocation, mkMeta, mockApi, renderAt, renderPage } from "../test/utils";
 import { BacktestPage } from "./BacktestPage";
 
 const run = (id: number, status = "done") => ({
@@ -50,5 +52,45 @@ describe("BacktestPage", () => {
     await user.click(await screen.findByRole("button", { name: "+ 新建回测" }));
     await user.click(await screen.findByRole("button", { name: "提交到队列" }));
     expect(await screen.findByText(/已提交回测 #131/)).toBeInTheDocument();
+  });
+
+  it("clicking a row never puts more than five runs into comparison", async () => {
+    const fetch = mockApi({ "/api/backtests": [200, [1, 2, 3, 4, 5, 6].map((i) => run(i))], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    const boxes = await screen.findAllByRole("checkbox");
+    for (const b of boxes.slice(0, 5)) if (!(b as HTMLInputElement).checked) await user.click(b);
+    await user.click(screen.getByText("#6"));
+    expect(boxes.filter((b) => (b as HTMLInputElement).checked)).toHaveLength(5);
+    expect(boxes[5]).toBeChecked();
+    for (const [input] of fetch.mock.calls) {
+      const u = new URL(String(input), "http://x");
+      if (u.pathname === "/api/backtests/equity") expect(u.searchParams.getAll("ids").length).toBeLessThanOrEqual(5);
+    }
+  });
+
+  function renderRoute(path: string) {
+    return renderAt(
+      path,
+      <ShellContext.Provider value={{ meta: mkMeta(), account: "paper" }}>
+        <Routes>
+          <Route path="/backtest" element={<BacktestPage />} />
+          <Route path="/backtest/:id" element={<BacktestPage />} />
+        </Routes>
+      </ShellContext.Provider>,
+    );
+  }
+
+  it("opens the run named in /backtest/:id", async () => {
+    mockApi({ "/api/backtests": [200, [run(128), run(127)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS] });
+    renderRoute("/backtest/127");
+    expect(await screen.findByText("#127 · combo")).toBeInTheDocument();
+  });
+
+  it("clicking a row updates the url and keeps the account", async () => {
+    mockApi({ "/api/backtests": [200, [run(128), run(127)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS] });
+    const { user } = renderRoute("/backtest?account=paper");
+    await user.click(await screen.findByText("#127"));
+    expect(currentLocation()).toBe("/backtest/127?account=paper");
+    expect(screen.getByText("#127 · combo")).toBeInTheDocument();
   });
 });

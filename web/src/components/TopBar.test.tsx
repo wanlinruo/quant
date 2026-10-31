@@ -37,12 +37,12 @@ describe("TopBar", () => {
     expect(screen.getByText("暂无数据")).toBeInTheDocument();
   });
 
-  it("search jumps to stock page", async () => {
+  it("search jumps to stock page and keeps the account", async () => {
     const { user } = renderAt(
-      "/",
-      <TopBar meta={mkMeta()} account="paper" onAccountChange={vi.fn()} />,
+      "/?account=live",
+      <TopBar meta={mkMeta({ has: { live: true } })} account="live" onAccountChange={vi.fn()} />,
     );
     await user.type(screen.getByRole("searchbox"), "nvda{Enter}");
-    expect(currentLocation()).toBe("/stock/NVDA");
+    expect(currentLocation()).toBe("/stock/NVDA?account=live");
   });
 });

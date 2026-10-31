@@ -13,12 +13,16 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from api_fixtures import needs_db, seed, valid_submit_body
+from quant.api import queries
 from quant.api.app import create_app
 from quant.api.backtests import build_submission
 from quant.api.deps import get_engine, get_settings
+from quant.api.routes import market
 from quant.api.schemas import BacktestSubmit, CostsIn
-from quant.core.settings import CostSettings
+from quant.broker.sim import CostModel
+from quant.core.settings import CostSettings, Settings
 from quant.db.models import BacktestRun
+from quant.engine.runner import BacktestSpec
 
 
 def _clear() -> None:
@@ -164,6 +168,8 @@ def test_submit_invalid_does_not_insert(client_db: TestClient, db_url: str) -> N
 
 # ---- build_submission（无数据库）----
 
+LAST = date(2026, 10, 28)  # 最近一个已完成交易日
+
 FORM: dict[str, Any] = {
     "strategy": "etf_momentum", "universe": ["SPY", "QQQ"], "safe_asset": "SHY",
     "lookback": 126, "top_k": 1, "sma_window": 200, "start": date(2016, 1, 4),
@@ -178,11 +184,12 @@ def _req(**change: Any) -> BacktestSubmit:
 
 
 def test_build_submission_ok() -> None:
-    params, errors = build_submission(_req(), CostSettings())
+    params, errors = build_submission(_req(), CostSettings(), LAST)
     assert errors == []
     assert params["universe"] == ["SPY", "QQQ"]
     assert params["_costs"] == {
         "commission_per_share": "0.005", "min_commission": "1", "slippage": "0.0005",
+        "platform_per_share": "0", "platform_min": "0",
     }  # fmt: skip
     assert params["_cash"] == "100000"
 
@@ -196,8 +203,88 @@ def test_build_submission_ok() -> None:
         ({"safe_asset": "SPY"}, "策略参数"),
         ({"universe": []}, "策略参数"),
         ({"start": date(2026, 10, 28)}, "开始日期"),
+        ({"strategy": "nope"}, "策略"),
+        ({"cash": Decimal("-5")}, "初始资金"),
+        ({"cash": Decimal("0")}, "初始资金"),
+        ({"cash": Decimal("10000001")}, "初始资金"),
+        ({"end": date(2026, 10, 29)}, "结束日期"),
+        ({"lookback": 4}, "动量回看"),
+        ({"lookback": 505}, "动量回看"),
+        ({"top_k": 0}, "持有数量"),
+        ({"sma_window": 401}, "均线窗口"),
+        ({"universe": ["../../x"]}, "标的池"),
+        ({"safe_asset": ""}, "避险资产"),
     ],
 )
 def test_build_submission_errors(change: dict[str, Any], message: str) -> None:
-    _, errors = build_submission(_req(**change), CostSettings())
+    _, errors = build_submission(_req(**change), CostSettings(), LAST)
     assert any(message in e for e in errors), errors
+
+
+def test_build_submission_normalizes_symbols() -> None:
+    params, errors = build_submission(
+        _req(universe=[" spy", "qqq "], safe_asset="shy"), CostSettings(), LAST
+    )
+    assert errors == []
+    assert params["universe"] == ["SPY", "QQQ"] and params["safe_asset"] == "SHY"
+
+
+def test_build_submission_keeps_configured_platform_fees() -> None:
+    """面板只覆盖佣金、最低佣金和滑点；平台费与封顶沿用配置，和命令行回测口径一致。"""
+    configured = CostSettings(
+        commission_per_share=Decimal("0.0039"), min_commission=Decimal("0.99"),
+        platform_per_share=Decimal("0.004"), platform_min=Decimal("1"),
+        max_fee_pct=Decimal("0.005"),
+    )  # fmt: skip
+    params, errors = build_submission(_req(), configured, LAST)
+    assert errors == []
+    spec = BacktestSpec.from_stored(
+        "etf_momentum",
+        FORM["start"],
+        FORM["end"],
+        params,
+        Settings(broker="sim", TRADING_MODE="sim"),
+    )
+    expected = configured.model_copy(
+        update={"commission_per_share": Decimal("0.005"), "min_commission": Decimal("1")}
+    )
+    assert spec.costs == CostModel.from_settings(expected)
+
+
+@pytest.mark.db
+@needs_db
+def test_submit_type_errors_are_chinese_with_field_names(client_db: TestClient) -> None:
+    body = valid_submit_body() | {"cash": "", "lookback": "abc"}
+    body["costs"] = {**body["costs"], "slippage": None}
+    r = client_db.post("/api/backtests", json=body)
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert all(isinstance(d, str) for d in detail), detail
+    assert any(d.startswith("初始资金：") for d in detail), detail
+    assert any(d.startswith("动量回看：") for d in detail), detail
+    assert any(d.startswith("滑点：") for d in detail), detail
+
+
+@pytest.mark.parametrize("symbol", ["^VIX", "1ABC", "BRK-B"])
+def test_bars_with_invalid_symbol_is_empty(client_no_db: TestClient, symbol: str) -> None:
+    r = client_no_db.get(f"/api/market/bars/{symbol}")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_data_status_is_cached(client_no_db: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[date] = []
+
+    def fake(store: object, cal: object, expected: date) -> list[object]:
+        calls.append(expected)
+        return []
+
+    monkeypatch.setattr(queries, "data_status", fake)
+    now = [1000.0]
+    monkeypatch.setattr(market, "_now", lambda: now[0])
+    client_no_db.get("/api/market/data-status")
+    client_no_db.get("/api/market/data-status")
+    assert len(calls) == 1
+    now[0] += market.DATA_STATUS_TTL + 1
+    client_no_db.get("/api/market/data-status")
+    assert len(calls) == 2

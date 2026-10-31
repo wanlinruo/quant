@@ -45,7 +45,7 @@ export function TopBar({ meta, account, onAccountChange }: Props) {
         onKeyDown={(e) => {
           const sym = q.trim().toUpperCase();
           if (e.key === "Enter" && sym) {
-            navigate(`/stock/${encodeURIComponent(sym)}`);
+            navigate({ pathname: `/stock/${encodeURIComponent(sym)}`, search: `?account=${account}` });
             setQ("");
           }
         }}
