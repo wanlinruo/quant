@@ -1,4 +1,4 @@
-// 由 python -m quant.api.openapi --ts 生成，请勿手改；修改后端模型后运行 make api-types
+// 由 python -m quant.api.openapi --ts 生成（make api-types），请勿手改
 
 export type Mode = "sim" | "paper" | "live";
 

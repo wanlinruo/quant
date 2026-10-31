@@ -28,7 +28,10 @@ make check     # lint + test，与 CI 相同
 make lint      # ruff check + ruff format --check + mypy
 make test      # pytest（TRADING_MODE=sim）
 make format    # 自动修复并格式化
-make up        # 本地启动 postgres + dashboard（http://localhost:8501，强制 TRADING_MODE=sim）
+make up        # 本地启动 postgres + 面板（http://localhost:8501，强制 TRADING_MODE=sim）
+make web-dev   # 前端开发服务器（Vite，/api 代理到 localhost:8501）
+make web-check # 前端 lint + 类型检查 + 测试 + 构建（make check 已包含）
+make api-types # 修改接口模型后重新生成 web/src/api/types.ts
 make down      # 停止本地服务（保留数据卷）
 make logs      # 查看本地服务日志
 make migrate   # 本地数据库执行迁移；表结构只能通过 Alembic 迁移修改

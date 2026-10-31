@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -50,7 +51,7 @@ def test_openapi_export_has_submit() -> None:
 
 
 def test_ts_types_from_schema() -> None:
-    schemas = {
+    schemas: dict[str, Any] = {
         "Mode": {"type": "string", "enum": ["sim", "paper", "live"]},
         "Item": {
             "type": "object",
@@ -83,7 +84,7 @@ def test_ts_types_from_schema() -> None:
 def test_api_schemas_render_to_ts() -> None:
     ts = _export("--ts")
     assert "export interface Meta {" in ts
-    assert 'export type Mode = "sim" | "paper" | "live";' in ts or "mode: \"sim\"" in ts
+    assert 'export type Mode = "sim" | "paper" | "live";' in ts or 'mode: "sim"' in ts
 
 
 @pytest.mark.skipif(not WEB_TYPES.exists(), reason="前端生成文件尚未提交（Task 4）")

@@ -34,7 +34,7 @@
 | 运行环境 | 海外 Linux 云服务器，只运行 CI 部署的内容，**不在服务器上写代码、不手动改文件** |
 | 部署方式 | Docker Compose；镜像由 GitHub Actions 构建并推送到 GHCR |
 | 架构原则 | 研究回测与交易执行分离；Broker 抽象为接口；策略只输出目标仓位 |
-| 面板 | 网页面板查看行情、回测、交易、系统状态；**只读，不能下单**；可以提交回测任务 |
+| 面板 | 网页面板查看盘后市场复盘、组合（模拟盘与实盘可切换）、回测、个股与系统状态；**只读，不能下单**；可以提交回测任务 |
 | 网络访问 | 面板不暴露公网，通过 Tailscale 私有网络访问 |
 | 存储 | 行情数据用 Parquet（DuckDB 查询）；交易状态与回测结果用 PostgreSQL |
 
@@ -56,7 +56,7 @@ GitHub
   ├─ postgres         交易状态、信号、回测结果
   ├─ scheduler        定时任务：数据采集 → 信号 → 风控 → 执行 → 对账
   ├─ backtest-worker  从 Postgres 队列领取回测任务执行（限制 CPU/内存）
-  ├─ dashboard        Streamlit 面板（只读 + 提交回测）
+  ├─ dashboard        FastAPI 接口 + React 前端（只读 + 提交回测）
   └─ 卷 /data/parquet 行情数据
         │
         ├─→ 老虎 OpenAPI（先模拟账户，后实盘）
@@ -88,7 +88,7 @@ GitHub
 | 调度 | 自写的轻量调度循环（`jobs/scheduler.py`，scheduler 容器内）：按 XNYS 日历与美东时间触发；未用 APScheduler，因其 cron 触发器无法表达交易日与半日市（#32） |
 | 数据源 | yfinance（回测历史数据）、tigeropen（行情与交易） |
 | 快速研究 | vectorbt（可选，用于参数探索） |
-| 面板 | Streamlit + Plotly |
+| 面板 | FastAPI（只读接口）+ React + TypeScript（Vite 构建，图表用 lightweight-charts） |
 | 部署 | Docker、Docker Compose、GitHub Actions、GHCR |
 
 ---
@@ -147,9 +147,8 @@ quant/
 │   │   └── migrations/      # Alembic
 │   ├── notify/
 │   │   └── webhook.py       # 飞书/企业微信告警
-│   └── dashboard/
-│       ├── app.py
-│       └── pages/           # 行情、回测、交易、系统
+│   └── api/                 # 面板接口（FastAPI，只读 + 提交回测），同时托管前端
+├── web/                     # 面板前端（React + TypeScript + Vite）
 ├── scripts/
 │   └── phase0/              # 可行性验证脚本
 ├── research/                # notebooks，不参与部署
@@ -356,16 +355,19 @@ class Strategy(ABC):
 
 ---
 
-## 10. 面板（Streamlit）
+## 10. 面板（FastAPI + React）
+
+后端 `src/quant/api/`（FastAPI，由 uvicorn 在 8501 端口提供接口与前端静态文件），前端 `web/`（React + TypeScript）。改版设计与后续步骤见 `docs/superpowers/specs/2026-10-31-dashboard-redesign-design.md`。
 
 | 页面 | 内容 |
 |---|---|
-| 行情 | 标的 K 线，数据最新日期，校验状态 |
-| 回测 | 提交回测表单；历史回测列表；净值与回撤曲线；多个回测的指标对比 |
-| 交易 | 当前持仓、目标仓位与实际仓位的差异、订单与成交记录、账户净值曲线 |
-| 系统 | 各任务最近运行状态、最近告警、交易模式与熔断开关状态（只读显示） |
+| 市场 | 盘后复盘首页：大盘、板块、异动、新闻与财经日历（数据源接入前显示“数据接入中”），我的策略摘要 |
+| 组合 | 账户净值、当前持仓与目标仓位的差异、最新信号、订单与成交记录；顶栏可切换本地模拟 / 模拟盘 / 实盘账户 |
+| 回测 | 提交回测；历史回测列表；净值与回撤曲线；多个回测的指标对比 |
+| 系统 | 交易模式与熔断开关状态（只读显示）、各任务最近运行状态、最近失败、回测队列、行情数据状态 |
+| 个股 | 通过搜索或点击进入：K 线、成交量与均线 |
 
-约束：面板**不得包含任何下单、撤单、修改熔断开关的功能**。唯一的写操作是提交回测任务。
+约束：面板**不得包含任何下单、撤单、修改熔断开关的功能**。唯一的写操作是提交回测任务（`POST /api/backtests`），由 `tests/test_api_readonly.py` 保证。前端类型由后端模型生成（`make api-types`）。
 
 ---
 

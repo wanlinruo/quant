@@ -13,13 +13,11 @@ dependencies = [
     "fastapi>=0.162.0",
     "numpy>=2.5.4",
     "pandas>=3.1.0",
-    "plotly>=7.1.0",
     "psycopg[binary]>=3",
     "pyarrow>=26.0.0",
     "pydantic-settings>=2.16.2",
     "pyyaml>=6.0.3",
     "sqlalchemy>=2",
-    "streamlit>=1.66.1",
     "tigeropen>=3.8.0",
     "uvicorn[standard]>=0.54.0",
     "yfinance>=1.7.0",
@@ -68,7 +66,7 @@ mypy_path = "src"
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["tigeropen.*", "yfinance.*", "exchange_calendars.*", "plotly.*"]
+module = ["tigeropen.*", "yfinance.*", "exchange_calendars.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

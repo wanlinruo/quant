@@ -163,7 +163,7 @@ class SubmitResult(BaseModel):
 
 
 class BacktestDefaults(BaseModel):
-    """提交表单的默认值（与原 Streamlit 表单一致）。"""
+    """提交表单的默认值（与改版前的面板表单一致）。"""
 
     strategies: list[str]
     universe_options: list[str]

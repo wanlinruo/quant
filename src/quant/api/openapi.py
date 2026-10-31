@@ -15,7 +15,7 @@ from typing import Any
 from quant.api.app import create_app
 from quant.api.schemas import MODES
 
-HEADER = "// 由 python -m quant.api.openapi --ts 生成，请勿手改；修改后端模型后运行 make api-types\n\n"
+HEADER = "// 由 python -m quant.api.openapi --ts 生成（make api-types），请勿手改\n\n"
 
 
 def render() -> str:
