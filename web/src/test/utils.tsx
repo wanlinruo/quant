@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { MemoryRouter, useLocation } from "react-router";
 import { vi } from "vitest";
 import type { Meta, Mode } from "../api/types";
+import { ShellContext } from "../shell";
 
 export function mkMeta(over: Partial<Meta> & { has?: Partial<Record<Mode, boolean>> } = {}): Meta {
   const { has = {}, ...rest } = over;
@@ -43,7 +44,7 @@ export function currentLocation(): string {
   return document.querySelector('[data-testid="location"]')?.textContent ?? "";
 }
 
-type Route = [number, unknown];
+type Route = readonly [number, unknown];
 
 /** 按路径（不含查询参数）返回固定 JSON；未配置的路径返回 404。 */
 export function mockApi(routes: Record<string, Route>) {
@@ -56,4 +57,8 @@ export function mockApi(routes: Record<string, Route>) {
       headers: { "content-type": "application/json" },
     });
   });
+}
+
+export function renderPage(ui: ReactNode, path: string, meta: Meta = mkMeta(), account: Mode = "paper") {
+  return renderAt(path, <ShellContext.Provider value={{ meta, account }}>{ui}</ShellContext.Provider>);
 }

@@ -66,3 +66,17 @@ table.dt tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
 .pill.warn { background: #3a3218; color: #facc15; } .pill.info { background: #1c2a52; color: #8fb0ff; }
 .pill.hold { background: #222735; color: #b2b5be; }
 .error-box { color: #fca5a5; background: #3a171c; border: 1px solid #5c2229; border-radius: 6px; padding: 10px 12px; }
+
+/* 回测页 */
+.runs .run { display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 5px; white-space: nowrap; cursor: pointer; }
+.runs .run:hover { background: var(--panel-2); }
+.runs .run.on { background: #141c33; outline: 1px solid #2a3d73; }
+.statbar { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: var(--gap); margin-top: 10px; }
+.drawer { background: var(--panel); border-left: 1px solid #2a2e39; padding: 16px 18px; overflow: auto; z-index: 20; box-shadow: -12px 0 30px rgba(0, 0, 0, 0.5); }
+.field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
+.field > span { color: var(--muted); font-size: 11px; }
+.field input, .field select { background: var(--bg); border: 1px solid #2a2e39; border-radius: 6px; padding: 6px 9px; color: #e3e5ea; font: inherit; }
+.drawer .two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.drawer .three { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid #333847; border-radius: 10px; padding: 1px 8px; white-space: nowrap; }
