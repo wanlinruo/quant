@@ -268,3 +268,72 @@ def test_earnings_calendar_reaction_day() -> None:
         assert (date.fromisoformat(b) - date.fromisoformat(a)).days <= 27
     assert client.earning_calls[0][0] == "2026-09-01"
     assert client.earning_calls[-1][1] == "2026-11-09"
+
+
+class BriefClient:
+    """get_stock_delay_briefs 的假客户端：rows 为 {代码: (美东成交时间, halted)}。"""
+
+    def __init__(self, rows: dict[str, tuple[datetime, float]]) -> None:
+        self.rows = rows
+        self.calls: list[list[str]] = []
+
+    def get_stock_delay_briefs(self, symbols: list[str]) -> pd.DataFrame:
+        self.calls.append(list(symbols))
+        recs = [
+            {"symbol": s, "pre_close": 99.0, "halted": h,
+             "time": int(t.timestamp() * 1000), "open": 100.0, "high": 102.0,
+             "low": 98.0, "close": 101.0, "volume": 5000}
+            for s, (t, h) in self.rows.items() if s in symbols
+        ]  # fmt: skip
+        return pd.DataFrame(recs)
+
+
+def test_delayed_bars_batches_and_throttles() -> None:
+    from quant.core.calendar import TradingCalendar
+
+    d = date(2026, 10, 30)
+    syms = [f"S{i:03d}" for i in range(120)]
+    client = BriefClient({s: (datetime(2026, 10, 30, 16, 0, tzinfo=ET), 0.0) for s in syms})
+    clock = FakeClock()
+    p = TigerProvider(client, clock=clock, sleep=clock.sleep)
+    got = p.delayed_bars(syms, d, TradingCalendar())
+    assert [len(c) for c in client.calls] == [50, 50, 20]  # 单次最多 50 个
+    assert clock.sleeps == [pytest.approx(6.1), pytest.approx(6.1)]  # 10 次/分钟
+    assert set(got) == set(syms)
+    bar = got["S000"]
+    assert list(bar.columns) == list(BAR_COLUMNS)
+    assert bar.index.tolist() == [pd.Timestamp(d)]
+    assert bar["close"].iloc[0] == 101.0 and bar["volume"].iloc[0] == 5000
+
+
+def test_delayed_bars_only_closed_sessions_of_the_day() -> None:
+    from quant.core.calendar import TradingCalendar
+
+    d = date(2026, 10, 30)
+    client = BriefClient({
+        "OK": (datetime(2026, 10, 30, 16, 0, tzinfo=ET), 0.0),
+        "INTRADAY": (datetime(2026, 10, 30, 15, 40, tzinfo=ET), 0.0),  # 收盘前的行情
+        "STALE": (datetime(2026, 10, 29, 16, 0, tzinfo=ET), 0.0),  # 前一日（停牌等）
+        "HALTED": (datetime(2026, 10, 30, 16, 0, tzinfo=ET), 3.0),
+    })  # fmt: skip
+    got = _provider(client).delayed_bars(list(client.rows), d, TradingCalendar())
+    assert set(got) == {"OK"}
+
+
+def test_delayed_bars_half_day_close() -> None:
+    from quant.core.calendar import TradingCalendar
+
+    d = date(2026, 11, 27)  # 感恩节次日半日市，13:00 收盘
+    client = BriefClient({"OK": (datetime(2026, 11, 27, 13, 0, tzinfo=ET), 0.0)})
+    assert set(_provider(client).delayed_bars(["OK"], d, TradingCalendar())) == {"OK"}
+
+
+def test_delayed_bars_error_wrapped() -> None:
+    from quant.core.calendar import TradingCalendar
+
+    class Bad(BriefClient):
+        def get_stock_delay_briefs(self, symbols: list[str]) -> pd.DataFrame:
+            raise RuntimeError("boom")
+
+    with pytest.raises(DataUnavailableError, match="延迟行情"):
+        _provider(Bad({})).delayed_bars(["AAPL"], date(2026, 10, 30), TradingCalendar())

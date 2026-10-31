@@ -143,3 +143,96 @@ def test_not_ready_raises_retryable_and_keeps_history(tmp_path: Path) -> None:
     with pytest.raises(UniverseNotReady):
         sync_universe_bars(store, late, no_splits, CAL, m, START, END)
     assert sorted(store.symbols()) == m  # 历史数据没有被删除
+
+
+PREV = DAYS[-2]
+
+
+class LateSina(FakeSina):
+    """当日数据还没出：只返回到前一交易日。"""
+
+    def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        return super().daily_bars(symbol, start, PREV)
+
+
+def today_bars(close: float = 100.0, only: Sequence[str] | None = None):  # type: ignore[no-untyped-def]
+    calls: list[list[str]] = []
+
+    def fetch(symbols: Sequence[str], d: date) -> dict[str, pd.DataFrame]:
+        calls.append(list(symbols))
+        idx = pd.DatetimeIndex([pd.Timestamp(d)])
+        df = pd.DataFrame({"open": close, "high": close, "low": close, "close": close,
+                           "volume": 3000}, index=idx)  # fmt: skip
+        return {s: normalize_bars(df, d, d) for s in symbols if only is None or s in only}
+
+    return fetch, calls
+
+
+def test_today_bar_fills_late_sina(tmp_path: Path) -> None:
+    store = universe_store(tmp_path)
+    m = members(20)
+    fetch, calls = today_bars()
+    r = sync_universe_bars(store, LateSina(), no_splits, CAL, m, START, END, today=fetch)
+    assert sorted(r.fetched) == m and r.not_ready == []
+    assert calls == [m]  # 一次批量查询
+    bars = store.read_bars("S000", START, END)
+    assert bars.index[-1].date() == END and bars["volume"].iloc[-1] == 3000
+    assert len(bars) == len(DAYS)
+
+
+def test_today_only_asked_for_late_symbols(tmp_path: Path) -> None:
+    m = members(20)
+    fetch, calls = today_bars()
+    sync_universe_bars(universe_store(tmp_path), FakeSina(), no_splits, CAL, m, START, END,
+                       today=fetch)  # fmt: skip
+    assert calls == []  # 新浪已有当日数据：不查延迟行情
+
+
+def test_today_missing_symbols_still_not_ready(tmp_path: Path) -> None:
+    from quant.data.universe_bars import UniverseNotReady
+
+    m = members(20)
+    fetch, _ = today_bars(only=m[:10])
+    with pytest.raises(UniverseNotReady):
+        sync_universe_bars(universe_store(tmp_path), LateSina(), no_splits, CAL, m, START, END,
+                           today=fetch)  # fmt: skip
+
+
+def test_today_not_appended_over_gap(tmp_path: Path) -> None:
+    # 新浪只到前两个交易日：中间缺一根，不能直接拼当日
+    class Gap(FakeSina):
+        def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+            return super().daily_bars(symbol, start, DAYS[-3])
+
+    store = universe_store(tmp_path)
+    m = members(20)
+    fetch, _ = today_bars()
+    r = sync_universe_bars(store, Gap(), no_splits, CAL, m, START, END, today=fetch,
+                           min_coverage=0.0)  # fmt: skip
+    assert sorted(r.not_ready) == m
+
+
+def test_today_bar_split_adjusted_with_history(tmp_path: Path) -> None:
+    # 当日除权（1 拆 2）：延迟行情是拆后价 50，新浪历史是拆前价 100
+    store = universe_store(tmp_path)
+
+    def splits(symbols: Sequence[str], s: date, e: date) -> dict[str, list[tuple[date, float]]]:
+        return {"S000": [(END, 0.5)]}
+
+    fetch, _ = today_bars(close=50.0)
+    r = sync_universe_bars(store, LateSina(), splits, CAL, members(20), START, END, today=fetch)
+    assert "S000" in r.fetched
+    bars = store.read_bars("S000", START, END)
+    assert bars["close"].iloc[0] == pytest.approx(50.0)
+    assert bars["close"].iloc[-1] == pytest.approx(50.0)
+
+
+def test_today_source_error_counts_as_not_ready(tmp_path: Path) -> None:
+    from quant.data.universe_bars import UniverseNotReady
+
+    def broken(symbols: Sequence[str], d: date) -> dict[str, pd.DataFrame]:
+        raise DataUnavailableError("老虎拉取延迟行情失败")
+
+    with pytest.raises(UniverseNotReady):  # 可重试，而不是整体失败
+        sync_universe_bars(universe_store(tmp_path), LateSina(), no_splits, CAL, members(20),
+                           START, END, today=broken)  # fmt: skip

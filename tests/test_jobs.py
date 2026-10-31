@@ -544,3 +544,28 @@ class TestUniverseNotReady:
         text = daily_data(ctx, MONTH_END)
         assert daily.DATA_RETRY_SECONDS in slept
         assert "覆盖率 100.0%" in text
+
+    def test_today_filled_from_delayed_quotes(self, engine: Engine, tmp_path: Path) -> None:
+        # 新浪当日未出时用主数据源（老虎）延迟行情补齐当日一根：不必等待重试（#53）
+        class WithDelayed(TigerLike):
+            def __init__(self, last: date) -> None:
+                super().__init__(last=last)
+                self.delayed_calls: list[list[str]] = []
+
+            def delayed_bars(
+                self, symbols: list[str], d: date, cal: object
+            ) -> dict[str, pd.DataFrame]:
+                self.delayed_calls.append(list(symbols))
+                full = UniverseFake(last=d).frames
+                return {s: full[s][full[s].index == pd.Timestamp(d)] for s in symbols}
+
+        late = LateUniverse(MONTH_END)
+        late.rounds = -10_000  # 始终只到前一交易日
+        primary = WithDelayed(MONTH_END)
+        ctx = combo_ctx(engine, tmp_path, last=MONTH_END, provider=primary,
+                        universe_provider=late)  # fmt: skip
+        slept: list[float] = []
+        ctx.sleep = slept.append
+        text = daily_data(ctx, MONTH_END)
+        assert slept == [] and "覆盖率 100.0%" in text
+        assert primary.delayed_calls == [["AAA", "BBB", "CCC"]]
