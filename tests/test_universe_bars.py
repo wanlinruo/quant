@@ -236,3 +236,11 @@ def test_today_source_error_counts_as_not_ready(tmp_path: Path) -> None:
     with pytest.raises(UniverseNotReady):  # 可重试，而不是整体失败
         sync_universe_bars(universe_store(tmp_path), LateSina(), no_splits, CAL, members(20),
                            START, END, today=broken)  # fmt: skip
+
+
+def test_coverage_error_lists_symbols(tmp_path: Path) -> None:
+    # 错误信息直接列出缺失的代码，不用另查日志（#56）
+    m = members(100)
+    with pytest.raises(DataValidationError, match=r"缺失 6 只：S000, S001.*S005"):
+        sync_universe_bars(universe_store(tmp_path), FakeSina(fail=m[:6]), no_splits, CAL, m,
+                           START, END)  # fmt: skip

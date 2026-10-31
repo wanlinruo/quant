@@ -3,6 +3,10 @@
 - 数据源为新浪日 K（不占老虎历史日线额度）；新浪不做拆股调整，用老虎拆股记录换算到最新口径
   （adj_close = 调整后的收盘价，不含分红）。
 - 存放在单独的 Parquet 目录（universe_bars），不与老虎复权数据混在一起。
+- 口径（#56）：排序时同一代码先取主目录（老虎，含分红复权），没有才取候选池（只做拆股调整）。
+  所以七姐妹、MU 等固定标的的 126 日涨幅含分红，其余成分股不含。回测全部用 yfinance 含分红口径。
+  差异约等于 6 个月股息率（标普 500 成分股多数 < 1 个百分点，高股息股可达 2–3 个百分点），
+  只影响排名临界附近的少数股票；动量入选股涨幅通常在 50% 以上，判定可接受。
 - 新浪当日日线要收盘后数小时才陆续更新（2026-10-30 实测，#53）：新浪只到前一交易日时，
   用 today（老虎延迟行情）补上当日一根，再做拆股调整与校验。
 - 拿不到的记入 missing；校验不通过的（单日涨跌超过 60%，如没有记录的合股）记入 excluded
@@ -35,6 +39,7 @@ TodaySource = Callable[[Sequence[str], date], dict[str, pd.DataFrame]]
 # 未记录的合股（价格 ×2 以上）仍会被识别。未记录的拆股表现为暴跌，只会让该股排名靠后，不会被误选。
 UNIVERSE_MAX_MOVE = 0.6
 MIN_COVERAGE = 0.95
+SHOW_SYMBOLS = 20  # 错误信息里最多列出的代码数
 
 
 def universe_store(data_dir: Path) -> ParquetStore:
@@ -129,9 +134,12 @@ def sync_universe_bars(
     cov = result.coverage(len(members))
     if cov < min_coverage:
         report = Report()
-        report.extend(
-            [Issue("候选池", "coverage", end, f"覆盖率 {cov:.1%} 低于 {min_coverage:.0%}")]
-        )
+        detail = [f"覆盖率 {cov:.1%} 低于 {min_coverage:.0%}"]
+        for label, syms in (("缺失", sorted(result.missing)), ("排除", sorted(result.excluded))):
+            if syms:
+                more = " 等" if len(syms) > SHOW_SYMBOLS else ""
+                detail.append(f"{label} {len(syms)} 只：{', '.join(syms[:SHOW_SYMBOLS])}{more}")
+        report.extend([Issue("候选池", "coverage", end, "；".join(detail))])
         if len(result.not_ready) * 2 >= len(result.missing) + len(result.excluded):
             raise UniverseNotReady(report)
         raise DataValidationError(report)

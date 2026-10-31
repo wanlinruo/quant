@@ -1,8 +1,9 @@
-"""新浪美股日 K（#41）：只用于与主数据源抽样比对收盘价，不作为主数据源。
+"""新浪美股日 K（#41）：与主数据源抽样比对收盘价；组合策略的候选池日线（#47，见 universe_bars）。
 
 接口为新浪财经网站前端使用的 JSONP 接口，非官方 API，条款上仅限个人使用，随时可能变化。
 返回未做分红调整的日线，adj_close 为 NaN；比对只用 close（data/validate.py compare_sources）。
-东京服务器可访问（Yahoo 被限流，见 #7）。
+东京服务器可访问（Yahoo 被限流，见 #7）。候选池一次约 500 只连续请求，相邻两次至少间隔
+MIN_CALL_INTERVAL 秒，避免被限流（#56）。
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import pandas as pd
 from quant.data.providers.base import DataProvider, DataUnavailableError, normalize_bars
 
 URL = "https://stock.finance.sina.com.cn/usstock/api/jsonp.php/var/US_MinKService.getDailyK"
+MIN_CALL_INTERVAL = 0.3  # 秒
 _JSONP = re.compile(r"\((\[.*\])\)", re.DOTALL)
 
 # 代码 → 响应文本
@@ -64,14 +66,25 @@ class SinaProvider(DataProvider):
         fetch: Fetch = _http_get,
         retries: int = 3,
         sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._fetch = fetch
         self._retries = retries
         self._sleep = sleep
+        self._clock = clock
+        self._last_call: float | None = None
+
+    def _throttle(self) -> None:
+        if self._last_call is not None:
+            wait = MIN_CALL_INTERVAL - (self._clock() - self._last_call)
+            if wait > 0:
+                self._sleep(wait)
+        self._last_call = self._clock()
 
     def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
         if start > end:
             raise ValueError(f"start {start} 晚于 end {end}")
+        self._throttle()
         last: Exception | None = None
         for attempt in range(self._retries):
             try:

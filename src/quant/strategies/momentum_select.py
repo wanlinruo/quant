@@ -106,7 +106,8 @@ class MomentumSelect(Strategy):
     def warmup_days(self, params: Mapping[str, Any]) -> int:
         return MomentumParams.from_mapping(params).min_history + 30
 
-    def _ranking(self, ctx: Context, me: date, p: MomentumParams) -> list[str]:
+    def ranking(self, ctx: Context, me: date, p: MomentumParams) -> list[str]:
+        """调仓日 me 的完整排名（全部合格代码，涨幅降序）；按 (me, 参数) 缓存。"""
         key = (me, p)
         if key not in self._cache:
             if ctx.universe is None:
@@ -123,7 +124,7 @@ class MomentumSelect(Strategy):
         if ctx.universe is None:
             raise ValueError("momentum_select 需要成分股快照（Context.universe）")
         me = rebalance_day(self._cal, ctx.as_of)
-        picks = self._ranking(ctx, me, p)[: p.top_n]
+        picks = self.ranking(ctx, me, p)[: p.top_n]
         if p.earnings_exit:
             horizon = ctx.as_of
             for _ in range(p.earnings_exit_days):

@@ -136,7 +136,15 @@ class Combo(Strategy):
             if p.swing_weight > 0
             else {}
         )
+        factor = self.timing_factor(ctx, p)
+        return merge_weights(m, s, p.momentum_weight, p.swing_weight, factor)
+
+    def timing_factor(self, ctx: Context, p: ComboParams) -> float:
+        """信号日的择时系数（1 或 vol_scale）。"""
         start = ctx.as_of - timedelta(days=int((p.vol_window + 5) * 1.6) + 10)
         close = ctx.field([p.vol_symbol], "close", start)[p.vol_symbol]
-        factor = vol_factor(close, p.vol_window, p.vol_threshold, p.vol_scale)
-        return merge_weights(m, s, p.momentum_weight, p.swing_weight, factor)
+        return vol_factor(close, p.vol_window, p.vol_threshold, p.vol_scale)
+
+    @property
+    def momentum(self) -> MomentumSelect:
+        return self._momentum
