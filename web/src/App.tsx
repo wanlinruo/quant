@@ -25,6 +25,13 @@ function Shell({ meta }: { meta: Meta }) {
         <Route path="/stock/:symbol" element={<StockPage />} />
         <Route path="*" element={<div className="page"><div className="empty">页面不存在</div></div>} />
       </Routes>
+      <footer className="footer">
+        图表由{" "}
+        <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">
+          TradingView Lightweight Charts™
+        </a>{" "}
+        提供
+      </footer>
     </ShellContext.Provider>
   );
 }

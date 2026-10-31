@@ -15,4 +15,11 @@ describe("App", () => {
     render(<App initialPath="/system" />);
     expect(await screen.findByRole("link", { name: "系统" })).toHaveClass("active");
   });
+
+  it("credits TradingView Lightweight Charts in the footer", async () => {
+    mockApi({ "/api/meta": [200, mkMeta()] });
+    render(<App initialPath="/system" />);
+    const link = await screen.findByRole("link", { name: /TradingView Lightweight Charts/ });
+    expect(link).toHaveAttribute("href", "https://www.tradingview.com/");
+  });
 });
