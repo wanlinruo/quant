@@ -36,6 +36,28 @@ const PROFILE = {
   trades: [{ filled_at: "2026-10-01T14:00:00Z", symbol: "NVDA", side: "BUY", qty: 300, price: 130.5, commission: 1.17 }],
 };
 
+const METRICS = [
+  { key: "peTTM", label: "市盈率（TTM）", kind: "ratio", value: 39.0103 },
+  { key: "roeTTM", label: "ROE（TTM）", kind: "pct", value: 1.3718 },
+  { key: "grossMarginTTM", label: "毛利率", kind: "pct", value: null },
+];
+const EXTRAS = {
+  symbol: "NVDA", covered: true, name: "Nvidia", sector: "信息技术", sub_industry: "Semiconductors", market_cap: 4.5e12,
+  sector_etf: "XLK", sector_periods: { ...NONE, "1D": 0.012, "1Y": 0.25 },
+  peers: [
+    { symbol: "AVGO", name: "Broadcom", market_cap: 1.6e12, d1: 0.021, ytd: 0.4 },
+    { symbol: "AMD", name: "Advanced Micro Devices", market_cap: 2.4e11, d1: -0.03, ytd: null },
+  ],
+  metrics: METRICS, metrics_updated: "2026-10-30",
+  news: Array.from({ length: 7 }, (_, i) => ({
+    time: `2026-10-30T${String(20 - i).padStart(2, "0")}:00:00Z`, headline: i === 0 ? "Nvidia Q3 earnings beat" : `Nvidia headline ${i}`,
+    source: "CNBC", url: `https://n/${i}`, tags: ["NVDA"], category: i === 0 ? "earnings" : "company",
+  })),
+  news_updated: "2026-10-30T21:15:00-04:00",
+};
+const UNCOVERED = { symbol: "QQQ", covered: false, sector_periods: {}, peers: [], metrics: [], news: [] };
+const ROUTES = { "/api/market/bars/NVDA": [200, BARS], "/api/stock/NVDA/profile": [200, PROFILE], "/api/stock/NVDA/extras": [200, EXTRAS] } as const;
+
 function render(symbol: string, routes: Record<string, readonly [number, unknown]>, path?: string) {
   mockApi(routes);
   return renderPage(<Routes><Route path="/stock/:symbol" element={<StockPage />} /></Routes>, path ?? `/stock/${symbol}?account=paper`);
@@ -92,5 +114,64 @@ describe("StockPage", () => {
     render("NVDA", { "/api/market/bars/NVDA": [200, BARS], "/api/stock/NVDA/profile": [200, PROFILE] });
     await screen.findByText("持有中 · 波段仓 · 12.0%");
     expect(screen.getAllByText("数据接入中").length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("stock extras sector etf row", async () => {
+    render("NVDA", ROUTES);
+    const row = (await screen.findByText("板块 ETF · XLK 信息技术")).closest("tr")!;
+    expect(within(row).getByText("+1.20%")).toBeInTheDocument();
+    expect(within(row).getByText("+25.00%")).toBeInTheDocument();
+  });
+
+  it("stock extras key stats cap and sector", async () => {
+    render("NVDA", ROUTES);
+    expect(await screen.findByText("$4.50T")).toBeInTheDocument();
+    expect(screen.getByTitle("Semiconductors")).toHaveTextContent("信息技术");
+  });
+
+  it("stock extras metrics", async () => {
+    render("NVDA", ROUTES);
+    const panel = await screen.findByTestId("metrics");
+    expect(within(panel).getByText("39.01×")).toBeInTheDocument();
+    expect(within(panel).getByText("137.2%")).toBeInTheDocument();
+    expect(within(panel).getByText("毛利率").closest("tr")).toHaveTextContent("—");
+    expect(screen.getByText("更新于 10-30")).toBeInTheDocument();
+  });
+
+  it("stock extras news panel and tab", async () => {
+    const { user } = render("NVDA", ROUTES);
+    const side = await screen.findByTestId("stock-news-side");
+    expect(within(side).getAllByRole("link")).toHaveLength(5);
+    expect(within(side).getByRole("link", { name: "Nvidia Q3 earnings beat" })).toHaveAttribute("rel", "noreferrer");
+    expect(within(side).getByText("10-30 16:00")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "新闻" }));
+    const tab = await screen.findByTestId("stock-news-tab");
+    expect(within(tab).getAllByRole("link")).toHaveLength(7);
+    expect(within(tab).getByText("财报")).toBeInTheDocument();
+  });
+
+  it("stock extras peers link with account", async () => {
+    render("NVDA", ROUTES);
+    const peers = await screen.findByTestId("peers");
+    expect(within(peers).getByRole("link", { name: "AVGO" })).toHaveAttribute("href", "/stock/AVGO?account=paper");
+    expect(within(peers).getByText("$1.60T")).toBeInTheDocument();
+    expect(within(peers).getByText("-3.00%")).toBeInTheDocument();
+  });
+
+  it("stock extras uncovered", async () => {
+    render("QQQ", {
+      "/api/market/bars/QQQ": [200, BARS],
+      "/api/stock/QQQ/profile": [200, { ...PROFILE, symbol: "QQQ" }],
+      "/api/stock/QQQ/extras": [200, UNCOVERED],
+    });
+    await screen.findByText("持有中 · 波段仓 · 12.0%");
+    expect(await screen.findAllByText("仅覆盖标普 500 成分股与持仓")).toHaveLength(3);
+  });
+
+  it("stock extras holding outside sp500 and no recent news", async () => {
+    const ext = { symbol: "NVDA", covered: true, in_sp500: false, sector_periods: {}, peers: [], metrics: [], news: [], news_updated: "2026-10-30T21:15:00-04:00" };
+    render("NVDA", { ...ROUTES, "/api/stock/NVDA/extras": [200, ext] });
+    expect(await screen.findByText("非标普 500 成分股，无同板块数据")).toBeInTheDocument();
+    expect(screen.getAllByText("近 7 天无新闻").length).toBeGreaterThan(0);
   });
 });

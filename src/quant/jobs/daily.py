@@ -65,7 +65,7 @@ from quant.strategies.universe import Constituents
 log = logging.getLogger("quant.jobs")
 
 JOBS = ("daily_data", "daily_signal", "daily_execute", "daily_report", "market_data",
-        "market_extras")  # fmt: skip
+        "market_extras", "stock_data")  # fmt: skip
 DATA_RETRIES = 3
 DATA_RETRY_SECONDS = 15 * 60
 COMPARE_DAYS = 45
@@ -530,6 +530,18 @@ def market_extras(ctx: JobContext, d: date) -> str:
     )
 
 
+def stock_data(ctx: JobContext, d: date) -> str:
+    """个股页新闻与财务指标（#70 第 3 批）→ data_dir/market/stocks/{SYMBOL}.json。与交易无关。"""
+    key = _key(ctx.settings.finnhub_api_key)
+    if key is None:
+        return "未配置 Finnhub key（QUANT_FINNHUB_API_KEY），跳过"
+    from quant.data.providers.finnhub import FinnhubClient
+    from quant.market.stock_job import run_stock_data
+
+    return run_stock_data(data_dir=ctx.settings.data_dir, today=d, now=ctx.now(),
+                          holdings=_all_holdings(ctx), finnhub=FinnhubClient(key))  # fmt: skip
+
+
 JOB_FUNCS: dict[str, Callable[[JobContext, date], str]] = {
     "daily_data": daily_data,
     "daily_signal": daily_signal,
@@ -537,6 +549,7 @@ JOB_FUNCS: dict[str, Callable[[JobContext, date], str]] = {
     "daily_report": daily_report,
     "market_data": market_data,
     "market_extras": market_extras,
+    "stock_data": stock_data,
 }
 
 # 这些异常在抛出前已经通知过

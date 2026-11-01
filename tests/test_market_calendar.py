@@ -103,3 +103,11 @@ def test_calendar_many_earnings_title() -> None:
     _, up = build_calendar([], {}, earn, [], set(), set(syms), NOW, date(2026, 11, 5))
     assert up[0].title == "A1 · A2 · A3 · A4 等 6 只财报"
     assert up[0].session is None and up[0].date_only
+
+
+def test_eps_rounded() -> None:
+    earn = [EarningsRaw("AAPL", date(2026, 11, 10), "amc", 2.0221, None),
+            EarningsRaw("MSFT", date(2026, 11, 11), "amc", 3.8, None),
+            EarningsRaw("XOM", date(2026, 11, 12), "bmo", 1.95, None)]  # fmt: skip
+    _, up = build_calendar([], {}, earn, [], {"AAPL", "MSFT", "XOM"}, set(), NOW, date(2026, 11, 5))
+    assert [i.forecast for i in up] == ["2.02", "3.8", "1.95"]
