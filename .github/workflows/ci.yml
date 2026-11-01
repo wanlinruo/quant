@@ -112,6 +112,8 @@ jobs:
           docker run --rm -e TRADING_MODE=sim quant:ci \
             python -c "from quant.core.settings import load_settings; s = load_settings(); assert s.trading_mode == 'sim', s; print('ok', s.broker)"
           docker run -d --name panel -e TRADING_MODE=sim -p 8501:8501 quant:ci
-          curl -sf --retry 10 --retry-connrefused --retry-delay 1 http://localhost:8501/api/health | grep -q '"ok"'
+          # 容器刚启动时连接可能被重置（curl 不重试），循环等待服务就绪
+          for i in $(seq 30); do curl -sf http://localhost:8501/api/health && break; sleep 1; done
+          curl -sf http://localhost:8501/api/health | grep -q '"ok"'
           curl -sf http://localhost:8501/backtest/1 | grep -q 'id="root"'
           docker rm -f panel
