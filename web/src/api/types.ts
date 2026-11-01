@@ -288,6 +288,13 @@ export interface Meta {
   data_as_of: string | null;
 }
 
+export interface MetricOut {
+  key: string;
+  label: string;
+  kind: "ratio" | "pct";
+  value: number | null;
+}
+
 export interface MoverOut {
   symbol: string;
   name: string | null;
@@ -331,6 +338,14 @@ export interface OrderOut {
   filled_qty: number;
   avg_fill_price: number | null;
   reason: string;
+}
+
+export interface PeerOut {
+  symbol: string;
+  name: string | null;
+  market_cap: number | null;
+  d1: number | null;
+  ytd: number | null;
 }
 
 export interface PerfPoint {
@@ -499,6 +514,22 @@ export interface SleeveAlloc {
 export interface StatOut {
   value: number | null;
   prev: number | null;
+}
+
+export interface StockExtras {
+  symbol: string;
+  covered: boolean;
+  name?: string | null;
+  sector?: string | null;
+  sub_industry?: string | null;
+  market_cap?: number | null;
+  sector_etf?: string | null;
+  sector_periods?: Record<string, number | null>;
+  peers?: PeerOut[];
+  metrics?: MetricOut[];
+  metrics_updated?: string | null;
+  news?: NewsItemOut[];
+  news_updated?: string | null;
 }
 
 export interface StockProfile {

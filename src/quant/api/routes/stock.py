@@ -8,9 +8,17 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from quant.api import stock
-from quant.api.deps import get_constituents, get_events, get_session, get_store, get_universe_store
+from quant.api.deps import (
+    get_constituents,
+    get_events,
+    get_session,
+    get_settings,
+    get_store,
+    get_universe_store,
+)
 from quant.api.portfolio import Stores
-from quant.api.schemas import Mode, StockProfile
+from quant.api.schemas import Mode, StockExtras, StockProfile
+from quant.api.stock_extras import stock_extras
 from quant.core.calendar import get_calendar
 
 router = APIRouter()
@@ -23,3 +31,9 @@ def profile(symbol: str, mode: Mode, s: SessionDep) -> StockProfile:
     return stock.profile(
         s, mode, symbol.upper(), stores, get_events(), get_constituents(), get_calendar()
     )
+
+
+@router.get("/stock/{symbol}/extras")
+def extras(symbol: str) -> StockExtras:
+    """估值与财务、相关新闻、同板块、市值与板块（stock_data / market_data 生成的文件，只读）。"""
+    return stock_extras(get_settings().data_dir, symbol)

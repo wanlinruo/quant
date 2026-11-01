@@ -601,3 +601,37 @@ class MarketCalendar(BaseModel):
     generated_at: datetime | None = None
     released: list[CalItemOut] = []
     upcoming: list[CalItemOut] = []
+
+
+# ---- 个股页估值、新闻、同板块（#70 第 3 批）----
+
+
+class MetricOut(BaseModel):
+    key: str
+    label: str
+    kind: Literal["ratio", "pct"]
+    value: float | None  # pct 为小数（0.012 即 1.2%）
+
+
+class PeerOut(BaseModel):
+    symbol: str
+    name: str | None
+    market_cap: float | None
+    d1: float | None
+    ytd: float | None
+
+
+class StockExtras(BaseModel):
+    symbol: str
+    covered: bool  # 是否在“标普 500 成分 ∪ 持仓”的覆盖范围内
+    name: str | None = None
+    sector: str | None = None
+    sub_industry: str | None = None
+    market_cap: float | None = None
+    sector_etf: str | None = None
+    sector_periods: dict[str, float | None] = {}
+    peers: list[PeerOut] = []
+    metrics: list[MetricOut] = []
+    metrics_updated: date | None = None
+    news: list[NewsItemOut] = []
+    news_updated: datetime | None = None
