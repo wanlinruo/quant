@@ -14,6 +14,8 @@ type Props = {
   percent?: boolean;
   /** 在第一条线上标出的日期（如调仓日），YYYY-MM-DD */
   markers?: string[];
+  /** 标记的文字（默认“调仓”） */
+  markerText?: string;
   /** 对数纵轴（净值对比） */
   logScale?: boolean;
   /** 从该日期（YYYY-MM-DD）起加浅蓝底色，如样本外区间 */
@@ -21,7 +23,7 @@ type Props = {
 };
 
 /** 折线图（lightweight-charts）。time 为 YYYY-MM-DD。 */
-export function LineChart({ series, height, percent, markers, logScale, shadeFrom }: Props) {
+export function LineChart({ series, height, percent, markers, markerText = "调仓", logScale, shadeFrom }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -50,7 +52,7 @@ export function LineChart({ series, height, percent, markers, logScale, shadeFro
         const have = new Set(s.points.map((p) => p.time));
         createSeriesMarkers(
           line,
-          markers.filter((t) => have.has(t)).map((t) => ({ time: t, position: "aboveBar", color: "#f5a623", shape: "arrowDown", text: "调仓" })),
+          markers.filter((t) => have.has(t)).map((t) => ({ time: t, position: "aboveBar", color: "#f5a623", shape: "arrowDown", text: markerText })),
         );
       }
     });
@@ -63,7 +65,7 @@ export function LineChart({ series, height, percent, markers, logScale, shadeFro
     }
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [series, height, percent, markers, logScale, shadeFrom]);
+  }, [series, height, percent, markers, markerText, logScale, shadeFrom]);
 
   return <div ref={ref} style={{ height }} />;
 }

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import type { BacktestAnalysis, BacktestDataStatus, BacktestDefaults, BacktestRunOut, EquityPoint } from "../api/types";
+import type { BacktestAnalysis, BacktestDataStatus, BacktestDefaults, BacktestRunOut, BtTradeOut, EquityPoint } from "../api/types";
 import { ApiState } from "../components/ApiState";
 import { DataTable } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
@@ -12,6 +12,8 @@ import { useApi } from "../hooks/useApi";
 import { fmtMetric, METRICS } from "../lib/metrics";
 import { OverviewTab, ParamsTab, ReturnsTab, RiskTab } from "./backtest/AnalysisTabs";
 import { MainChart } from "./backtest/MainChart";
+import { PositionsTab } from "./backtest/PositionsTab";
+import { TradesTab } from "./backtest/TradesTab";
 import { RunHeader } from "./backtest/RunHeader";
 import { RunList } from "./backtest/RunList";
 import { BacktestSubmitDrawer, type DrawerInitial } from "./BacktestSubmitDrawer";
@@ -51,6 +53,7 @@ export function BacktestPage() {
   const [drawer, setDrawer] = useState<DrawerInitial | "new" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("overview");
+  const [trade, setTrade] = useState<BtTradeOut | null>(null);
 
   const { id: routeId } = useParams();
   const navigate = useNavigate();
@@ -139,9 +142,14 @@ export function BacktestPage() {
                 onCopy={() => setDrawer({ strategy: current.strategy, start: current.start, end: current.end, params: current.params, costs: current.costs, cash: a?.initial_cash != null ? String(a.initial_cash) : null })}
                 onExport={() => a && exportCsv(a)}
               />
-              <MainChart s={a?.series} strategy={current.strategy} oosStart={a?.oos_start ?? "2023-01-01"} />
+              <MainChart
+                s={a?.series}
+                strategy={current.strategy}
+                oosStart={a?.oos_start ?? "2023-01-01"}
+                marks={trade ? [trade.open_date, ...(trade.close_date ? [trade.close_date] : [])] : undefined}
+              />
               <Panel title={TABS.find((t) => t.key === tab)?.label ?? ""} right={<Tabs tabs={TABS.map((t) => ({ key: t.key, label: t.label }))} value={tab} onChange={setTab} />}>
-                <TabBody tab={tab} a={a} loading={analysis.loading} />
+                <TabBody tab={tab} a={a} loading={analysis.loading} runId={current.id} trade={trade?.seq ?? null} onTrade={setTrade} />
               </Panel>
             </div>
           ) : (
@@ -165,9 +173,11 @@ export function BacktestPage() {
   );
 }
 
-function TabBody({ tab, a, loading }: { tab: TabKey; a: BacktestAnalysis | null; loading: boolean }) {
-  if (tab === "trades" || tab === "positions")
-    return <EmptyState kind="pending" note="B 批接入（新存储：逐笔交易与每日持仓）" />;
+type TabBodyProps = { tab: TabKey; a: BacktestAnalysis | null; loading: boolean; runId: number; trade: number | null; onTrade: (t: BtTradeOut) => void };
+
+function TabBody({ tab, a, loading, runId, trade, onTrade }: TabBodyProps) {
+  if (tab === "trades") return <TradesTab runId={runId} selected={trade} onSelect={onTrade} />;
+  if (tab === "positions") return <PositionsTab runId={runId} />;
   if (tab === "robust") return <EmptyState kind="pending" note="待稳健性检验（#68）：参数敏感性、walk-forward、成本与起点敏感性" />;
   if (!a) return loading ? <div className="muted sm">加载中…</div> : <EmptyState />;
   if (tab === "params") return <ParamsTab a={a} />;

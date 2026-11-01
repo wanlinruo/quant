@@ -10,7 +10,7 @@ function line(name: string, color: string, dates: string[], vals: (number | null
 }
 
 /** 主图（常驻，切换标签时不重新挂载）：策略、QQQ、SPY 净值（起点 = 1，对数 / 线性），样本外蓝底；回撤对比。 */
-export function MainChart({ s, strategy, oosStart }: { s: BtSeriesOut | null | undefined; strategy: string; oosStart: string }) {
+export function MainChart({ s, strategy, oosStart, marks }: { s: BtSeriesOut | null | undefined; strategy: string; oosStart: string; marks?: string[] }) {
   const [log, setLog] = useState(true);
   const nav = useMemo(() => {
     if (!s) return [];
@@ -33,7 +33,7 @@ export function MainChart({ s, strategy, oosStart }: { s: BtSeriesOut | null | u
           </span>
         }
       >
-        {nav.length ? <LineChart height={300} series={nav} logScale={log} shadeFrom={oosStart} /> : <EmptyState />}
+        {nav.length ? <LineChart height={300} series={nav} logScale={log} shadeFrom={oosStart} markers={marks} markerText="开 / 平" /> : <EmptyState />}
       </Panel>
       <Panel title="回撤对比">{dd.length ? <LineChart height={140} series={dd} percent /> : <EmptyState />}</Panel>
     </div>

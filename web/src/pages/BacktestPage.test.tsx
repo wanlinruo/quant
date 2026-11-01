@@ -1,10 +1,11 @@
 import { screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { ShellContext } from "../shell";
 import { currentLocation, mkMeta, mockApi, renderAt, renderPage } from "../test/utils";
 import { BacktestPage } from "./BacktestPage";
-import { ANALYSIS } from "./backtest/analysisFixture";
+import { ANALYSIS, POSITIONS, TRADES } from "./backtest/analysisFixture";
 
 const run = (id: number, status = "done") => ({
   id, strategy: "combo", status, start: "2016-10-28", end: "2026-10-29", params: {}, costs: null,
@@ -179,7 +180,6 @@ describe("BacktestPage", () => {
     const chart = await screen.findByTestId("main-chart");
     await user.click(screen.getByRole("button", { name: "收益分析" }));
     await user.click(screen.getByRole("button", { name: "交易明细" }));
-    expect(screen.getByText(/B 批接入/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "稳健性" }));
     expect(screen.getByText(/#68/)).toBeInTheDocument();
     expect(screen.getByTestId("main-chart")).toBe(chart);
@@ -196,7 +196,7 @@ describe("BacktestPage", () => {
   });
 
   async function openTab(name: string) {
-    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS] });
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS], "/api/backtests/128/trades": [200, TRADES], "/api/backtests/128/positions": [200, POSITIONS] });
     const r = renderPage(<BacktestPage />, "/backtest");
     await screen.findByText("QQQ 10.10%");
     await r.user.click(screen.getByRole("button", { name }));
@@ -218,7 +218,6 @@ describe("BacktestPage", () => {
     const cell = within(tab).getByText("+5.0%");
     expect(cell.closest("td")).toHaveClass("up");
     expect(within(tab).getByText("2023-01-31")).toBeInTheDocument();
-    expect(within(tab).getByText(/子仓贡献.*B 批接入/)).toBeInTheDocument();
   });
 
   it("risk tab", async () => {
@@ -226,7 +225,6 @@ describe("BacktestPage", () => {
     expect(within(tab).getByText("-21.30%")).toBeInTheDocument();
     expect(within(tab).getByText("82%")).toBeInTheDocument();
     expect(within(tab).getByText("VaR 95%（日）")).toBeInTheDocument();
-    expect(within(tab).getByText(/择时效果.*B 批接入/)).toBeInTheDocument();
   });
 
   it("params tab", async () => {
@@ -247,5 +245,46 @@ describe("BacktestPage", () => {
     expect(btn).toHaveAttribute("title", "在左侧再勾选一个回测即可对比");
     expect(await screen.findByText(note)).toBeInTheDocument();
     expect(screen.getByText("#128 · combo")).toBeInTheDocument();
+  });
+
+  it("trades tab", async () => {
+    const tab = await openTab("交易明细");
+    expect(await within(tab).findByText("50.0%")).toBeInTheDocument();
+    expect(within(tab).getByText("4.00")).toBeInTheDocument();
+    const table = within(tab).getByTestId("trade-table");
+    expect(within(table).getAllByRole("row")).toHaveLength(4);
+    expect(within(table).getByText("持有中")).toBeInTheDocument();
+    const r = within(table).getByText("BBB").closest("tr")!;
+    await userEvent.click(r);
+    expect(r).toHaveAttribute("aria-selected", "true");
+    await userEvent.click(within(tab).getByRole("button", { name: "波段仓" }));
+    expect(within(table).queryByText("AAA")).not.toBeInTheDocument();
+    expect(within(tab).getByTestId("scatter").querySelectorAll("circle")).toHaveLength(1); // 散点跟随筛选
+    expect(within(tab).getAllByText("动量排名跌出前 10").length).toBeGreaterThan(0);
+  });
+
+  it("positions tab", async () => {
+    const tab = await openTab("持仓变化");
+    expect(await within(tab).findByTestId("stack")).toBeInTheDocument();
+    expect(within(tab).getByTestId("stack").querySelectorAll("rect.timing")).toHaveLength(1);
+    expect(within(tab).getByText("25.0%")).toBeInTheDocument();
+    expect(within(tab).getByText("120 天")).toBeInTheDocument();
+  });
+
+  it("returns and risk show sleeves and timing", async () => {
+    const ret = await openTab("收益分析");
+    expect(within(ret).queryByText(/子仓贡献.*B 批接入/)).not.toBeInTheDocument();
+    expect(within(ret).getByText("子仓累计收益贡献")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "回撤与风险" }));
+    const risk = screen.getByTestId("tab-回撤与风险");
+    expect(within(risk).getByText("+3.00%")).toBeInTheDocument();
+  });
+
+  it("old run shows note in trades tab", async () => {
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS], "/api/backtests/128/trades": [200, { note: "此回测运行于交易记录功能上线之前，重新运行（复制参数新建）即可查看", trades: [], by_reason: [], by_symbol: [] }] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await screen.findByText("QQQ 10.10%");
+    await user.click(screen.getByRole("button", { name: "交易明细" }));
+    expect(await screen.findByText(/重新运行/)).toBeInTheDocument();
   });
 });
