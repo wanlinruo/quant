@@ -182,6 +182,7 @@ class BacktestDefaults(BaseModel):
     start: date
     end: date
     data_end: date | None = None  # 服务器回测数据截止日（tiingo 模式）
+    min_start: date | None = None  # 服务器回测最早开始日（tiingo 模式）
 
 
 # ---- 组合页（#65）----

@@ -100,6 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
     bd_sub.add_parser("status", help="查看补齐进度与额度")
     bd_sync = bd_sub.add_parser("sync", help="立即补拉（受额度限制）")
     bd_sync.add_argument("--max", type=int, default=10, help="最多补几只")
+    bd_sync.add_argument("--retry-unavailable", action="store_true",
+                         help="先清除本月“拿不到 / 校验不过”的记录，再补拉")  # fmt: skip
 
     tr = sub.add_parser("trading", help="查看或人工切换熔断开关 trading_enabled")
     tr.add_argument("action", choices=["status", "enable", "disable"])
@@ -390,6 +392,10 @@ def backtest_data_command(args: argparse.Namespace, settings: Settings, out: Any
         if runner is None:
             print("需要 QUANT_DATA__BACKTEST_SOURCE=tiingo 且配置 QUANT_TIINGO_API_KEY", file=out)
             return 1
+        if args.retry_unavailable:
+            cleared = bd.clear_unavailable(bd.state_path(data_dir))
+            runner.state = bd.BackfillState.load(bd.state_path(data_dir))
+            print(f"已清除：{', '.join(cleared) or '无'}", file=out)
         wanted, today = runner.wanted(), runner.today()
         for _ in range(max(0, args.max)):
             r = bd.backfill_step(runner.provider, runner.store, runner.state, runner.ledger,

@@ -15,7 +15,14 @@ from sqlalchemy.orm import Session
 from quant.broker.sim import CostModel
 from quant.core.calendar import TradingCalendar, get_calendar
 from quant.core.settings import CostSettings, Settings
-from quant.data.backtest_data import backtest_store, earnings_path
+from quant.data.backtest_data import (
+    FULL_START,
+    MIN_BACKTEST_START,
+    BackfillState,
+    backtest_store,
+    earnings_path,
+    state_path,
+)
 from quant.data.events import live_earnings_path, load_earnings, load_fomc_dates
 from quant.data.pipeline import DataValidationError, ensure_bars
 from quant.data.providers.base import DataProvider, DataUnavailableError
@@ -109,7 +116,7 @@ def _local_bars(
     return out, missing
 
 
-def _backtest_events(data_dir: Path) -> tuple[EventCalendar, str]:
+def _backtest_events(data_dir: Path, tiingo: bool) -> tuple[EventCalendar, str]:
     """回测用的财报日：earnings.csv ∪ earnings_sp500.csv（SEC EDGAR）∪ earnings_live.csv + FOMC。"""
     earnings: dict[str, set[date]] = {}
     sp500 = earnings_path(data_dir)
@@ -120,7 +127,13 @@ def _backtest_events(data_dir: Path) -> tuple[EventCalendar, str]:
     cal = EventCalendar(
         earnings={k: tuple(sorted(v)) for k, v in earnings.items()}, fomc=load_fomc_dates()
     )
-    return cal, "complete" if sp500.exists() else "none"
+    if not sp500.exists():
+        flag = "none"
+    elif tiingo:  # 服务器：同步分批进行，整轮完成后才算完整
+        flag = "complete" if BackfillState.load(state_path(data_dir)).earnings_month else "partial"
+    else:
+        flag = "complete"
+    return cal, flag
 
 
 def run_spec(
@@ -153,6 +166,7 @@ def run_spec(
                 f"回测数据尚未补齐：缺 {', '.join(missing)}（服务器在空闲时按 Tiingo 额度补齐，"
                 "可用 quant backtest-data status 查看进度）"
             )
+        _check_start(bars, data_start, cal)
     else:
         store = ParquetStore(data_dir)
         bars = ensure_bars(
@@ -187,8 +201,10 @@ def run_spec(
                 except (DataUnavailableError, DataValidationError):
                     continue
         bars = {**cand, **bars}
-        by_year = missing_ratio_by_year(universe, set(bars), spec.start, spec.end)
-        events, earnings_flag = _backtest_events(data_dir)
+        ranges = {s: (pd.Timestamp(df.index[0]).date(), pd.Timestamp(df.index[-1]).date())
+                  for s, df in bars.items()}  # fmt: skip
+        by_year = missing_ratio_by_year(universe, set(bars), spec.start, spec.end, ranges)
+        events, earnings_flag = _backtest_events(data_dir, tiingo)
         info |= {
             "coverage": float(1 - by_year.mean()) if len(by_year) else 1.0,
             "missing_by_year": {str(y): float(v) for y, v in by_year.items()},
@@ -202,7 +218,41 @@ def run_spec(
     )
     bt = Backtester(strategy, bars, cal, spec.costs, spec.cash, plan, params, BENCHMARK,
                     events=events, universe=universe)  # fmt: skip
-    return replace(bt.run(spec.start, spec.end), data_info=info)
+    result = bt.run(spec.start, spec.end)
+    stale = _stale_holdings(result.weights, bars, spec.end, cal)
+    if stale:
+        info["stale_holdings"] = stale
+    return replace(result, data_info=info)
+
+
+def _check_start(bars: Mapping[str, pd.DataFrame], data_start: date, cal: TradingCalendar) -> None:
+    """本地数据从 FULL_START 起：早于此时就存在的标的若首日晚于预热起点，说明开始日期过早。"""
+    need = data_start if cal.is_trading_day(data_start) else cal.next_trading_day(data_start)
+    for s, df in bars.items():
+        first = pd.Timestamp(df.index[0]).date()
+        if first > need + timedelta(days=7) and first <= FULL_START + timedelta(days=15):
+            raise BacktestDataError(
+                f"开始日期过早：服务器回测数据从 {FULL_START} 起（{s} 最早 {first}），"
+                f"策略预热需要 {data_start} 起的数据；请把开始日期设为 {MIN_BACKTEST_START} 之后"
+            )
+
+
+def _stale_holdings(
+    weights: pd.DataFrame, bars: Mapping[str, pd.DataFrame], end: date, cal: TradingCalendar
+) -> dict[str, str]:
+    """区间结束时仍持有、但数据在结束前已中断的标的（多为退市）：按最后价格冻结，结果偏乐观。"""
+    if weights.empty:
+        return {}
+    last_day = end if cal.is_trading_day(end) else cal.previous_trading_day(end)
+    final = weights.iloc[-1]
+    out: dict[str, str] = {}
+    for s, w in final.items():
+        df = bars.get(str(s))
+        if w > 1e-9 and df is not None and len(df):
+            last = pd.Timestamp(df.index[-1]).date()
+            if last < last_day:
+                out[str(s)] = last.isoformat()
+    return out
 
 
 def save_result(session: Session, run_id: int, result: BacktestResult) -> None:

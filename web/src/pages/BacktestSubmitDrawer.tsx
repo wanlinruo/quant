@@ -55,10 +55,10 @@ export function BacktestSubmitDrawer({ defaults, onClose, onSubmitted }: Props) 
     }
   }
 
-  const field = (label: string, k: keyof typeof form, type = "text", max?: string) => (
+  const field = (label: string, k: keyof typeof form, type = "text", max?: string, min?: string) => (
     <label className="field">
       <span>{label}</span>
-      <input type={type} value={form[k] as string} onChange={set(k)} max={max} />
+      <input type={type} value={form[k] as string} onChange={set(k)} max={max} min={min} />
     </label>
   );
   // 标的池与动量参数只属于 etf_momentum；其它策略沿用服务器配置（与模拟盘一致）
@@ -77,7 +77,7 @@ export function BacktestSubmitDrawer({ defaults, onClose, onSubmitted }: Props) 
           {defaults.strategies.map((s) => <option key={s}>{s}</option>)}
         </select>
       </label>
-      <div className="two">{field("开始", "start", "date", maxEnd)}{field("结束", "end", "date", maxEnd)}</div>
+      <div className="two">{field("开始", "start", "date", maxEnd, defaults.min_start ?? undefined)}{field("结束", "end", "date", maxEnd, defaults.min_start ?? undefined)}</div>
       {defaults.data_end && <div className="muted sm">回测数据截止 {defaults.data_end}</div>}
       {formStrategy ? (
         <>

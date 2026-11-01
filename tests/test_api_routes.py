@@ -356,3 +356,9 @@ def test_data_status_tiingo_progress(client_tiingo: TestClient) -> None:
 def test_defaults_end_clamped_to_data_end(client_tiingo: TestClient) -> None:
     d = client_tiingo.get("/api/backtests/defaults").json()
     assert d["data_end"] == "2026-10-28" and d["end"] == "2026-10-28"
+
+
+def test_submit_start_before_min_is_422() -> None:
+    _, errors = build_submission(_req(start=date(2010, 1, 4)), CostSettings(), LAST,
+                                 min_start=date(2014, 7, 1))  # fmt: skip
+    assert any("开始日期：不能早于 2014-07-01" in e for e in errors), errors

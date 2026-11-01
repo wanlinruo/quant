@@ -78,3 +78,15 @@ def test_ledger_file_survives_restart(tmp_path: Path) -> None:
     a.record("B")
     b = QuotaLedger(path, LIMITS, clock)
     assert b.usage().hour_used == 2 and b.usage().month_symbols == 2
+
+
+def test_two_ledgers_share_file(tmp_path: Path) -> None:
+    """命令行 sync 与 worker 各持一个台账对象：每次操作都以磁盘为准，不互相覆盖。"""
+    clock = Clock()
+    a = QuotaLedger(tmp_path / "q.json", LIMITS, clock)
+    b = QuotaLedger(tmp_path / "q.json", LIMITS, clock)
+    a.record("A")
+    b.record("B")
+    a.record("C")
+    assert QuotaLedger(tmp_path / "q.json", LIMITS, clock).usage().hour_used == 3
+    assert b.usage().month_symbols == 3

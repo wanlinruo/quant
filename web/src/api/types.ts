@@ -40,6 +40,7 @@ export interface BacktestDefaults {
   start: string;
   end: string;
   data_end?: string | null;
+  min_start?: string | null;
 }
 
 export interface BacktestRunOut {

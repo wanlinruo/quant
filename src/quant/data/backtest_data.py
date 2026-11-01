@@ -20,9 +20,10 @@ from quant.core.calendar import TradingCalendar
 from quant.core.settings import Settings
 from quant.data.events import load_earnings, save_earnings
 from quant.data.providers.base import DataProvider, DataUnavailableError
+from quant.data.providers.tiingo import SymbolNotFound, TiingoAuthError
 from quant.data.quota import QuotaExceeded, QuotaLedger, QuotaUsage, atomic_write_text
 from quant.data.store import ParquetStore
-from quant.data.validate import validate_bars
+from quant.data.validate import Report, validate_bars
 from quant.strategies import ETF_OPTIONS, STRATEGIES
 from quant.strategies.combo import Combo
 from quant.strategies.universe import Constituents
@@ -35,7 +36,12 @@ REFRESH_DAYS = 30
 EARNINGS_CHUNK = 50  # 每次空闲同步多少只的财报日（SEC 每秒 10 次以内）
 BENCHMARKS = ("SPY", "QQQ")
 
-Outcome = Literal["fetched", "unavailable", "invalid", "quota", "idle"]
+Outcome = Literal["fetched", "unavailable", "invalid", "quota", "error", "auth", "idle"]
+# 补数时可以容忍的校验问题：缺个别交易日（停牌）与大幅跳空（退市前暴跌、财报）；其余视为数据错误
+TOLERATED = frozenset({"missing_day", "jump"})
+MAX_MISSING_RATIO = 0.02
+# 2013 年起的数据 + 约一年半预热：服务器上回测最早从这天开始
+MIN_BACKTEST_START = date(2014, 7, 1)
 
 
 def backtest_store(data_dir: Path) -> ParquetStore:
@@ -124,30 +130,47 @@ class BackfillState:
         atomic_write_text(self.path, json.dumps(doc, ensure_ascii=False, indent=1))
 
 
-def _needs(st: SymbolState | None, active: bool, today: date, month: str) -> bool:
-    if st is None:
-        return True
-    if st.status != "ok":
-        return st.month != month  # 本月失败过的不再试
-    return active and date.fromisoformat(st.last_fetch) <= today - timedelta(days=REFRESH_DAYS)
+def _missing(st: SymbolState | None, month: str) -> bool:
+    """从未拿到过（本月失败过的不再试）。"""
+    return st is None or (st.status != "ok" and st.month != month)
+
+
+def _stale(st: SymbolState | None, today: date) -> bool:
+    return (
+        st is not None
+        and st.status == "ok"
+        and date.fromisoformat(st.last_fetch) <= today - timedelta(days=REFRESH_DAYS)
+    )
 
 
 def next_symbol(
     wanted: Wanted, state: BackfillState, ledger: QuotaLedger, today: date
 ) -> str | None:
+    """新标的优先于刷新，避免每月额度被刷新占满、已退市成分永远补不上（固定标的的刷新例外，
+    它决定回测数据截止日）。顺序：缺失的固定 → 到期的固定 → 缺失的当前成分 → 缺失的已退市成分
+    → 到期的当前成分。月度新标的额度用完时，只能请求本月已请求过的代码。"""
     month = ledger.usage().month
     left = ledger.month_left()
-    groups: tuple[tuple[Sequence[str], bool], ...] = (
-        (wanted.fixed, True), (wanted.current, True), (wanted.delisted, False),
-    )  # fmt: skip
-    for symbols, active in groups:
+    st = state.symbols.get
+    passes: tuple[tuple[Sequence[str], Callable[[str], bool]], ...] = (
+        (wanted.fixed, lambda s: _missing(st(s), month)),
+        (wanted.fixed, lambda s: _stale(st(s), today)),
+        (wanted.current, lambda s: _missing(st(s), month)),
+        (wanted.delisted, lambda s: _missing(st(s), month)),
+        (wanted.current, lambda s: _stale(st(s), today)),
+    )
+    for symbols, need in passes:
         for s in symbols:
-            if not _needs(state.symbols.get(s), active, today, month):
-                continue
-            if left <= 0 and not ledger.used(s):
-                continue
-            return s
+            if need(s) and (left > 0 or ledger.used(s)):
+                return s
     return None
+
+
+def _acceptable(report: Report, n_days: int) -> bool:
+    if any(i.kind not in TOLERATED for i in report.issues):
+        return False
+    missing = sum(1 for i in report.issues if i.kind == "missing_day")
+    return missing <= max(1, int(n_days * MAX_MISSING_RATIO))
 
 
 @dataclass(frozen=True)
@@ -174,13 +197,17 @@ def backfill_step(
         df = provider.daily_bars(s, FULL_START, today)
     except QuotaExceeded:
         return StepResult(s, "quota")
-    except DataUnavailableError as e:
+    except TiingoAuthError:
+        return StepResult(s, "auth")
+    except SymbolNotFound as e:
         state.symbols[s] = SymbolState("unavailable", today.isoformat(), month, reason=str(e))
         state.save()
         return StepResult(s, "unavailable")
+    except DataUnavailableError:
+        return StepResult(s, "error")  # 网络超时、5xx 等临时故障：不记状态，稍后重试
     first, last = df.index[0].date(), df.index[-1].date()
     report = validate_bars(s, df, cal, first, last, max_move=Combo.max_daily_move)
-    if not report.ok:
+    if not _acceptable(report, len(df)):
         state.symbols[s] = SymbolState("invalid", today.isoformat(), month,
                                        reason=report.summary(limit=3))  # fmt: skip
         state.save()
@@ -194,10 +221,22 @@ def backfill_step(
 EarningsFetch = Callable[[str, str], list[date]]
 
 
-def _default_earnings_fetch(symbol: str, user_agent: str) -> list[date]:
+def edgar_fetcher() -> EarningsFetch:
+    """与研究脚本相同的流程：先取一次 SEC 的代码 → CIK 映射，再按 CIK 抓财报；没有 CIK 的返回空。"""
     from quant.data.providers import edgar
 
-    return edgar.fetch_earnings(symbol, user_agent)
+    ciks: dict[str, int] | None = None
+
+    def fetch(symbol: str, user_agent: str) -> list[date]:
+        nonlocal ciks
+        if ciks is None:
+            ciks = edgar.fetch_cik_map(user_agent)
+        cik = ciks.get(symbol) or ciks.get(symbol.replace(".", "-"))
+        if cik is None:
+            return []
+        return edgar.fetch_earnings(symbol, user_agent, ciks=(cik,))
+
+    return fetch
 
 
 def sync_earnings_step(
@@ -206,7 +245,7 @@ def sync_earnings_step(
     user_agent: str | None,
     wanted: Wanted,
     today: date,
-    fetch: EarningsFetch = _default_earnings_fetch,
+    fetch: EarningsFetch | None = None,
     limit: int = EARNINGS_CHUNK,
 ) -> int:
     """固定标的与当前成分都补齐后，每月一次从 SEC EDGAR 同步候选池股票的历史财报反应日。
@@ -216,9 +255,10 @@ def sync_earnings_step(
     month = today.strftime("%Y-%m")
     if not user_agent or state.earnings_month == month:
         return 0
-    if any(state.symbols.get(s) is None or state.symbols[s].status != "ok"
-           for s in [*wanted.fixed, *wanted.current]):  # fmt: skip
+    # 固定标的与当前成分都已请求过（拿不到的也算），才开始同步
+    if any(state.symbols.get(s) is None for s in [*wanted.fixed, *wanted.current]):
         return 0
+    fetch = fetch or edgar_fetcher()
     if state.earnings_progress != month:
         state.earnings_progress, state.earnings_done = month, []
     done = set(state.earnings_done)
@@ -300,23 +340,33 @@ class BackfillRunner:
         today: Callable[[], date],
         data_dir: Path | None = None,
         user_agent: str | None = None,
+        state_file: Path | None = None,
     ) -> None:
         self.provider, self.store, self.state, self.ledger = provider, store, state, ledger
         self.wanted, self.cal, self.interval = wanted, cal, interval
         self._clock, self.today = clock, today
         self.data_dir, self.user_agent = data_dir, user_agent
         self._last: float | None = None
+        self.state_file = state_file
+        self.stopped = False
 
     def maybe_step(self) -> None:
         now = self._clock()
         if self._last is not None and now - self._last < self.interval:
             return
         self._last = now
+        if self.stopped:
+            return
         try:
+            if self.state_file is not None:  # 命令行 sync 可能刚改过状态
+                self.state = BackfillState.load(self.state_file)
             wanted, today = self.wanted(), self.today()
             r = backfill_step(self.provider, self.store, self.state, self.ledger, wanted, today,
                               self.cal)  # fmt: skip
-            if r.outcome != "idle":
+            if r.outcome == "auth":
+                self.stopped = True
+                log.error("Tiingo 拒绝访问，停止补数；检查 TIINGO_API_KEY 后重启 backtest-worker")
+            elif r.outcome != "idle":
                 log.info("回测数据 %s：%s", r.symbol, r.outcome)
             elif self.data_dir is not None:
                 n = sync_earnings_step(self.state, self.data_dir, self.user_agent, wanted, today)
@@ -350,5 +400,15 @@ def make_runner(settings: Settings, cal: TradingCalendar) -> BackfillRunner | No
         TiingoProvider(settings.tiingo_api_key, ledger), backtest_store(data_dir),
         BackfillState.load(state_path(data_dir)), ledger, wanted, cal,
         interval=3600 / settings.tiingo.hourly + 1, today=today, data_dir=data_dir,
-        user_agent=ua.get_secret_value() if ua else None,
+        user_agent=ua.get_secret_value() if ua else None, state_file=state_path(data_dir),
     )  # fmt: skip
+
+
+def clear_unavailable(path: Path) -> list[str]:
+    """清除本月“拿不到 / 校验不过”的记录，让这些代码可以立即重试；返回被清除的代码。"""
+    state = BackfillState.load(path)
+    cleared = sorted(s for s, st in state.symbols.items() if st.status != "ok")
+    for s in cleared:
+        del state.symbols[s]
+    state.save()
+    return cleared

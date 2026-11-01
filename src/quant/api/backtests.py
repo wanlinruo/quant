@@ -35,6 +35,7 @@ def build_submission(
     *,
     data_end: date | None = None,
     strategy_params: Mapping[str, Any] | None = None,
+    min_start: date | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """把请求整理成 backtest_runs.params；返回 (params, 错误列表)。
 
@@ -53,6 +54,8 @@ def build_submission(
         errors.append(f"结束日期：不能晚于回测数据截止日 {data_end}")
     if req.start >= req.end:
         errors.append("开始日期必须早于结束日期")
+    if min_start is not None and req.start < min_start:
+        errors.append(f"开始日期：不能早于 {min_start}（服务器回测数据从 2013 年起，含策略预热）")
     if req.strategy == FORM_STRATEGY:
         params, form_errors = _form_params(req)
         errors += form_errors
@@ -122,11 +125,13 @@ def submit(
     *,
     data_end: date | None = None,
     strategy_params: Mapping[str, Any] | None = None,
+    min_start: date | None = None,
 ) -> int:
     """校验并插入一条 queued 任务；事务由调用方用 session.begin() 提交。"""
     params, errors = build_submission(
-        req, configured, last, data_end=data_end, strategy_params=strategy_params
-    )
+        req, configured, last, data_end=data_end, strategy_params=strategy_params,
+        min_start=min_start,
+    )  # fmt: skip
     if errors:
         raise HTTPException(status_code=422, detail=errors)
     return create_run(session, req.strategy, params, req.start, req.end, "queued")

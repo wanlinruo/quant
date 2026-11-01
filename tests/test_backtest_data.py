@@ -11,6 +11,7 @@ from quant.core.calendar import get_calendar
 from quant.core.settings import TiingoSettings
 from quant.data import backtest_data as bd
 from quant.data.providers.base import DataProvider, DataUnavailableError
+from quant.data.providers.tiingo import SymbolNotFound
 from quant.data.quota import QuotaExceeded, QuotaLedger
 from quant.data.store import ParquetStore
 from quant.strategies.universe import Constituents
@@ -46,7 +47,7 @@ class FakeProvider(DataProvider):
         self.ledger.record(symbol)
         self.calls.append(symbol)
         if symbol in self.missing:
-            raise DataUnavailableError(f"{symbol}：Tiingo 没有该代码的日线")
+            raise SymbolNotFound(f"{symbol}：Tiingo 没有该代码的日线")
         df = sample(end)
         if symbol in self.bad:
             df.loc[df.index[-5], "close"] = 1e6  # 单日暴涨，校验不通过
@@ -254,3 +255,133 @@ def test_cli_sync_requires_tiingo(tmp_path: Path) -> None:
     args = build_parser().parse_args(["backtest-data", "sync", "--max", "3"])
     assert backtest_data_command(args, settings, out) == 1
     assert "QUANT_TIINGO_API_KEY" in out.getvalue()
+
+
+# ---- 最终审查修复（#66）----
+
+
+class ErrProvider(FakeProvider):
+    def __init__(self, ledger: QuotaLedger, exc: Exception) -> None:
+        super().__init__(ledger)
+        self.exc = exc
+
+    def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        raise self.exc
+
+
+def test_transient_error_does_not_mark_unavailable(tmp_path: Path) -> None:
+    env = Env(tmp_path)
+    r = env.step(ErrProvider(env.ledger, DataUnavailableError("SPY：Tiingo 返回 502")))
+    assert r.outcome == "error" and "QQQ" not in env.state.symbols
+    assert env.step(FakeProvider(env.ledger)).symbol == "QQQ"  # 立刻可以重试
+
+
+def test_auth_error_stops(tmp_path: Path) -> None:
+    from quant.data.providers.tiingo import TiingoAuthError
+
+    env = Env(tmp_path)
+    r = env.step(ErrProvider(env.ledger, TiingoAuthError("Tiingo key 无效")))
+    assert r.outcome == "auth" and env.state.symbols == {}
+
+
+def test_symbol_not_found_marks_unavailable(tmp_path: Path) -> None:
+    from quant.data.providers.tiingo import SymbolNotFound
+
+    env = Env(tmp_path)
+    r = env.step(ErrProvider(env.ledger, SymbolNotFound("QQQ：没有")))
+    assert r.outcome == "unavailable" and env.state.symbols["QQQ"].status == "unavailable"
+
+
+def test_new_symbols_before_refresh_in_new_month(tmp_path: Path) -> None:
+    """第二个月：先刷新固定标的、再补上月没拿到的当前成分与已退市成分，最后才刷新当前成分。"""
+    env = Env(tmp_path, monthly=4)
+    env.wanted = bd.Wanted(fixed=["F1"], current=["C1", "C2", "C3"], delisted=["D1", "D2"])
+    p = FakeProvider(env.ledger)
+    assert [env.step(p).symbol for _ in range(5)] == ["F1", "C1", "C2", "C3", None]  # 本月额度用完
+    env.now = datetime(2026, 12, 1, 22, tzinfo=UTC)
+    env.today = date(2026, 12, 1)  # 刷新全部到期
+    got = [env.step(p).symbol for _ in range(5)]
+    assert got == ["F1", "D1", "D2", "C1", None]
+
+
+def test_lenient_validation_accepts_gap_and_jump(tmp_path: Path) -> None:
+    env = Env(tmp_path)
+
+    class GapJump(FakeProvider):
+        def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+            df: pd.DataFrame = (
+                super().daily_bars(symbol, start, end).drop(index=sample().index[100])
+            )
+            prices = ["open", "high", "low", "close", "adj_close"]
+            df.loc[df.index[-3] :, prices] *= 0.2  # 退市前暴跌
+            return df
+
+    assert env.step(GapJump(env.ledger)).outcome == "fetched"
+
+
+def test_bad_ohlc_still_invalid(tmp_path: Path) -> None:
+    env = Env(tmp_path)
+
+    class BadOhlc(FakeProvider):
+        def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+            df = super().daily_bars(symbol, start, end)
+            df.loc[df.index[-5], "high"] = 0.5  # 最高价低于收盘价
+            return df
+
+    assert env.step(BadOhlc(env.ledger)).outcome == "invalid"
+
+
+def test_earnings_precondition_ignores_unavailable(tmp_path: Path) -> None:
+    from quant.data.providers.tiingo import SymbolNotFound
+
+    env = Env(tmp_path)
+    p = FakeProvider(env.ledger)
+    env.step(p)
+    env.step(p)
+    env.step(p)
+    env.step(ErrProvider(env.ledger, SymbolNotFound("BBB：没有")))
+    n = bd.sync_earnings_step(env.state, tmp_path, "me test@example.com", env.wanted, TODAY,
+                              lambda s, ua: [date(2026, 7, 30)])  # fmt: skip
+    assert n == 3
+
+
+def test_default_earnings_fetch_uses_cik_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    from quant.data.providers import edgar
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(edgar, "fetch_cik_map", lambda ua: {"XOM": 34088})
+
+    def fake(symbol: str, ua: str, **kw: object) -> list[date]:
+        seen.update(kw, symbol=symbol)
+        return [date(2026, 7, 31)]
+
+    monkeypatch.setattr(edgar, "fetch_earnings", fake)
+    fetch = bd.edgar_fetcher()
+    assert fetch("XOM", "me x@example.com") == [date(2026, 7, 31)]
+    assert seen["ciks"] == (34088,)
+    assert fetch("NOCIK", "me x@example.com") == []
+
+
+def test_runner_reloads_state(tmp_path: Path) -> None:
+    """命令行刚补过的标的，worker 不会因为内存里的旧状态再拉一次。"""
+    env = Env(tmp_path)
+    p = FakeProvider(env.ledger)
+    r = bd.BackfillRunner(p, env.store, env.state, env.ledger, lambda: env.wanted, CAL,
+                          interval=0, clock=lambda: 0.0, today=lambda: TODAY,
+                          state_file=bd.state_path(tmp_path))  # fmt: skip
+    other = bd.BackfillState.load(bd.state_path(tmp_path))
+    other.symbols["QQQ"] = bd.SymbolState("ok", TODAY.isoformat(), "2026-10", TODAY.isoformat())
+    other.path = bd.state_path(tmp_path)
+    other.save()
+    r.maybe_step()
+    assert p.calls == ["SPY"]
+
+
+def test_cli_sync_retry_unavailable_clears(tmp_path: Path) -> None:
+    state = bd.BackfillState.load(bd.state_path(tmp_path))
+    state.symbols["SPY"] = bd.SymbolState("unavailable", TODAY.isoformat(), "2026-10", reason="x")
+    state.symbols["QQQ"] = bd.SymbolState("ok", TODAY.isoformat(), "2026-10", TODAY.isoformat())
+    state.save()
+    assert bd.clear_unavailable(bd.state_path(tmp_path)) == ["SPY"]
+    again = bd.BackfillState.load(bd.state_path(tmp_path))
+    assert "SPY" not in again.symbols and "QQQ" in again.symbols

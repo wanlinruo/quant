@@ -25,6 +25,16 @@ from quant.data.providers.base import DataProvider, DataUnavailableError, normal
 from quant.data.quota import QuotaExceeded, QuotaLedger
 
 BASE_URL = "https://api.tiingo.com/tiingo/daily"
+
+
+class SymbolNotFound(DataUnavailableError):
+    """Tiingo 没有该代码（404 或空数组）：本月不再请求。"""
+
+
+class TiingoAuthError(DataUnavailableError):
+    """key 无效或无权限（401 / 403）：停止补数，属于配置问题。"""
+
+
 Fetch = Callable[[str, Mapping[str, str]], tuple[int, Any]]
 
 
@@ -54,7 +64,8 @@ class TiingoProvider(DataProvider):
             raise ValueError(f"start {start} 晚于 end {end}")
         self.ledger.check(symbol)
         query = urlencode({"startDate": start.isoformat(), "endDate": end.isoformat()})
-        url = f"{BASE_URL}/{quote(symbol)}/prices?{query}"
+        # Tiingo 用连字符表示股票类别（BRK-B），成分名单与本地数据用点（BRK.B）
+        url = f"{BASE_URL}/{quote(symbol.replace('.', '-'))}/prices?{query}"
         headers = {"Authorization": f"Token {self._key.get_secret_value()}",
                    "Content-Type": "application/json"}  # fmt: skip
         try:
@@ -66,8 +77,10 @@ class TiingoProvider(DataProvider):
         if status == 429:
             self.ledger.mark_exhausted("hour")
             raise QuotaExceeded("hour")
+        if status in (401, 403):
+            raise TiingoAuthError(f"Tiingo 拒绝访问（{status}），请检查 TIINGO_API_KEY")
         if status == 404 or (status == 200 and not body):
-            raise DataUnavailableError(f"{symbol}：Tiingo 没有该代码的日线")
+            raise SymbolNotFound(f"{symbol}：Tiingo 没有该代码的日线")
         if status != 200 or not isinstance(body, list):
             raise DataUnavailableError(f"{symbol}：Tiingo 返回 {status}")
         return to_bars(body, start, end)

@@ -74,6 +74,9 @@ class QuotaLedger:
         )
 
     def _roll(self) -> _State:
+        # 每次都以磁盘为准：命令行 sync 与 worker 可能同时使用同一个台账文件
+        if self.path.exists():
+            self._s = _State(**json.loads(self.path.read_text(encoding="utf-8")))
         t = self._now().astimezone(ET)
         hour, day, month = t.strftime("%Y-%m-%dT%H"), t.strftime("%Y-%m-%d"), t.strftime("%Y-%m")
         s = self._s

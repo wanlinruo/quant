@@ -99,7 +99,10 @@ def defaults() -> BacktestDefaults:
         else str(cfg.commission_per_share),
         min_commission=None if cfg.min_commission is None else str(cfg.min_commission),
         slippage=str(cfg.slippage),
-        start=date(end.year - 10, end.month, 1),
+        start=max(date(end.year - 10, end.month, 1), bd.MIN_BACKTEST_START)
+        if data_end
+        else date(end.year - 10, end.month, 1),
+        min_start=bd.MIN_BACKTEST_START if _data_status().source == "tiingo" else None,
         end=end,
         data_end=data_end,
     )
@@ -114,6 +117,7 @@ def submit_backtest(req: BacktestSubmit, s: SessionDep) -> SubmitResult:
         raise HTTPException(status_code=422, detail=["回测数据尚未补齐固定标的，请稍后再提交"])
     configured = settings.strategy.params if settings.strategy.name == req.strategy else {}
     with s.begin():
+        min_start = bd.MIN_BACKTEST_START if status.source == "tiingo" else None
         run_id = submit(s, req, settings.costs, last, data_end=status.data_end,
-                        strategy_params=configured)  # fmt: skip
+                        strategy_params=configured, min_start=min_start)  # fmt: skip
     return SubmitResult(id=run_id)

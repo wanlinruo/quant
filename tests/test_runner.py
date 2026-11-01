@@ -121,7 +121,7 @@ def test_events_loaded_for_universe_strategy(
     res = run_spec(spec, settings(tmp_path))
     assert seen["events"].next_earnings("A", date(2025, 4, 1)) == date(2025, 4, 30)
     assert seen["universe"] is not None
-    assert res.data_info["earnings"] == "complete"
+    assert res.data_info["earnings"] == "partial"  # 文件存在但本月同步未完成
 
 
 def test_universe_without_constituents_fails(tmp_path: Path) -> None:
@@ -129,3 +129,49 @@ def test_universe_without_constituents_fails(tmp_path: Path) -> None:
     spec = BacktestSpec("combo", date(2025, 1, 2), END, COSTS, params=COMBO_PARAMS)
     with pytest.raises(BacktestDataError, match="成分股"):
         run_spec(spec, settings(tmp_path))
+
+
+# ---- 最终审查修复（#66）----
+
+
+def test_start_before_local_data_fails(tmp_path: Path) -> None:
+    syms = sorted({*get_strategy("etf_momentum").symbols({}), "SPY"})
+    write_fixed(tmp_path, syms)
+    spec = BacktestSpec("etf_momentum", date(2010, 1, 4), END, COSTS)
+    with pytest.raises(BacktestDataError, match="开始日期过早"):
+        run_spec(spec, settings(tmp_path))
+
+
+def test_earnings_partial_until_sync_complete(tmp_path: Path) -> None:
+    from quant.data.backtest_data import BackfillState, state_path
+
+    _combo_setup(tmp_path)
+    save_earnings(earnings_path(tmp_path), {"A": [date(2025, 4, 30)]})
+    spec = BacktestSpec("combo", date(2025, 1, 2), END, COSTS, params=COMBO_PARAMS)
+    assert run_spec(spec, settings(tmp_path)).data_info["earnings"] == "partial"
+    st = BackfillState.load(state_path(tmp_path))
+    st.earnings_month = "2026-11"
+    st.save()
+    assert run_spec(spec, settings(tmp_path)).data_info["earnings"] == "complete"
+
+
+def test_coverage_uses_snapshot_periods(tmp_path: Path) -> None:
+    """D 的数据停在 2024 年（预热期内）：2025 年的回测区间里它仍算缺失。"""
+    _combo_setup(tmp_path)
+    backtest_store(tmp_path).write_bars("D", bars(0.0003, end=date(2024, 6, 28)), "tiingo")
+    spec = BacktestSpec("combo", date(2025, 1, 2), END, COSTS, params=COMBO_PARAMS)
+    assert run_spec(spec, settings(tmp_path)).data_info["coverage"] == pytest.approx(0.75)
+
+
+def test_stale_holdings_reported(tmp_path: Path) -> None:
+    """持仓标的数据在区间结束前中断（退市）：记入 metrics.data.stale_holdings。"""
+    _combo_setup(tmp_path)
+    store = backtest_store(tmp_path)
+    store.write_bars("A", bars(0.0012, end=date(2025, 5, 30)), "tiingo")  # A 涨得最快，必被持有
+    import shutil
+
+    shutil.rmtree(store.root / "bars" / "daily" / "symbol=A")
+    store.write_bars("A", bars(0.0012, end=date(2025, 5, 30)), "tiingo")
+    spec = BacktestSpec("combo", date(2025, 1, 2), END, COSTS, params=COMBO_PARAMS)
+    info = run_spec(spec, settings(tmp_path)).data_info
+    assert info["stale_holdings"] == {"A": "2025-05-30"}

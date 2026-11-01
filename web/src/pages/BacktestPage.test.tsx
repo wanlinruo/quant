@@ -135,6 +135,14 @@ describe("BacktestPage", () => {
     expect(screen.getByLabelText("结束")).toHaveAttribute("max", "2026-10-28");
   });
 
+  it("start date input is limited to min_start", async () => {
+    mockApi({ "/api/backtests": [200, []], "/api/backtests/defaults": [200, { ...DEFAULTS, data_end: "2026-10-28", min_start: "2014-07-01" }],
+              "/api/backtests/data-status": [200, TIINGO(19)] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click(await screen.findByRole("button", { name: "+ 新建回测" }));
+    expect(screen.getByLabelText("开始")).toHaveAttribute("min", "2014-07-01");
+  });
+
   it("shows coverage warning on run", async () => {
     const r = { ...run(130), metrics: { ...run(130).metrics, data: { source: "tiingo", data_end: "2026-10-28", coverage: 0.82, missing_by_year: {}, earnings: "none" } } };
     mockApi({ "/api/backtests": [200, [r]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS],

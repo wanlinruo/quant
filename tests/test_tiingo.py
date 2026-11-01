@@ -101,3 +101,31 @@ def test_key_not_in_error_message(tmp_path: Path) -> None:
         p.daily_bars("SPY", date(2026, 1, 2), date(2026, 10, 30))
     assert "secret-key-123" not in str(e.value)
     assert e.value.__cause__ is None and e.value.__suppress_context__
+
+
+# ---- 最终审查修复（#66）----
+
+
+def test_dot_symbol_uses_dash(tmp_path: Path) -> None:
+    fetch = FakeFetch(body=[row("2026-10-30", 10, 10)])
+    provider(tmp_path, fetch).daily_bars("BRK.B", date(2026, 10, 30), date(2026, 10, 30))
+    assert "/daily/BRK-B/prices?" in fetch.calls[0][0]
+
+
+def test_error_kinds(tmp_path: Path) -> None:
+    from quant.data.providers.tiingo import SymbolNotFound, TiingoAuthError
+
+    def get(fetch: FakeFetch) -> None:
+        provider(tmp_path, fetch).daily_bars("SPY", date(2026, 1, 2), date(2026, 1, 5))
+
+    with pytest.raises(SymbolNotFound):
+        get(FakeFetch(status=404, body={}))
+    with pytest.raises(TiingoAuthError):
+        get(FakeFetch(status=401, body={}))
+    for status in (500, 502):
+        with pytest.raises(DataUnavailableError) as e:
+            get(FakeFetch(status=status, body={}))
+        assert not isinstance(e.value, SymbolNotFound | TiingoAuthError)
+    with pytest.raises(DataUnavailableError) as e:
+        get(FakeFetch(exc=TimeoutError()))
+    assert not isinstance(e.value, SymbolNotFound)
