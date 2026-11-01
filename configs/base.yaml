@@ -58,3 +58,10 @@ tiingo:
   hourly: 50
   daily: 1000
   monthly_symbols: 500
+
+board:
+  # 首页市场看板（#69）：Massive 免费档每分钟 5 次；每次任务约 2 + history_per_run + caps_per_run 次请求
+  history_days: 260
+  history_per_run: 60
+  caps_per_run: 60
+  caps_max_age_days: 7
