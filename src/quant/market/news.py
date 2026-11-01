@@ -72,10 +72,15 @@ def build_feed(
     holdings: set[str],
     since: datetime,
     limit: int = 80,
+    names: Mapping[str, str | None] | None = None,
 ) -> list[NewsItem]:
+    """持仓公司新闻只收标题提到代码或公司简称的（Finnhub 公司新闻里有不少泛泛而谈的文章）。"""
+    names = names or {}
     cands: list[tuple[NewsRaw, list[str], str]] = [(x, [], "macro") for x in market]
     for sym in sorted(holdings & set(company)):
-        recent = sorted((x for x in company[sym] if x.time >= since), key=lambda x: x.time,
+        recent = sorted((x for x in company[sym]
+                         if x.time >= since and _mentions(x.headline, sym, names.get(sym))),
+                        key=lambda x: x.time,
                         reverse=True)[:PER_SYMBOL]  # fmt: skip
         cands += [(x, [sym], "earnings" if EARNINGS_RE.search(x.headline) else "company")
                   for x in recent]  # fmt: skip

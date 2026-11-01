@@ -39,7 +39,8 @@ def test_feed_categories_and_tags() -> None:
     market = [n("Fed holds rates", 1, "m1")]
     company = {"XOM": [n("Exxon Q3 earnings beat", 2, "c1"), n("Exxon names CFO", 3, "c2")],
                "NVDA": [n("Nvidia rallies", 4, "c3")]}  # fmt: skip
-    feed = build_feed(market, company, holdings={"XOM"}, since=T0 - timedelta(days=2))
+    feed = build_feed(market, company, holdings={"XOM"}, since=T0 - timedelta(days=2),
+                      names={"XOM": "Exxon Mobil Corp."})  # fmt: skip
     by = {f.headline: f for f in feed}
     assert by["Fed holds rates"].category == "macro" and by["Fed holds rates"].tags == []
     assert by["Exxon Q3 earnings beat"].category == "earnings"
@@ -60,6 +61,15 @@ def test_feed_dedup_and_limit() -> None:
 
 def test_feed_drops_old_and_caps_per_symbol() -> None:
     company = {"XOM": [n(f"Exxon {i}", i) for i in range(8)] + [n("Exxon ancient", -5000)]}
-    feed = build_feed([], company, {"XOM"}, since=T0 - timedelta(days=2))
+    feed = build_feed([], company, {"XOM"}, since=T0 - timedelta(days=2), names={"XOM": "Exxon"})
     assert len(feed) == 5 and all("ancient" not in f.headline for f in feed)
     assert feed[0].headline == "Exxon 7"
+
+
+def test_holdings_feed_only_relevant() -> None:
+    noise = n("5 Best High Growth Stocks Outside Big Tech", 1, "a")
+    company = {"AAPL": [noise, n("Apple beats on iPhone sales", 2, "b"), n("AAPL slips", 3, "c")]}
+    feed = build_feed(
+        [], company, {"AAPL"}, since=T0 - timedelta(days=2), names={"AAPL": "Apple Inc."}
+    )
+    assert [f.headline for f in feed] == ["AAPL slips", "Apple beats on iPhone sales"]

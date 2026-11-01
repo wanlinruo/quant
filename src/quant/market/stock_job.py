@@ -19,7 +19,7 @@ from quant.data.market_store import ETF_SET, STOCK_SYMBOL_RE, load_gics, stock_p
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.finnhub import FinnhubAuthError, NewsRaw
 from quant.data.quota import atomic_write_text
-from quant.market.news import EARNINGS_RE, NewsItem
+from quant.market.news import EARNINGS_RE, NewsItem, _mentions
 
 log = logging.getLogger("quant.stock_data")
 
@@ -58,12 +58,13 @@ def _load(path: Path) -> dict[str, Any]:
         return {}
 
 
-def _items(symbol: str, raw: list[NewsRaw]) -> list[dict[str, Any]]:
+def _items(symbol: str, name: str | None, raw: list[NewsRaw]) -> list[dict[str, Any]]:
+    """只保留标题提到代码或公司简称的新闻（去掉“5 Best Stocks…”这类泛泛而谈的文章）。"""
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for x in sorted(raw, key=lambda x: x.time, reverse=True):
         key = x.headline.strip().lower()
-        if key in seen:
+        if key in seen or not _mentions(x.headline, symbol, name):
             continue
         seen.add(key)
         cat = "earnings" if EARNINGS_RE.search(x.headline) else "company"
@@ -102,15 +103,9 @@ def run_stock_data(
 
     notes: list[str] = []
     news_n = metrics_n = 0
+    stage = "财务指标"
     try:
-        for s in order("news_updated"):
-            raw = finnhub.company_news(
-                s, today - timedelta(days=NEWS_DAYS), today + timedelta(days=1)
-            )
-            docs[s]["news"] = _items(s, raw)
-            docs[s]["news_updated"] = now.isoformat()
-            save(s)
-            news_n += 1
+        # 指标先取（每天最多 metrics_per_run 次），新闻阶段限流时指标仍有进展
         cutoff = (today - timedelta(days=METRICS_MAX_AGE)).isoformat()
         due = [s for s in order("metrics_updated")
                if (docs[s].get("metrics_updated") or "") < cutoff]  # fmt: skip
@@ -119,9 +114,18 @@ def run_stock_data(
             docs[s]["metrics_updated"] = today.isoformat()
             save(s)
             metrics_n += 1
+        stage = "新闻"
+        for s in order("news_updated"):
+            raw = finnhub.company_news(
+                s, today - timedelta(days=NEWS_DAYS), today + timedelta(days=1)
+            )
+            docs[s]["news"] = _items(s, gics.name(s) if gics else None, raw)
+            docs[s]["news_updated"] = now.isoformat()
+            save(s)
+            news_n += 1
     except FinnhubAuthError:
         raise
     except DataUnavailableError as e:
-        notes.append(f"限流或故障，停止本轮（{e}）")
+        notes.append(f"限流或故障，停在{stage}阶段（{e}）")
     summary = f"新闻 {news_n} 只；指标 {metrics_n} 只；覆盖 {len(universe)} 只"
     return "；".join([summary, *notes])

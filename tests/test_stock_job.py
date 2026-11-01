@@ -103,7 +103,7 @@ def test_stock_data_resumes_oldest_first(tmp_path: Path) -> None:
     ]
     fh = FakeFinnhub()
     run(tmp_path, fh, today=TODAY + timedelta(days=1))
-    assert fh.news_calls[:3] == ["S3", "S4", "S5"]
+    assert fh.metric_calls[:3] == ["S3", "S4", "S5"]  # 上次没取到的先取
 
 
 def test_stock_data_auth_error_raises(tmp_path: Path) -> None:
@@ -135,3 +135,28 @@ def test_scheduler_includes_stock_data() -> None:
     plan = dict(day_plan(TODAY, ScheduleSettings(), get_calendar()))
     assert plan["stock_data"] == datetime(2026, 10, 30, 21, 15, tzinfo=ET)
     assert "stock_data" in JOBS and "stock_data" in JOB_FUNCS
+
+
+class NoisyFinnhub(FakeFinnhub):
+    def company_news(self, symbol: str, start: date, end: date) -> list[NewsRaw]:
+        self._tick()
+        self.news_calls.append(symbol)
+        noise = "5 Best High Growth Stocks Outside Big Tech"
+        return [NewsRaw("x", T, noise, "Yahoo", "https://n/x", (symbol,)),
+                NewsRaw("y", T, "Co S0 beats estimates", "CNBC", "https://n/y", (symbol,))]  # fmt: skip
+
+
+def test_stock_news_only_relevant(tmp_path: Path) -> None:
+    gics(tmp_path, ["S0", "S1"])
+    run(tmp_path, NoisyFinnhub())
+    assert [n["headline"] for n in doc(tmp_path, "S0")["news"]] == ["Co S0 beats estimates"]
+    d1 = doc(tmp_path, "S1")
+    assert d1["news"] == [] and d1["news_updated"]
+
+
+def test_stock_metrics_before_news_and_stage_in_summary(tmp_path: Path) -> None:
+    gics(tmp_path, ["S0", "S1", "S2"])
+    fh = FakeFinnhub(fail_at=4)  # 3 次指标 + 1 次新闻后限流
+    summary = run(tmp_path, fh)
+    assert fh.metric_calls == ["S0", "S1", "S2"] and fh.news_calls == ["S0"]
+    assert "停在新闻阶段" in summary and doc(tmp_path, "S2")["metrics_updated"]
