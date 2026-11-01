@@ -20,12 +20,11 @@ from quant.api.schemas import (
     SubmitResult,
 )
 from quant.core.calendar import get_calendar
-from quant.strategies import STRATEGIES
+from quant.strategies import ETF_OPTIONS, STRATEGIES
 from quant.strategies.etf_momentum import MomentumParams
 
 router = APIRouter()
 SessionDep = Annotated[Session, Depends(get_session)]
-UNIVERSE_OPTIONS = ["SPY", "QQQ", "TLT", "GLD", "IWM", "EFA", "EEM", "VNQ", "DBC"]
 MAX_COMPARE = 5
 
 
@@ -48,7 +47,7 @@ def defaults() -> BacktestDefaults:
     last = get_calendar().last_completed_trading_day(datetime.now(UTC))
     return BacktestDefaults(
         strategies=sorted(STRATEGIES),
-        universe_options=UNIVERSE_OPTIONS,
+        universe_options=list(ETF_OPTIONS),
         universe=list(d.universe),
         safe_asset=d.safe_asset,
         lookback=d.lookback,

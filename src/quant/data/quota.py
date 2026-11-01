@@ -115,6 +115,13 @@ class QuotaLedger:
             s.day_used = self.limits.daily
         self._save()
 
+    def used(self, symbol: str) -> bool:
+        """本月是否已请求过该代码（再请求不占“不同标的”额度）。"""
+        return symbol in self._roll().symbols
+
+    def month_left(self) -> int:
+        return max(0, self.limits.monthly_symbols - len(self._roll().symbols))
+
     def usage(self) -> QuotaUsage:
         s = self._roll()
         return QuotaUsage(s.hour_used, s.day_used, s.month, len(s.symbols))

@@ -16,6 +16,10 @@ STRATEGIES: dict[str, type[Strategy]] = {
 }
 
 
+# 面板回测表单可选的 ETF 标的池；服务器回测数据也要覆盖这些（#66）
+ETF_OPTIONS: tuple[str, ...] = ("SPY", "QQQ", "TLT", "GLD", "IWM", "EFA", "EEM", "VNQ", "DBC")
+
+
 def get_strategy(name: str) -> Strategy:
     try:
         return STRATEGIES[name]()
