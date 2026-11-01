@@ -165,3 +165,99 @@ def yearly(equity: pd.Series, qqq: pd.Series | None) -> list[dict[str, Any]]:
     q = align(eq, qqq) if qqq is not None else None
     ys, qs = _year_returns(eq), (_year_returns(q) if q is not None else {})
     return [{"year": y, "strategy": _f(v), "qqq": _f(qs.get(y))} for y, v in ys.items()]
+
+
+# ---- 收益分析 ----
+
+PERIOD_FREQ = {"周": "W-FRI", "月": "M", "季": "Q", "年": "Y"}
+
+
+def period_returns_by(eq: pd.Series, freq: str) -> pd.Series:
+    """按自然周期的收益：本期最后一个净值 / 上期最后一个净值 − 1（第一期以首日净值为基准）。
+
+    索引为每期最后一个交易日。
+    """
+    idx = pd.DatetimeIndex(eq.index)
+    grouped = eq.groupby(idx.to_period(freq))
+    last = grouped.last()
+    when = pd.DatetimeIndex(grouped.apply(lambda s: s.index[-1]))
+    base = last.shift(1)
+    base.iloc[0] = float(eq.iloc[0])
+    return pd.Series((last / base - 1).to_numpy(), index=when)
+
+
+def monthly_table(equity: pd.Series, qqq: pd.Series | None) -> list[dict[str, Any]]:
+    eq = _clean(equity)
+    if eq is None:
+        return []
+    m = period_returns_by(eq, "M")
+    q = align(eq, qqq) if qqq is not None else None
+    ys, qs = _year_returns(eq), (_year_returns(q) if q is not None else {})
+    rows = []
+    for y in sorted(ys):
+        months: list[float | None] = [None] * 12
+        sel = m[pd.DatetimeIndex(m.index).year == y]
+        for d, v in zip(pd.DatetimeIndex(sel.index), sel.to_numpy(), strict=True):
+            months[d.month - 1] = _f(v)
+        rows.append(
+            {"year": y, "months": months, "year_total": _f(ys[y]), "qqq_year": _f(qs.get(y))}
+        )
+    return rows
+
+
+def distribution(equity: pd.Series, bins: int = 20) -> list[dict[str, Any]]:
+    """月收益分布（等宽分组）。"""
+    eq = _clean(equity)
+    if eq is None:
+        return []
+    vals = [float(v) for v in period_returns_by(eq, "M").to_numpy() if math.isfinite(v)]
+    if not vals:
+        return []
+    lo, hi = min(vals), max(vals)
+    width = (hi - lo) / bins if hi > lo else 0.0
+    counts = [0] * bins
+    for v in vals:
+        i = min(int((v - lo) / width), bins - 1) if width else 0
+        counts[i] += 1
+    return [
+        {"lo": lo + i * width, "hi": lo + (i + 1) * width, "count": c} for i, c in enumerate(counts)
+    ]
+
+
+def best_worst(equity: pd.Series) -> list[dict[str, Any]]:
+    eq = _clean(equity)
+    if eq is None:
+        return []
+    series = {"日": eq.pct_change().dropna()}
+    series |= {k: period_returns_by(eq, f) for k, f in PERIOD_FREQ.items()}
+    out = []
+    for k, s in series.items():
+        s = s[pd.Series(s).map(lambda v: math.isfinite(float(v))).to_numpy()]
+        if s.empty:
+            continue
+        pos_hi, pos_lo = int(s.to_numpy().argmax()), int(s.to_numpy().argmin())
+        idx = pd.DatetimeIndex(s.index)
+        out.append({"period": k, "best": _f(s.iloc[pos_hi]), "best_at": str(idx[pos_hi].date()),
+                    "worst": _f(s.iloc[pos_lo]), "worst_at": str(idx[pos_lo].date())})  # fmt: skip
+    return out
+
+
+def rolling_12m(equity: pd.Series) -> list[dict[str, Any]]:
+    """滚动 12 个月收益与夏普，按月末取样。"""
+    eq = _clean(equity)
+    if eq is None:
+        return []
+    r = eq.pct_change()
+    first = pd.Timestamp(eq.index[0])
+    out = []
+    for t in period_returns_by(eq, "M").index:
+        start = pd.Timestamp(t) - pd.DateOffset(months=12)
+        if start < first:
+            continue
+        base = eq[:start]
+        win = r[(r.index > start) & (r.index <= t)].dropna()
+        sd = win.std(ddof=1)
+        sharpe = win.mean() * TRADING_DAYS / (sd * math.sqrt(TRADING_DAYS)) if sd else None
+        out.append({"date": str(pd.Timestamp(t).date()), "ret": _f(eq[t] / base.iloc[-1] - 1),
+                    "sharpe": _f(sharpe)})  # fmt: skip
+    return out

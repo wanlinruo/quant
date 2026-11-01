@@ -82,3 +82,57 @@ def test_tiny_series_safe() -> None:
     sp = ba.split_metrics(tiny, None)
     out = [ba.stat_bar(tiny, None), sp, ba.checks(sp), ba.yearly(tiny, None)]
     dumps(out)
+
+
+# ---- Task 2：收益分析 ----
+
+
+def monthly_series() -> pd.Series:
+    """每月最后一个交易日收益已知：1 月 +10%，2 月 -5%，其余 0；从 2021-01 起两年。"""
+    idx = pd.bdate_range("2020-12-31", "2022-12-30")
+    level = 100.0
+    vals = []
+    for d in idx:
+        if d.month == 1 and d == idx[(idx.year == d.year) & (idx.month == 1)][-1]:
+            level *= 1.10
+        if d.month == 2 and d == idx[(idx.year == d.year) & (idx.month == 2)][-1]:
+            level *= 0.95
+        vals.append(level)
+    return pd.Series(vals, index=idx)
+
+
+def test_monthly_table() -> None:
+    eq = monthly_series()
+    rows = ba.monthly_table(eq, eq)
+    r21 = next(r for r in rows if r["year"] == 2021)
+    assert r21["months"][0] == pytest.approx(0.10) and r21["months"][1] == pytest.approx(-0.05)
+    assert r21["months"][2] == pytest.approx(0.0)
+    assert r21["year_total"] == pytest.approx(1.10 * 0.95 - 1) and r21["qqq_year"] == pytest.approx(
+        r21["year_total"]
+    )
+    r20 = next(r for r in rows if r["year"] == 2020)
+    assert r20["months"][:11] == [None] * 11  # 只有 12-31 一天
+
+
+def test_distribution_counts_months() -> None:
+    eq = monthly_series()
+    bins = ba.distribution(eq, bins=5)
+    n_months = sum(1 for r in ba.monthly_table(eq, None) for m in r["months"] if m is not None)
+    assert sum(b["count"] for b in bins) == n_months and len(bins) == 5
+
+
+def test_best_worst() -> None:
+    eq = monthly_series()
+    bw = {r["period"]: r for r in ba.best_worst(eq)}
+    assert set(bw) == {"日", "周", "月", "季", "年"}
+    assert bw["月"]["best"] == pytest.approx(0.10) and bw["月"]["best_at"].startswith("2021-01")
+    assert bw["月"]["worst"] == pytest.approx(-0.05) and bw["月"]["worst_at"][5:7] == "02"
+
+
+def test_rolling_12m() -> None:
+    roll = ba.rolling_12m(EQ)
+    assert roll[0]["date"][:7] == "2019-12" or roll[0]["date"][:7] == "2020-01"
+    first = pd.Timestamp(roll[0]["date"])
+    base = EQ[: first - pd.DateOffset(months=12)].iloc[-1]
+    assert roll[0]["ret"] == pytest.approx(EQ[:first].iloc[-1] / base - 1)
+    assert ba.rolling_12m(EQ.iloc[:30]) == []
