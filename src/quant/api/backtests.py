@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
@@ -11,7 +12,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from quant.api.schemas import BacktestSubmit
+from quant.api.schemas import BacktestSubmit, ParamField
 from quant.core.settings import CostSettings
 from quant.data.store import is_valid_symbol
 from quant.db.backtests import create_run
@@ -60,7 +61,7 @@ def build_submission(
         params, form_errors = _form_params(req)
         errors += form_errors
     else:
-        params = dict(strategy_params or {})
+        params = _merge(strategy_params or {}, req.params or {})
         if req.strategy in STRATEGIES:
             try:
                 get_strategy(req.strategy).warmup_days(params)  # 校验参数
@@ -135,3 +136,69 @@ def submit(
     if errors:
         raise HTTPException(status_code=422, detail=errors)
     return create_run(session, req.strategy, params, req.start, req.end, "queued")
+
+
+def _merge(base: Mapping[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
+    """服务器配置的参数被用户的覆盖合并：嵌套组（dict）按键合并，其余直接替换。"""
+    out = dict(base)
+    for k, v in over.items():
+        if isinstance(v, Mapping) and isinstance(out.get(k), Mapping):
+            out[k] = {**out[k], **v}
+        else:
+            out[k] = v
+    return out
+
+
+def _field_type(v: Any) -> str | None:
+    if isinstance(v, bool):
+        return "bool"
+    if isinstance(v, int):
+        return "int"
+    if isinstance(v, float):
+        return "float"
+    if isinstance(v, str):
+        return "str"
+    if isinstance(v, list | tuple):
+        return "list"
+    return None
+
+
+def _fields(cls: type, values: Mapping[str, Any], group: str | None) -> list[ParamField]:
+    out = []
+    for f in dataclasses.fields(cls):
+        if f.default is not dataclasses.MISSING:
+            default: Any = f.default
+        elif f.default_factory is not dataclasses.MISSING:
+            default = f.default_factory()
+        else:
+            continue
+        v = values.get(f.name, default)
+        t = _field_type(v)
+        if t is None:  # 嵌套组等由调用方另行展开
+            continue
+        out.append(ParamField(key=f.name, group=group, type=t,
+                              default=list(v) if isinstance(v, tuple) else v))  # fmt: skip
+    return out
+
+
+def param_schema(strategy_name: str, configured: Mapping[str, Any]) -> dict[str, list[ParamField]]:
+    """各策略的参数表单；configured 为服务器配置的策略参数（只用于名为 strategy_name 的策略）。"""
+    from quant.strategies.combo import V2_SWING, ComboParams
+    from quant.strategies.etf_momentum import MomentumParams as EtfParams
+    from quant.strategies.momentum_select import MomentumParams as SelectParams
+    from quant.strategies.swing_pullback import SwingParams
+
+    def cfg(name: str) -> Mapping[str, Any]:
+        return configured if strategy_name == name else {}
+
+    c = cfg("combo")
+    return {
+        "combo": [
+            *_fields(ComboParams, c, None),
+            *_fields(SelectParams, c.get("momentum") or {}, "momentum"),
+            *_fields(SwingParams, {**V2_SWING, **(c.get("swing") or {})}, "swing"),
+        ],
+        "etf_momentum": _fields(EtfParams, cfg("etf_momentum"), None),
+        "momentum_select": _fields(SelectParams, cfg("momentum_select"), None),
+        "swing_pullback": _fields(SwingParams, cfg("swing_pullback"), None),
+    }

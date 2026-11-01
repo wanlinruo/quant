@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from quant.api import queries
 from quant.api.backtest_view import analysis, compare_view, positions_view, trades_view
-from quant.api.backtests import submit
+from quant.api.backtests import param_schema, submit
 from quant.api.deps import get_session, get_settings
 from quant.api.schemas import (
     BacktestAnalysis,
@@ -23,6 +23,7 @@ from quant.api.schemas import (
     BacktestSubmit,
     BacktestTrades,
     EquityPoint,
+    ParamField,
     Progress,
     QuotaOut,
     SubmitResult,
@@ -85,6 +86,13 @@ def run_analysis(run_id: int, s: SessionDep) -> BacktestAnalysis:
     if out is None:
         raise HTTPException(status_code=404, detail="回测不存在")
     return out
+
+
+@router.get("/backtests/param-schema")
+def params_schema() -> dict[str, list[ParamField]]:
+    """新建回测表单：各策略的参数、类型与默认值（服务器配置的策略参数覆盖默认值）。"""
+    settings = get_settings()
+    return param_schema(settings.strategy.name, settings.strategy.params)
 
 
 @router.get("/backtests/compare")

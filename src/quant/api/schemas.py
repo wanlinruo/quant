@@ -159,6 +159,8 @@ class BacktestSubmit(BaseModel):
     sma_window: int
     cash: Decimal
     costs: CostsIn
+    # 非表单策略（如 combo）的参数覆盖：只含用户改过的键；嵌套组（momentum / swing）只含改过的子键
+    params: dict[str, Any] | None = None
 
 
 class SubmitResult(BaseModel):
@@ -918,3 +920,12 @@ class BacktestCompare(BaseModel):
     metrics: list[BtCompareMetric] = []
     params: list[BtCompareParam] = []
     corr: list[list[float | None]] = []
+
+
+class ParamField(BaseModel):
+    """新建回测表单的一个参数（由策略参数数据类自省；默认值已含服务器配置的覆盖）。"""
+
+    key: str
+    group: str | None  # combo 的子仓参数组：momentum / swing
+    type: Literal["int", "float", "str", "bool", "list"]
+    default: Any

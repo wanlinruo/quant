@@ -111,6 +111,7 @@ export interface BacktestSubmit {
   sma_window: number;
   cash: number | string;
   costs: CostsIn;
+  params?: Record<string, unknown> | null;
 }
 
 export interface BacktestTrades {
@@ -609,6 +610,13 @@ export interface OrderOut {
   filled_qty: number;
   avg_fill_price: number | null;
   reason: string;
+}
+
+export interface ParamField {
+  key: string;
+  group: string | null;
+  type: "int" | "float" | "str" | "bool" | "list";
+  default: unknown;
 }
 
 export interface PeerOut {

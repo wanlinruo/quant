@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, ApiError } from "../api/client";
-import type { BacktestDefaults, BacktestSubmit, SubmitResult } from "../api/types";
+import type { BacktestDefaults, BacktestSubmit, ParamField, SubmitResult } from "../api/types";
+import { useApi } from "../hooks/useApi";
 
 /** “复制参数新建”：用某次回测的策略、区间、资金、参数与成本预填 */
 export type DrawerInitial = {
@@ -15,6 +16,46 @@ export type DrawerInitial = {
 type Props = { defaults: BacktestDefaults; initial?: DrawerInitial; onClose: () => void; onSubmitted: (id: number) => void };
 
 const str = (v: unknown, fallback: string) => (v === undefined || v === null ? fallback : String(v));
+const GROUP_TEXT: Record<string, string> = { momentum: "动量仓（momentum）", swing: "波段仓（swing）" };
+
+function fieldId(f: ParamField): string {
+  return f.group ? `${f.group}.${f.key}` : f.key;
+}
+
+function toText(v: unknown): string {
+  return Array.isArray(v) ? v.join(",") : v === undefined || v === null ? "" : String(v);
+}
+
+function parse(f: ParamField, text: string): unknown {
+  if (f.type === "int") return Number.parseInt(text, 10);
+  if (f.type === "float") return Number.parseFloat(text);
+  if (f.type === "bool") return text === "true";
+  if (f.type === "list") return text.split(",").map((x) => x.trim()).filter(Boolean);
+  return text;
+}
+
+/** 只提交与默认值不同的参数；嵌套组只含改过的子键 */
+function changedParams(fields: ParamField[], edits: Record<string, string>): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {};
+  for (const f of fields) {
+    const text = edits[fieldId(f)];
+    if (text === undefined || text === toText(f.default)) continue;
+    const v = parse(f, text);
+    if (f.group) out[f.group] = { ...((out[f.group] as Record<string, unknown>) ?? {}), [f.key]: v };
+    else out[f.key] = v;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+function initialEdits(params: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(params)) {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) out[`${k}.${k2}`] = toText(v2);
+    } else out[k] = toText(v);
+  }
+  return out;
+}
 
 const STATUS_STYLE = { position: "fixed", top: 0, right: 0, bottom: 0, width: 440 } as const;
 
@@ -36,6 +77,9 @@ export function BacktestSubmitDrawer({ defaults, initial, onClose, onSubmitted }
     min_commission: str(c.min_commission, defaults.min_commission ?? ""),
     slippage: str(c.slippage, defaults.slippage),
   });
+  const schema = useApi<Record<string, ParamField[]>>("/api/backtests/param-schema");
+  // “复制参数新建”时用那次回测的参数预填（只对非表单策略）
+  const [edits, setEdits] = useState<Record<string, string>>(() => (initial && initial.strategy !== "etf_momentum" ? initialEdits(p) : {}));
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
@@ -58,6 +102,7 @@ export function BacktestSubmitDrawer({ defaults, initial, onClose, onSubmitted }
         min_commission: form.min_commission || null,
         slippage: form.slippage,
       },
+      params: form.strategy === "etf_momentum" ? null : changedParams(schema.data?.[form.strategy] ?? [], edits),
     };
     try {
       const r = await api.post<SubmitResult>("/api/backtests", body);
@@ -114,7 +159,7 @@ export function BacktestSubmitDrawer({ defaults, initial, onClose, onSubmitted }
       <div className="two">{field("持有数量 top_k", "top_k", "number")}{field("均线窗口", "sma_window", "number")}</div>
         </>
       ) : (
-        <div className="muted sm" style={{ margin: "6px 0" }}>{form.strategy} 的参数沿用服务器配置（与模拟盘一致），此处不可修改。</div>
+        <StrategyParams fields={schema.data?.[form.strategy] ?? []} edits={edits} setEdits={setEdits} />
       )}
       {field("初始资金（美元）", "cash", "number")}
       <div className="three">{field("每股佣金", "commission_per_share")}{field("单笔最低佣金", "min_commission")}{field("滑点", "slippage")}</div>
@@ -127,5 +172,40 @@ export function BacktestSubmitDrawer({ defaults, initial, onClose, onSubmitted }
       </div>
       <div className="muted sm" style={{ marginTop: 8 }}>这是面板唯一的写操作：只插入一条排队任务，由 backtest-worker 执行。</div>
     </aside>
+  );
+}
+
+function StrategyParams({ fields, edits, setEdits }: { fields: ParamField[]; edits: Record<string, string>; setEdits: (e: Record<string, string>) => void }) {
+  if (!fields.length) return <div className="muted sm" style={{ margin: "6px 0" }}>加载参数中…</div>;
+  const groups = [...new Set(fields.map((f) => f.group ?? ""))];
+  const value = (f: ParamField) => edits[fieldId(f)] ?? toText(f.default);
+  const set = (f: ParamField, text: string) => setEdits({ ...edits, [fieldId(f)]: text });
+  return (
+    <div className="param-form">
+      <div className="muted sm" style={{ margin: "6px 0" }}>默认值与服务器配置一致（模拟盘在用的参数）；只提交改过的项，改过的标黄。</div>
+      {groups.map((g) => (
+        <details key={g || "top"} open={!g}>
+          <summary className="sm"><b>{g ? GROUP_TEXT[g] ?? g : "组合参数"}</b></summary>
+          <div className="two">
+            {fields.filter((f) => (f.group ?? "") === g).map((f) => {
+              const changed = value(f) !== toText(f.default);
+              return (
+                <label key={fieldId(f)} className={`field${changed ? " changed" : ""}`}>
+                  <span>{f.key}</span>
+                  {f.type === "bool" ? (
+                    <select aria-label={fieldId(f)} value={value(f)} onChange={(e) => set(f, e.target.value)}>
+                      <option value="true">true</option>
+                      <option value="false">false</option>
+                    </select>
+                  ) : (
+                    <input aria-label={fieldId(f)} type={f.type === "int" || f.type === "float" ? "number" : "text"} step={f.type === "float" ? "any" : undefined} value={value(f)} onChange={(e) => set(f, e.target.value)} />
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        </details>
+      ))}
+    </div>
   );
 }

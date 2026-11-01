@@ -126,7 +126,6 @@ describe("BacktestPage", () => {
     expect(screen.getByText("动量回看（交易日）")).toBeInTheDocument();
     await user.selectOptions(screen.getByRole("combobox"), "combo");
     expect(screen.queryByText("动量回看（交易日）")).not.toBeInTheDocument();
-    expect(screen.getByText(/参数沿用服务器配置/)).toBeInTheDocument();
   });
 
   it("end date input is limited to data_end", async () => {
@@ -342,5 +341,34 @@ describe("BacktestPage", () => {
     const { user } = renderPage(<BacktestPage />, "/backtest");
     await user.click((await screen.findAllByRole("checkbox"))[1]);
     expect(await screen.findByText(/没有共同区间/)).toBeInTheDocument();
+  });
+
+  const SCHEMA = {
+    combo: [
+      { key: "momentum_weight", group: null, type: "float", default: 0.4 },
+      { key: "top_n", group: "momentum", type: "int", default: 4 },
+      { key: "stop_pct", group: "swing", type: "float", default: 0.07 },
+      { key: "stocks", group: "swing", type: "list", default: ["AAPL", "NVDA"] },
+      { key: "use_inverse", group: "swing", type: "bool", default: false },
+    ],
+    etf_momentum: [],
+  };
+
+  it("drawer generates combo params and submits only changes", async () => {
+    const fetch = mockApi({ "/api/backtests": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/param-schema": [200, SCHEMA], "POST /api/backtests": [201, { id: 9 }] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click(await screen.findByRole("button", { name: "+ 新建回测" }));
+    await user.selectOptions(screen.getByRole("combobox"), "combo");
+    const dlg = screen.getByRole("dialog");
+    expect(await within(dlg).findByText("波段仓（swing）")).toBeInTheDocument();
+    expect(within(dlg).getByText(/默认值与服务器配置一致/)).toBeInTheDocument();
+    const stop = within(dlg).getByLabelText("swing.stop_pct");
+    await user.clear(stop);
+    await user.type(stop, "0.05");
+    await user.click(within(dlg).getByRole("button", { name: "提交到队列" }));
+    const post = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST");
+    const body = JSON.parse(String((post![1] as RequestInit).body));
+    expect(body.strategy).toBe("combo");
+    expect(body.params).toEqual({ swing: { stop_pct: 0.05 } });
   });
 });
