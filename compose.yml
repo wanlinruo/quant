@@ -45,6 +45,9 @@ services:
     environment:
       TRADING_MODE: ${TRADING_MODE:-paper}
       QUANT_DATABASE_URL: postgresql+psycopg://quant:${POSTGRES_PASSWORD}@postgres:5432/quant
+      # 服务器回测数据（#66）：空闲时用 Tiingo 补齐日线、用 SEC EDGAR 补历史财报日
+      QUANT_TIINGO_API_KEY: ${TIINGO_API_KEY:-}
+      QUANT_EDGAR_USER_AGENT: ${EDGAR_USER_AGENT:-}
     volumes:
       - parquet:/data/parquet
     depends_on:

@@ -124,3 +124,16 @@ def test_tiger_props_missing() -> None:
     s = load_settings(REPO_CONFIGS)
     with pytest.raises(ConfigError, match="TIGER_PROPS_PATH"):
         s.tiger_props_file()
+
+
+def test_env_maps_tiingo_key_and_backtest_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    """服务器 compose 把 .env 里的 TIINGO_API_KEY / EDGAR_USER_AGENT 映射成 QUANT_ 前缀（#66）。"""
+    monkeypatch.setenv("TRADING_MODE", "sim")
+    monkeypatch.setenv("QUANT_TIINGO_API_KEY", "tk-secret")
+    monkeypatch.setenv("QUANT_EDGAR_USER_AGENT", "someone someone@example.com")
+    monkeypatch.setenv("QUANT_DATA__BACKTEST_SOURCE", "tiingo")
+    s = load_settings()
+    assert s.data.backtest_source == "tiingo"
+    assert s.tiingo_api_key is not None and s.tiingo_api_key.get_secret_value() == "tk-secret"
+    assert "tk-secret" not in repr(s) and "example.com" not in repr(s)
+    assert s.tiingo.hourly == 50 and s.tiingo.monthly_symbols == 500
