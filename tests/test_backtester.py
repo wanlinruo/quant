@@ -139,3 +139,21 @@ def test_adjusted_ohlc_requires_adj_close(data: dict[str, pd.DataFrame]) -> None
     df.loc[df.index[0], "adj_close"] = np.nan
     with pytest.raises(ValueError, match="adj_close"):
         adjusted_ohlc(df)
+
+
+# ---- #67 B 批：归因与每日持仓 ----
+
+
+def test_records_attribution_and_holdings(
+    data: dict[str, pd.DataFrame], cal: TradingCalendar
+) -> None:
+    r = run(Alternating(cal), data, cal)
+    assert set(r.attribution) == set(r.signals)
+    day = sorted(r.attribution)[3]
+    assert r.attribution[day].sleeves == {"main": r.signals[day]}
+    some = sorted(r.holdings)[5]
+    sym, (qty, mv) = next(iter(r.holdings[some].items()))
+    assert qty > 0 and mv == pytest.approx(
+        r.weights.loc[pd.Timestamp(some), sym] * r.equity[pd.Timestamp(some)]
+    )
+    assert set(r.holdings) == {d.date() for d in r.equity.index}
