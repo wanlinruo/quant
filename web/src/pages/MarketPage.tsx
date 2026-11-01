@@ -120,7 +120,7 @@ function full(m: MarketOverview | null): Full | null {
     status: "ok", as_of: m.as_of, stale: m.stale ?? false, generated_at: m.generated_at, members: m.members ?? 0,
     coverage: m.coverage, strip: m.strip ?? [], highlights: m.highlights ?? "", breadth: m.breadth,
     styles: m.styles ?? [], sectors: m.sectors ?? [], movers: m.movers ?? [], heatmap: m.heatmap ?? {},
-    index_candles: m.index_candles ?? {}, macro: m.macro ?? [],
+    index_candles: m.index_candles ?? {}, macro: m.macro ?? [], sector_periods: m.sector_periods ?? {},
   };
 }
 

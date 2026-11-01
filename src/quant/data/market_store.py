@@ -9,9 +9,10 @@ import csv
 import io
 import json
 import logging
+import re
 import time
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
@@ -78,6 +79,16 @@ def ff_events_path(data_dir: Path) -> Path:
     return market_dir(data_dir) / "ff_events.json"
 
 
+STOCK_SYMBOL_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,9}$")
+
+
+def stock_path(data_dir: Path, symbol: str) -> Path | None:
+    """个股新闻与财务指标文件（stock_data 任务写、个股页接口读）；代码不合法时为 None。"""
+    if not STOCK_SYMBOL_RE.match(symbol):
+        return None
+    return market_dir(data_dir) / "stocks" / f"{symbol}.json"
+
+
 def gics_path(data_dir: Path) -> Path:
     return market_dir(data_dir) / "sp500_gics.csv"
 
@@ -85,6 +96,7 @@ def gics_path(data_dir: Path) -> Path:
 @dataclass(frozen=True)
 class GicsTable:
     rows: dict[str, tuple[str, str]]  # 代码 → （公司名，GICS 板块）
+    sub: dict[str, str] = field(default_factory=dict)  # 代码 → GICS 子行业（英文，可能缺）
 
     @property
     def members(self) -> list[str]:
@@ -98,17 +110,32 @@ class GicsTable:
         r = self.rows.get(symbol)
         return r[0] if r else None
 
+    def sub_industry(self, symbol: str) -> str | None:
+        return self.sub.get(symbol) or None
+
 
 def parse_gics(text: str) -> GicsTable:
     reader = csv.DictReader(io.StringIO(text))
     if reader.fieldnames is None or any(c not in reader.fieldnames for c in GICS_COLUMNS):
         raise ValueError("成分表缺少 Symbol / Security / GICS Sector 列")
-    rows = {
-        r["Symbol"].strip(): (r["Security"].strip(), r["GICS Sector"].strip())
-        for r in reader
-        if r.get("Symbol")
-    }
-    return GicsTable(rows)
+    rows: dict[str, tuple[str, str]] = {}
+    subs: dict[str, str] = {}
+    for r in reader:
+        sym = (r.get("Symbol") or "").strip()
+        if not sym:
+            continue
+        rows[sym] = (r["Security"].strip(), r["GICS Sector"].strip())
+        if si := (r.get("GICS Sub-Industry") or "").strip():
+            subs[sym] = si
+    return GicsTable(rows, subs)
+
+
+def load_gics(data_dir: Path) -> GicsTable | None:
+    """只读本地成分表（不下载）；没有或无法解析时为 None。面板接口用。"""
+    try:
+        return parse_gics(gics_path(data_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError, KeyError, csv.Error):
+        return None
 
 
 def sync_gics(

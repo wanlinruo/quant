@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
@@ -110,6 +110,17 @@ class FinnhubClient:
         body = self._get("/company-news", f"{symbol} 新闻", symbol=symbol,
                          **{"from": start.isoformat(), "to": end.isoformat()})  # fmt: skip
         return _news(body)
+
+    def metrics(self, symbol: str, keys: Sequence[str]) -> dict[str, float | None]:
+        """财务指标（/stock/metric）中 keys 这些键；非数字为 None。"""
+        body = self._get("/stock/metric", f"{symbol} 指标", symbol=symbol, metric="all")
+        m = body.get("metric") if isinstance(body, dict) else None
+        m = m if isinstance(m, dict) else {}
+        out: dict[str, float | None] = {}
+        for k in keys:
+            v = m.get(k)
+            out[k] = float(v) if isinstance(v, int | float) and not isinstance(v, bool) else None
+        return out
 
     def earnings(self, day: date) -> list[EarningsRaw]:
         """day 当天的财报（免费档一次最多 1500 条，所以按天查）。"""

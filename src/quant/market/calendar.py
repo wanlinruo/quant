@@ -101,7 +101,7 @@ def merge_ff(
 
 
 def _num(v: float | None) -> str | None:
-    return None if v is None else f"{v:g}"
+    return None if v is None else f"{round(v, 2):g}"
 
 
 def _earnings_items(

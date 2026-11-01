@@ -317,6 +317,7 @@ class Strategy(ABC):
 | 17:00 | `daily_signal` | 运行策略 → 写入 `signals` → 推送"明日计划调仓"通知 |
 | 20:30 | `market_data` | 首页市场看板（#69）：同步标普 500 GICS 成分表（每周）→ Massive 全市场日线（当日 + 按额度补历史）→ 分批刷新市值 → 预计算快照 `market/snapshot.json`；与交易无关，没有 Massive key 时跳过 |
 | 21:00 | `market_extras` | 首页宏观、新闻、财经日历（#69 第 2 批）：FRED（VIX、10 年期、广义美元、WTI 与经济数据实际值）、Coinbase 比特币、Finnhub 市场 / 持仓 / 异动股新闻与财报日历、Forex Factory 本周经济日历 → `market/{macro,news,calendar}.json`；各数据源互不影响，未配置 key 的区块跳过 |
+| 21:15 | `stock_data` | 个股页（#70 第 3 批）：Finnhub 为标普 500 成分 ∪ 持仓预取公司新闻（每天全部）与财务指标（每天最旧的 120 只，约一周一轮）→ `market/stocks/{代码}.json`；限流时停止、下次从最旧的继续；没有 Finnhub key 时跳过 |
 | 次日 09:50（可配置） | `daily_execute` | 熔断检查 → 对账 → 生成订单 → 风控 → 下单 → 跟踪成交 |
 | 执行完成后 | `daily_report` | 持仓与账户快照 → 再次对账 → 推送日报 |
 

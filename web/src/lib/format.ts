@@ -22,6 +22,7 @@ export function money(v: number | null | undefined): string {
 export function compact(v: number | null | undefined, digits = 2): string {
   if (v === null || v === undefined || Number.isNaN(v)) return "-";
   const a = Math.abs(v);
+  if (a >= 1e12) return `${(v / 1e12).toFixed(digits)}T`;
   if (a >= 1e9) return `${(v / 1e9).toFixed(digits)}B`;
   if (a >= 1e6) return `${(v / 1e6).toFixed(digits)}M`;
   if (a >= 1e3) return `${(v / 1e3).toFixed(digits)}K`;
