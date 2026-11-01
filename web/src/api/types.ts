@@ -519,6 +519,7 @@ export interface StatOut {
 export interface StockExtras {
   symbol: string;
   covered: boolean;
+  in_sp500?: boolean;
   name?: string | null;
   sector?: string | null;
   sub_industry?: string | null;

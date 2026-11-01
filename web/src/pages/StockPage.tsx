@@ -37,9 +37,10 @@ function sp(v: number | null | undefined, digits = 2): string {
 
 const UNCOVERED = "仅覆盖标普 500 成分股与持仓";
 
-/** 估值、新闻、同板块：未覆盖与尚未取到时的说明；有数据时为 null。 */
-function extrasNote(x: StockExtras | null, has: boolean, pending: string): ReactNode {
+/** 估值、新闻、同板块：未覆盖、已取到但为空、尚未取到时的说明；有数据时为 null。 */
+function extrasNote(x: StockExtras | null, has: boolean, pending: string, empty?: string | false): ReactNode {
   if (x && !x.covered) return <EmptyState note={UNCOVERED} />;
+  if (!has && empty) return <EmptyState note={empty} />;
   if (!has) return <EmptyState kind="pending" note={x ? pending : undefined} />;
   return null;
 }
@@ -178,7 +179,7 @@ export function StockPage() {
               right={<Tabs tabs={[{ key: "strategy", label: "我的策略" }, { key: "news", label: "新闻" }, { key: "earnings", label: "财报" }, { key: "backtest", label: "回测中的表现" }]} value={tab} onChange={setTab} />}
             >
               {tab === "strategy" && <StrategyTab p={p} account={account} focus={focus} onFocus={setFocus} />}
-              {tab === "news" && (extrasNote(x, news.length > 0, "每天收盘后更新") ?? <StockNews items={news} testId="stock-news-tab" />)}
+              {tab === "news" && (extrasNote(x, news.length > 0, "每天收盘后更新", !!x?.news_updated && "近 7 天无新闻") ?? <StockNews items={news} testId="stock-news-tab" />)}
               {tab === "earnings" && <EarningsHistory p={p} />}
               {tab === "backtest" && <EmptyState kind="pending" note="随回测页上线（#67）" />}
             </Panel>
@@ -235,10 +236,10 @@ export function StockPage() {
               )}
             </Panel>
             <Panel title="相关新闻">
-              {extrasNote(x, news.length > 0, "每天收盘后更新") ?? <StockNews items={news} limit={5} testId="stock-news-side" />}
+              {extrasNote(x, news.length > 0, "每天收盘后更新", !!x?.news_updated && "近 7 天无新闻") ?? <StockNews items={news} limit={5} testId="stock-news-side" />}
             </Panel>
             <Panel title="同板块" right={x?.sub_industry ? <span className="muted sm">同子行业优先</span> : undefined} grow>
-              {extrasNote(x, peers.length > 0, "随首页市场数据更新") ?? (
+              {extrasNote(x, peers.length > 0, "随首页市场数据更新", x?.in_sp500 === false && "非标普 500 成分股，无同板块数据") ?? (
                 <table className="dt compact" data-testid="peers">
                   <thead>
                     <tr><th>代码</th><th className="r">市值</th><th className="r">1日</th><th className="r">今年</th></tr>

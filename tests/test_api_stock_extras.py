@@ -153,3 +153,29 @@ def test_extras_bad_news_item_does_not_drop_rest(client: TestClient, tmp_path: P
     out = client.get("/api/stock/AAPL/extras").json()
     assert [n["headline"] for n in out["news"]] == ["Apple Q4 earnings beat"]
     assert len(out["metrics"]) == len(METRIC_KEYS)
+
+
+def test_extras_corrupt_caps_and_snapshot_values(client: TestClient, tmp_path: Path) -> None:
+    setup(tmp_path)
+    (tmp_path / "market" / "caps.json").write_text("{broken", encoding="utf-8")
+    r = client.get("/api/stock/AAPL/extras")
+    assert r.status_code == 200 and r.json()["covered"] and r.json()["market_cap"] is None
+    assert len(r.json()["peers"]) == 8
+    setup(tmp_path, snapshot={"as_of": "2026-10-30",
+                              "heatmap": {"1D": [{"symbol": "DELL", "ret": "x"}]},
+                              "sector_periods": {"XLK": {"1D": "bad", "1W": 0.02}}})  # fmt: skip
+    r = client.get("/api/stock/AAPL/extras")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["sector_periods"] == {"1W": 0.02} and d["peers"][0]["d1"] is None
+
+
+def test_extras_holding_outside_sp500(client: TestClient, tmp_path: Path) -> None:
+    setup(tmp_path)
+    sp = ms.stock_path(tmp_path, "TSM")
+    assert sp is not None
+    sp.write_text(json.dumps({"symbol": "TSM", "news_updated": "2026-10-30T21:15:00-04:00",
+                              "news": [], "metrics": {}}), encoding="utf-8")  # fmt: skip
+    d = client.get("/api/stock/TSM/extras").json()
+    assert d["covered"] and d["in_sp500"] is False and d["peers"] == []
+    assert client.get("/api/stock/AAPL/extras").json()["in_sp500"] is True

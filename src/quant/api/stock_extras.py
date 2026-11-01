@@ -42,11 +42,24 @@ def _load(path: Path | None) -> dict[str, Any]:
         return {}
 
 
+def _num(v: Any) -> float | None:
+    return float(v) if isinstance(v, int | float) and not isinstance(v, bool) else None
+
+
 def _rets(snap: dict[str, Any], period: str) -> dict[str, float | None]:
-    cells = (snap.get("heatmap") or {}).get(period) or []
+    heat = snap.get("heatmap")
+    cells = heat.get(period) if isinstance(heat, dict) else None
     try:
-        return {c["symbol"]: c.get("ret") for c in cells}
+        return {c["symbol"]: _num(c.get("ret")) for c in cells or []}
     except (TypeError, KeyError, AttributeError):
+        return {}
+
+
+def _caps(data_dir: Path) -> dict[str, float | None]:
+    try:
+        return {k: _num(v.market_cap) for k, v in MarketStore(data_dir).caps().items()}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        log.warning("caps.json 无法读取：%s", type(e).__name__)
         return {}
 
 
@@ -62,13 +75,17 @@ def stock_extras(data_dir: Path, symbol: str) -> StockExtras:
     in_gics = gics is not None and sym in gics.rows
     if not in_gics and not doc:
         return empty
-    caps = {k: v.market_cap for k, v in MarketStore(data_dir).caps().items()}
-    out: dict[str, Any] = {"symbol": sym, "covered": True, "market_cap": caps.get(sym)}
+    caps = _caps(data_dir)
+    out: dict[str, Any] = {"symbol": sym, "covered": True, "in_sp500": in_gics,
+                           "market_cap": caps.get(sym)}  # fmt: skip
     if gics is not None and in_gics:
         sector = gics.sector(sym)
         etf = SECTOR_ETF.get(sector or "")
         snap = _load(snapshot_path(data_dir))
-        periods = (snap.get("sector_periods") or {}).get(etf) if etf else None
+        sp = snap.get("sector_periods")
+        raw_periods = sp.get(etf) if etf and isinstance(sp, dict) else None
+        periods = ({k: v for k, v in raw_periods.items() if _num(v) is not None}
+                   if isinstance(raw_periods, dict) else {})  # fmt: skip
         d1, ytd = _rets(snap, "1D"), _rets(snap, "YTD")
         sub = gics.sub_industry(sym)
         by_cap = sorted((s for s in gics.members if s != sym),
@@ -80,7 +97,7 @@ def stock_extras(data_dir: Path, symbol: str) -> StockExtras:
             "sector": SECTOR_NAME.get(sector or "", sector),
             "sub_industry": sub,
             "sector_etf": etf,
-            "sector_periods": periods if isinstance(periods, dict) else {},
+            "sector_periods": periods,
             "peers": [
                 PeerOut(
                     symbol=s,
@@ -97,7 +114,7 @@ def stock_extras(data_dir: Path, symbol: str) -> StockExtras:
         metrics = []
         for key, label, kind in METRICS:
             v = raw.get(key)
-            v = float(v) if isinstance(v, int | float) and not isinstance(v, bool) else None
+            v = _num(v)
             if v is not None and kind == "pct":
                 v /= 100
             metrics.append(MetricOut(key=key, label=label, kind=kind, value=v))

@@ -624,6 +624,7 @@ class PeerOut(BaseModel):
 class StockExtras(BaseModel):
     symbol: str
     covered: bool  # 是否在“标普 500 成分 ∪ 持仓”的覆盖范围内
+    in_sp500: bool = False  # 标普 500 成分（才有板块与同板块）
     name: str | None = None
     sector: str | None = None
     sub_industry: str | None = None
