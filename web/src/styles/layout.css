@@ -113,3 +113,13 @@ table.dt tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
 .pnlcal-g { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
 .pnlcal-g .wd { text-align: center; }
 .pnlcal-g .day { height: 30px; border-radius: 3px; background: #161a23; display: flex; align-items: center; justify-content: center; font-size: 11px; font-variant-numeric: tabular-nums; }
+.readout { position: absolute; top: 4px; left: 8px; z-index: 2; color: #c9ccd3; pointer-events: none; white-space: nowrap; }
+.chips-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip2 { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid #2a2f3b; color: #c9ccd3; white-space: nowrap; }
+.chip2.on { border-color: #2962ff; color: #9db4ff; }
+.quote-h { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.quote-stats { display: grid; grid-template-columns: repeat(8, auto); gap: 4px 16px; font-size: 12px; white-space: nowrap; }
+.dt tr[aria-selected="true"] td { background: rgba(41,98,255,.15); }
+.dt tr.click { cursor: pointer; }
+.rangebar { position: relative; height: 6px; background: #1d212b; border-radius: 3px; margin: 6px 0 2px; }
+.rangebar .pin { position: absolute; top: -3px; width: 2px; height: 12px; background: #fff; }
