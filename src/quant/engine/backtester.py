@@ -17,6 +17,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 import pandas as pd
 
@@ -96,6 +97,8 @@ class BacktestResult:
     benchmark: Metrics | None
     benchmark_equity: pd.Series | None = None
     signals: dict[date, dict[str, float]] = field(default_factory=dict)
+    # 数据来源与覆盖（服务器回测，#66）：source、data_end，候选池策略另有 coverage 等
+    data_info: dict[str, Any] = field(default_factory=dict)
 
 
 class Backtester:

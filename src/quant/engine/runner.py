@@ -2,25 +2,32 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
+import pandas as pd
 from sqlalchemy.orm import Session
 
 from quant.broker.sim import CostModel
-from quant.core.calendar import get_calendar
+from quant.core.calendar import TradingCalendar, get_calendar
 from quant.core.settings import CostSettings, Settings
-from quant.data.pipeline import ensure_bars
-from quant.data.providers.base import DataProvider
+from quant.data.backtest_data import backtest_store, earnings_path
+from quant.data.events import live_earnings_path, load_earnings, load_fomc_dates
+from quant.data.pipeline import DataValidationError, ensure_bars
+from quant.data.providers.base import DataProvider, DataUnavailableError
 from quant.data.providers.yfinance import YFinanceProvider
 from quant.data.store import ParquetStore
+from quant.data.universe import constituents_path, load_constituents
 from quant.db.backtests import complete_run
 from quant.engine.backtester import Backtester, BacktestResult
+from quant.engine.coverage import missing_ratio_by_year
 from quant.engine.orders import OrderPlanParams
 from quant.strategies import get_strategy
+from quant.strategies.events import EventCalendar
 
 BENCHMARK = "SPY"
 COSTS_KEY = "_costs"  # 存入 backtest_runs.params 的成本假设
@@ -79,12 +86,55 @@ def costs_with_overrides(
     )
 
 
+class BacktestDataError(ValueError):
+    """回测所需的本地数据不全（服务器 tiingo 模式下不联网补拉）。"""
+
+
+def _local_bars(
+    store: ParquetStore, symbols: Iterable[str], start: date, end: date, cal: TradingCalendar
+) -> tuple[dict[str, pd.DataFrame], list[str]]:
+    """只读本地：返回有数据且覆盖到 end 的标的，以及缺失或不覆盖的标的。
+
+    上市晚于 start 的标的照常使用（补数时已取全部历史并校验过）。
+    """
+    last_needed = end if cal.is_trading_day(end) else cal.previous_trading_day(end)
+    out: dict[str, pd.DataFrame] = {}
+    missing: list[str] = []
+    for s in sorted(set(symbols)):
+        df = store.read_bars(s, start, end)
+        if df.empty or pd.Timestamp(df.index[-1]).date() < last_needed:
+            missing.append(s)
+        else:
+            out[s] = df
+    return out, missing
+
+
+def _backtest_events(data_dir: Path) -> tuple[EventCalendar, str]:
+    """回测用的财报日：earnings.csv ∪ earnings_sp500.csv（SEC EDGAR）∪ earnings_live.csv + FOMC。"""
+    earnings: dict[str, set[date]] = {}
+    sp500 = earnings_path(data_dir)
+    for p in (data_dir / "events" / "earnings.csv", sp500, live_earnings_path(data_dir)):
+        if p.exists():
+            for sym, days in load_earnings(p).items():
+                earnings.setdefault(sym, set()).update(days)
+    cal = EventCalendar(
+        earnings={k: tuple(sorted(v)) for k, v in earnings.items()}, fomc=load_fomc_dates()
+    )
+    return cal, "complete" if sp500.exists() else "none"
+
+
 def run_spec(
     spec: BacktestSpec,
     settings: Settings,
     provider: DataProvider | None = None,
     refresh_data: bool = False,
 ) -> BacktestResult:
+    """准备数据并回测。
+
+    data.backtest_source = yfinance（Mac 默认）：主数据目录，缺数据时用 YFinance 拉取。
+    data.backtest_source = tiingo（服务器）：只读 backtest_bars 目录，不联网；缺固定标的直接报错。
+    需要候选池的策略（如 combo）另外加载成分股快照、候选池日线与历史财报日，并记录覆盖率。
+    """
     if spec.start >= spec.end:
         raise ValueError(f"start {spec.start} 必须早于 end {spec.end}")
     cal = get_calendar()
@@ -93,24 +143,66 @@ def run_spec(
     symbols = sorted({*strategy.symbols(params), BENCHMARK})
     # 交易日 ≈ 自然日 × 252/365，再多留余量
     data_start = spec.start - timedelta(days=int(strategy.warmup_days(params) * 1.5) + 10)
-    bars = ensure_bars(
-        ParquetStore(settings.data_dir),
-        provider or YFinanceProvider(),
-        cal,
-        symbols,
-        data_start,
-        spec.end,
-        refresh_data,
-        strategy.max_daily_move,
-    )
+    tiingo = settings.data.backtest_source == "tiingo"
+    data_dir = settings.data_dir
+    if tiingo:
+        store = backtest_store(data_dir)
+        bars, missing = _local_bars(store, symbols, data_start, spec.end, cal)
+        if missing:
+            raise BacktestDataError(
+                f"回测数据尚未补齐：缺 {', '.join(missing)}（服务器在空闲时按 Tiingo 额度补齐，"
+                "可用 quant backtest-data status 查看进度）"
+            )
+    else:
+        store = ParquetStore(data_dir)
+        bars = ensure_bars(
+            store, provider or YFinanceProvider(), cal, symbols, data_start, spec.end,
+            refresh_data, strategy.max_daily_move,
+        )  # fmt: skip
+    data_end = min(pd.Timestamp(df.index[-1]).date() for df in bars.values())
+    info: dict[str, Any] = {"source": "tiingo" if tiingo else "yfinance",
+                            "data_end": data_end.isoformat()}  # fmt: skip
+    events: EventCalendar | None = None
+    universe = None
+    if strategy.uses_universe:
+        path = constituents_path(data_dir)
+        if not path.exists():
+            raise BacktestDataError(f"缺成分股名单：{path}")
+        universe = load_constituents(path)
+        members = universe.all_symbols(data_start, spec.end) - set(symbols)
+        if tiingo:
+            cand, _ = _local_bars(store, members, data_start, spec.end, cal)
+            # 已退市成分的数据停在退市日：只要在 data_start 之后有数据就算有
+            cand |= {
+                s: df for s in members - set(cand)
+                if not (df := store.read_bars(s, data_start, spec.end)).empty
+            }  # fmt: skip
+        else:
+            cand = {}
+            for s in sorted(members):
+                try:
+                    cand |= ensure_bars(store, provider or YFinanceProvider(), cal, [s],
+                                        data_start, spec.end, refresh_data,
+                                        strategy.max_daily_move)  # fmt: skip
+                except (DataUnavailableError, DataValidationError):
+                    continue
+        bars = {**cand, **bars}
+        by_year = missing_ratio_by_year(universe, set(bars), spec.start, spec.end)
+        events, earnings_flag = _backtest_events(data_dir)
+        info |= {
+            "coverage": float(1 - by_year.mean()) if len(by_year) else 1.0,
+            "missing_by_year": {str(y): float(v) for y, v in by_year.items()},
+            "earnings": earnings_flag,
+        }
     ex = settings.executor
     plan = OrderPlanParams(
         cash_buffer=Decimal(str(ex.cash_buffer)),
         min_trade_usd=Decimal(str(ex.min_trade_usd)),
         min_weight_diff=Decimal(str(ex.min_weight_diff)),
     )
-    bt = Backtester(strategy, bars, cal, spec.costs, spec.cash, plan, params, BENCHMARK)
-    return bt.run(spec.start, spec.end)
+    bt = Backtester(strategy, bars, cal, spec.costs, spec.cash, plan, params, BENCHMARK,
+                    events=events, universe=universe)  # fmt: skip
+    return replace(bt.run(spec.start, spec.end), data_info=info)
 
 
 def save_result(session: Session, run_id: int, result: BacktestResult) -> None:
@@ -118,4 +210,6 @@ def save_result(session: Session, run_id: int, result: BacktestResult) -> None:
         **result.metrics.to_dict(),
         "benchmark": result.benchmark.to_dict() if result.benchmark else None,
     }
+    if result.data_info:
+        metrics["data"] = result.data_info
     complete_run(session, run_id, metrics, result.equity, result.drawdown)

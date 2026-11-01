@@ -1,7 +1,7 @@
 """服务器回测数据（#66）：backtest-worker 空闲时按 Tiingo 额度逐只补齐，回测只读本地数据。
 
 优先级：固定标的（各策略标的、SPY/QQQ、面板 ETF 选项）→ 当前标普 500 成分 → 已退市的历史成分。
-每次拉 2015-01-01 至今的全量（复权价始终自洽）；仍在市的超过 30 天重新拉，已退市的只拉一次。
+每次拉 2013-01-01 至今的全量（复权价始终自洽）；仍在市的超过 30 天重新拉，已退市的只拉一次。
 本月拿不到 / 校验不过的代码，本月不再请求（避免反复消耗额度），下个月再试。
 """
 
@@ -29,7 +29,7 @@ from quant.strategies.universe import Constituents
 
 log = logging.getLogger("quant.backtest_data")
 
-FULL_START = date(2015, 1, 1)
+FULL_START = date(2013, 1, 1)  # 2016 年起的回测需要约一年半的预热数据
 HISTORY_START = date(2016, 1, 1)  # 历史成分从这一年起计入（回测通常从 2016 年开始）
 REFRESH_DAYS = 30
 EARNINGS_CHUNK = 50  # 每次空闲同步多少只的财报日（SEC 每秒 10 次以内）
