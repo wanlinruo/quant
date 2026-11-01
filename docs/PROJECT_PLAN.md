@@ -282,8 +282,9 @@ class Strategy(ABC):
 
 | 表 | 主要字段 | 说明 |
 |---|---|---|
-| `job_runs` | job_name, trade_date, status, started_at, finished_at, error | `(job_name, trade_date)` 唯一，保证幂等 |
-| `signals` | strategy, signal_date, target_weights (jsonb), data_as_of | 每日目标仓位 |
+| `job_runs` | mode, job_name, trade_date, status, started_at, finished_at, error | `(mode, job_name, trade_date)` 唯一，保证幂等；模拟盘与实盘的 scheduler 各自独立 |
+| `job_attempts` | mode, job_name, trade_date, attempt, started_at, finished_at, result, error | 每次实际执行（含重跑）一行，供系统页“重试后成功”与运行详情；不影响幂等 |
+| `signals` | mode, strategy, signal_date, target_weights (jsonb), data_as_of, detail (jsonb) | 每日目标仓位；detail 为策略给出的子仓明细（两仓权重、择时系数、动量排名前 50），面板据此显示所属仓、信号状态与调仓原因 |
 | `orders` | client_order_id, broker_order_id, symbol, side, qty, limit_price, status, mode | `client_order_id` 唯一 |
 | `fills` | broker_order_id, symbol, qty, price, commission, filled_at | 成交记录 |
 | `position_snapshots` | snapshot_date, symbol, qty, avg_cost, market_value | 每日持仓快照 |
@@ -296,7 +297,7 @@ class Strategy(ABC):
 
 - `orders`、`fills`、两张快照表增加 `mode` 列（sim / paper / live），模拟盘与实盘数据在同一个库中不混淆；快照表按 `(日期, mode[, symbol])` 唯一。
 - `orders` 增加 `reference_price`（下单时参考价）、`filled_qty`、`avg_fill_price`、`reason`，用于评估延迟行情下的执行偏差（#3）。
-- `signals` 按 `(strategy, signal_date)` 唯一。状态、方向、模式等字段用 CHECK 约束限定取值。
+- `signals` 按 `(mode, strategy, signal_date)` 唯一；执行器只读取本账户（mode）的信号。状态、方向、模式等字段用 CHECK 约束限定取值。
 - 初始迁移写入 `trading_enabled = false`：熔断开关默认关闭，需人工打开。
 
 ---
@@ -362,10 +363,10 @@ class Strategy(ABC):
 | 页面 | 内容 |
 |---|---|
 | 市场 | 盘后复盘首页：大盘、板块、异动、新闻与财经日历（数据源接入前显示“数据接入中”），我的策略摘要 |
-| 组合 | 账户净值、当前持仓与目标仓位的差异、最新信号、订单与成交记录；顶栏可切换本地模拟 / 模拟盘 / 实盘账户 |
+| 组合 | 6 个指标卡、净值对比（QQQ、SPY，标出调仓日）与回撤、分仓与择时、持仓表（所属仓、偏差、信号状态、下次财报、持有天数）、收益贡献、每日盈亏日历、风险、下次调仓预览（只读）、订单 / 成交 / 已平仓；顶栏可切换本地模拟 / 模拟盘 / 实盘账户 |
 | 回测 | 提交回测；历史回测列表；净值与回撤曲线；多个回测的指标对比 |
 | 系统 | 交易模式与熔断开关状态（只读显示）、各任务最近运行状态、最近失败、回测队列、行情数据状态 |
-| 个股 | 通过搜索或点击进入：K 线、成交量与均线 |
+| 个股 | 通过搜索或点击进入：报价与“与我的系统的关系”（持有、子仓、动量排名、标普 500 成分）、区间表现对比 QQQ、K 线（持仓期底色、买卖点、财报日）、波段信号与技术面、交易记录、关键数据与财报；候选池股票用未复权日线并标注 |
 
 约束：面板**不得包含任何下单、撤单、修改熔断开关的功能**。唯一的写操作是提交回测任务（`POST /api/backtests`），由 `tests/test_api_readonly.py` 保证。前端类型由后端模型生成（`make api-types`）。
 

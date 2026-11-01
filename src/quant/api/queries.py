@@ -17,7 +17,6 @@ from quant.api.schemas import (
     MODES,
     AccountPoint,
     BacktestRunOut,
-    Bar,
     DataStatusRow,
     EquityPoint,
     FailureOut,
@@ -30,7 +29,7 @@ from quant.api.schemas import (
     SignalOut,
 )
 from quant.core.calendar import TradingCalendar
-from quant.data.store import ParquetStore, is_valid_symbol
+from quant.data.store import ParquetStore
 from quant.data.validate import validate_bars
 from quant.db.models import (
     AccountSnapshotRow,
@@ -105,9 +104,11 @@ def account_curve(s: Session, mode: Mode) -> list[AccountPoint]:
     ]  # fmt: skip
 
 
-def latest_signals(s: Session) -> list[SignalOut]:
-    """每个策略最近一次的目标仓位。"""
-    rows = s.scalars(select(Signal).order_by(Signal.signal_date.desc()).limit(50)).all()
+def latest_signals(s: Session, mode: Mode) -> list[SignalOut]:
+    """该账户每个策略最近一次的目标仓位。"""
+    rows = s.scalars(
+        select(Signal).where(Signal.mode == mode).order_by(Signal.signal_date.desc()).limit(50)
+    ).all()
     seen: set[str] = set()
     out = []
     for r in rows:
@@ -115,7 +116,8 @@ def latest_signals(s: Session) -> list[SignalOut]:
             continue
         seen.add(r.strategy)
         out.append(
-            SignalOut(strategy=r.strategy, signal_date=r.signal_date, data_as_of=r.data_as_of,
+            SignalOut(mode=r.mode, strategy=r.strategy, signal_date=r.signal_date,
+                      data_as_of=r.data_as_of, detail=r.detail,
                       target_weights={k: float(v) for k, v in r.target_weights.items()})
         )  # fmt: skip
     return out
@@ -185,17 +187,18 @@ def queue_status(s: Session) -> QueueStatus:
 # ---- 系统 ----
 
 
-def job_status(s: Session) -> list[JobStatusOut]:
-    """每个任务最近一次运行。"""
-    rows = s.scalars(select(JobRun).order_by(JobRun.started_at.desc()).limit(500)).all()
-    seen: set[str] = set()
+def job_status(s: Session, mode: Mode | None = None) -> list[JobStatusOut]:
+    """每个账户、每个任务最近一次运行；给出 mode 时只看该账户。"""
+    q = select(JobRun).order_by(JobRun.started_at.desc()).limit(500)
+    rows = s.scalars(q.where(JobRun.mode == mode) if mode else q).all()
+    seen: set[tuple[str, str]] = set()
     out = []
     for r in rows:
-        if r.job_name in seen:
+        if (r.mode, r.job_name) in seen:
             continue
-        seen.add(r.job_name)
+        seen.add((r.mode, r.job_name))
         out.append(
-            JobStatusOut(job_name=r.job_name, trade_date=r.trade_date, status=r.status,
+            JobStatusOut(mode=r.mode, job_name=r.job_name, trade_date=r.trade_date, status=r.status,
                          started_at=r.started_at, finished_at=r.finished_at,
                          error=_first_line(r.error))
         )  # fmt: skip
@@ -263,18 +266,3 @@ def data_status(store: ParquetStore, cal: TradingCalendar, expected: date) -> li
             )
         )  # fmt: skip
     return out
-
-
-def bars(store: ParquetStore, symbol: str, start: date | None) -> list[Bar]:
-    """不合法或没有数据的代码返回空列表（个股页显示“暂无数据”）。"""
-    if not is_valid_symbol(symbol):
-        return []
-    df = store.read_bars(symbol, start)
-    return [
-        Bar(date=d.date(), open=float(o), high=float(h), low=float(lo), close=float(c),
-            adj_close=float(a), volume=float(v))
-        for d, o, h, lo, c, a, v in zip(
-            pd.DatetimeIndex(df.index), df["open"], df["high"], df["low"], df["close"],
-            df["adj_close"], df["volume"], strict=True,
-        )
-    ]  # fmt: skip

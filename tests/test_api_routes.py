@@ -69,7 +69,7 @@ def test_health_and_meta_without_db(client_no_db: TestClient) -> None:
     [
         "/api/portfolio/paper/positions",
         "/api/portfolio/paper/curve",
-        "/api/signals/latest",
+        "/api/signals/latest?mode=paper",
         "/api/backtests",
         "/api/system/jobs",
         "/api/system/queue",
@@ -105,7 +105,7 @@ def test_defaults_without_db(client_no_db: TestClient) -> None:
 
 def test_market_endpoints_without_data(client_no_db: TestClient) -> None:
     assert client_no_db.get("/api/market/data-status").json() == []
-    assert client_no_db.get("/api/market/bars/SPY").json() == []
+    assert client_no_db.get("/api/market/bars/SPY").json() == {"adjusted": True, "bars": []}
 
 
 @pytest.mark.db
@@ -116,7 +116,7 @@ def test_portfolio_and_meta_with_data(client_db: TestClient) -> None:
     assert client_db.get("/api/portfolio/live/positions").json() == []
     assert len(client_db.get("/api/portfolio/paper/orders", params={"limit": 1}).json()) == 1
     assert client_db.get("/api/portfolio/paper/fills").json()[0]["symbol"] == "NVDA"
-    assert client_db.get("/api/signals/latest").json()[0]["strategy"] == "combo"
+    assert client_db.get("/api/signals/latest?mode=paper").json()[0]["strategy"] == "combo"
     meta = client_db.get("/api/meta").json()
     assert meta["database_configured"] is True
     assert meta["default_account"] == "paper"
@@ -133,6 +133,10 @@ def test_system_endpoints_with_data(client_db: TestClient) -> None:
     assert client_db.get("/api/system/flags").json()["trading_enabled"] == "false"
     jobs = {j["job_name"] for j in client_db.get("/api/system/jobs").json()}
     assert jobs == {"daily_data", "daily_signal"}
+    paper = client_db.get("/api/system/jobs", params={"mode": "paper"}).json()
+    assert {j["job_name"] for j in paper} == {"daily_data", "daily_signal"}
+    assert all(j["mode"] == "paper" for j in paper)
+    assert client_db.get("/api/system/jobs", params={"mode": "live"}).json() == []
     assert len(client_db.get("/api/system/failures").json()) == 2
 
 
@@ -269,7 +273,7 @@ def test_submit_type_errors_are_chinese_with_field_names(client_db: TestClient) 
 def test_bars_with_invalid_symbol_is_empty(client_no_db: TestClient, symbol: str) -> None:
     r = client_no_db.get(f"/api/market/bars/{symbol}")
     assert r.status_code == 200
-    assert r.json() == []
+    assert r.json()["bars"] == []
 
 
 def test_data_status_is_cached(client_no_db: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

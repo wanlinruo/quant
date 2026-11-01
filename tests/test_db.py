@@ -29,6 +29,7 @@ TABLES = {
     "backtest_runs",
     "backtest_equity",
     "system_flags",
+    "job_attempts",
 }
 
 
@@ -50,9 +51,10 @@ def test_all_tables_defined() -> None:
 @pytest.mark.parametrize(
     ("table", "columns"),
     [
-        ("job_runs", ("job_name", "trade_date")),
+        ("job_runs", ("mode", "job_name", "trade_date")),
         ("orders", ("client_order_id",)),
-        ("signals", ("strategy", "signal_date")),
+        ("signals", ("mode", "strategy", "signal_date")),
+        ("job_attempts", ("mode", "job_name", "trade_date", "attempt")),
         ("account_snapshots", ("snapshot_date", "mode")),
         ("position_snapshots", ("snapshot_date", "mode", "symbol")),
     ],
@@ -143,8 +145,8 @@ def test_order_check_constraints(engine: Engine, overrides: dict[str, object]) -
 @needs_db
 def test_job_run_unique_per_day(engine: Engine) -> None:
     sql = text(
-        "INSERT INTO job_runs (job_name, trade_date, status, started_at)"
-        " VALUES ('daily_data', :d, 'running', :t)"
+        "INSERT INTO job_runs (mode, job_name, trade_date, status, started_at)"
+        " VALUES ('paper', 'daily_data', :d, 'running', :t)"
     )
     args = {"d": date(2026, 10, 29), "t": datetime.now(UTC)}
     with engine.begin() as conn:
@@ -193,3 +195,82 @@ def test_backtest_run_roundtrip(engine: Engine) -> None:
         assert s.query(BacktestEquity).filter_by(run_id=rid).count() == 3
         failed = s.get(BacktestRun, bad)
         assert failed is not None and failed.status == "failed" and failed.error == "boom"
+
+
+@pytest.mark.db
+@needs_db
+def test_job_run_unique_per_mode(engine: Engine) -> None:
+    sql = text(
+        "INSERT INTO job_runs (mode, job_name, trade_date, status, started_at)"
+        " VALUES (:m, 'daily_data', :d, 'running', :t)"
+    )
+    args = {"d": date(2026, 10, 29), "t": datetime.now(UTC)}
+    with engine.begin() as conn:
+        conn.execute(sql, {**args, "m": "paper"})
+        conn.execute(sql, {**args, "m": "live"})
+    with pytest.raises(IntegrityError), engine.begin() as conn:
+        conn.execute(sql, {**args, "m": "live"})
+
+
+@pytest.mark.db
+@needs_db
+def test_signal_unique_per_mode(engine: Engine) -> None:
+    sql = text(
+        "INSERT INTO signals (mode, strategy, signal_date, target_weights, data_as_of, detail)"
+        " VALUES (:m, 'combo', :d, '{}', :d, CAST(:detail AS jsonb))"
+    )
+    args = {"d": date(2026, 10, 29), "detail": '{"timing_factor": 1.0}'}
+    with engine.begin() as conn:
+        conn.execute(sql, {**args, "m": "paper"})
+        conn.execute(sql, {**args, "m": "live"})
+    with pytest.raises(IntegrityError), engine.begin() as conn:
+        conn.execute(sql, {**args, "m": "paper"})
+
+
+@pytest.mark.db
+@needs_db
+def test_job_attempts_roundtrip(engine: Engine) -> None:
+    from sqlalchemy.orm import Session
+
+    from quant.db.models import JobAttempt
+
+    now = datetime.now(UTC)
+    with Session(engine) as s, s.begin():
+        s.add_all([
+            JobAttempt(mode="paper", job_name="daily_data", trade_date=date(2026, 10, 29),
+                       attempt=1, started_at=now, finished_at=now, result="failed", error="x"),
+            JobAttempt(mode="paper", job_name="daily_data", trade_date=date(2026, 10, 29),
+                       attempt=2, started_at=now, result="running"),
+        ])  # fmt: skip
+    with Session(engine) as s:
+        rows = s.query(JobAttempt).order_by(JobAttempt.attempt).all()
+        assert [(r.attempt, r.result) for r in rows] == [(1, "failed"), (2, "running")]
+
+
+@pytest.mark.db
+@needs_db
+def test_migration_backfills_paper(engine: Engine) -> None:
+    cfg = _alembic_cfg()
+    command.downgrade(cfg, "-1")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO signals (strategy, signal_date, target_weights, data_as_of)"
+                " VALUES ('combo', '2026-10-28', '{}', '2026-10-28')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO job_runs (job_name, trade_date, status, started_at)"
+                " VALUES ('daily_data', '2026-10-28', 'success', now())"
+            )
+        )
+    command.upgrade(cfg, "head")
+    with engine.connect() as conn:
+        assert conn.scalar(text("SELECT mode FROM signals")) == "paper"
+        assert conn.scalar(text("SELECT mode FROM job_runs")) == "paper"
+        assert conn.scalar(text("SELECT detail FROM signals")) is None
+    command.downgrade(cfg, "-1")
+    with engine.connect() as conn:
+        assert conn.scalar(text("SELECT count(*) FROM signals")) == 1
+    command.upgrade(cfg, "head")

@@ -7,9 +7,10 @@ from datetime import UTC, date, datetime
 
 from fastapi import APIRouter
 
-from quant.api import queries
-from quant.api.deps import get_store
-from quant.api.schemas import Bar, DataStatusRow
+from quant.api import queries, stock
+from quant.api.deps import get_store, get_universe_store
+from quant.api.portfolio import Stores
+from quant.api.schemas import BarsOut, DataStatusRow
 from quant.core.calendar import get_calendar
 
 router = APIRouter()
@@ -38,5 +39,5 @@ def data_status() -> list[DataStatusRow]:
 
 
 @router.get("/market/bars/{symbol}")
-def bars(symbol: str, start: date | None = None) -> list[Bar]:
-    return queries.bars(get_store(), symbol.upper(), start)
+def bars(symbol: str, start: date | None = None) -> BarsOut:
+    return stock.bars(Stores(get_store(), get_universe_store()), symbol.upper(), start)

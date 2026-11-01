@@ -46,10 +46,12 @@ class AccountPoint(BaseModel):
 
 
 class SignalOut(BaseModel):
+    mode: Mode
     strategy: str
     signal_date: date
     data_as_of: date
     target_weights: dict[str, float]
+    detail: dict[str, Any] | None = None
 
 
 class OrderOut(BaseModel):
@@ -98,6 +100,7 @@ class EquityPoint(BaseModel):
 
 
 class JobStatusOut(BaseModel):
+    mode: Mode
     job_name: str
     trade_date: date
     status: str
@@ -178,3 +181,248 @@ class BacktestDefaults(BaseModel):
     slippage: str
     start: date
     end: date
+
+
+# ---- 组合页（#65）----
+
+Sleeve = Literal["momentum", "swing", "both", "exit"]
+SignalState = Literal["ok", "near", "exit"]
+
+
+class PortfolioSummaryOut(BaseModel):
+    today_pnl: float | None
+    today_return: float | None
+    total_return: float | None
+    qqq_return: float | None
+    spy_return: float | None
+    max_drawdown: float | None
+    current_drawdown: float | None
+    ann_vol: float | None
+    sharpe: float | None
+
+
+class RiskOut(BaseModel):
+    beta_spy: float | None
+    corr_qqq: float | None
+    var95_1d: float | None
+
+
+class TimingOut(BaseModel):
+    factor: float
+    vol_symbol: str
+    vol_20d: float | None
+    threshold: float
+
+
+class SleeveAlloc(BaseModel):
+    sleeve: Literal["momentum", "swing", "cash", "other"]
+    actual: float
+    target: float | None
+
+
+class ReconcileOut(BaseModel):
+    trading_enabled: bool
+    last_report_status: str | None
+
+
+class PortfolioOverview(BaseModel):
+    as_of: date | None
+    net_liquidation: float | None
+    cash: float | None
+    summary: PortfolioSummaryOut
+    risk: RiskOut
+    top5: float | None
+    max_single: float | None
+    exposure: float | None
+    timing: TimingOut | None
+    allocation: list[SleeveAlloc]
+    earnings_next_week: list[str]
+    reconcile: ReconcileOut
+
+
+class PerfPoint(BaseModel):
+    date: date
+    nav: float
+    portfolio: float
+    qqq: float | None
+    spy: float | None
+    drawdown: float
+
+
+class PerformanceOut(BaseModel):
+    points: list[PerfPoint]
+    rebalance_dates: list[date]
+
+
+class HoldingRow(BaseModel):
+    symbol: str
+    sleeve: Sleeve | None
+    qty: int
+    avg_cost: float
+    price: float | None
+    change_pct: float | None
+    market_value: float
+    weight: float | None
+    target_weight: float
+    deviation: float | None
+    unrealized_pnl: float | None
+    state: SignalState | None
+    state_note: str
+    next_earnings: date | None
+    holding_days: int
+
+
+class ContributionRow(BaseModel):
+    symbol: str
+    sleeve: Sleeve | None
+    pnl: float
+
+
+class CalendarDayOut(BaseModel):
+    date: date
+    pnl: float | None
+    ret: float | None
+
+
+class PreviewRow(BaseModel):
+    side: Literal["BUY", "SELL"]
+    symbol: str
+    sleeve: Sleeve | None
+    qty: int
+    weight_from: float
+    weight_to: float
+    reason: str
+
+
+class RebalancePreview(BaseModel):
+    signal_date: date | None
+    rows: list[PreviewRow]
+    turnover: float
+    est_commission: float | None
+    missing_prices: list[str] = []  # 缺价格无法预估的代码
+
+
+class ClosedTradeOut(BaseModel):
+    symbol: str
+    open_date: date
+    close_date: date
+    qty: int
+    open_price: float
+    close_price: float
+    pnl: float
+    ret: float
+    days: int
+
+
+class TradeStatsOut(BaseModel):
+    count: int
+    win_rate: float | None
+    avg_pnl: float | None
+    avg_slippage: float | None
+
+
+class ClosedTradesOut(BaseModel):
+    trades: list[ClosedTradeOut]
+    stats: TradeStatsOut
+
+
+# ---- 个股页（#65）----
+
+
+class BarsOut(BaseModel):
+    adjusted: bool  # False：来自候选池目录（新浪，未复权）
+    bars: list[Bar]
+
+
+class QuoteOut(BaseModel):
+    close: float
+    change: float | None
+    change_pct: float | None
+    open: float
+    high: float
+    low: float
+    volume: float
+    turnover: float
+    high_52w: float
+    low_52w: float
+    ret_1m: float | None
+    ytd: float | None
+
+
+class RelationOut(BaseModel):
+    held: bool
+    weight: float | None
+    sleeve: Sleeve | None
+    momentum_rank: int | None
+    universe_size: int | None
+    in_sp500: bool
+    swing_universe: bool
+    prev_holding: str | None
+    next_holding: str | None
+
+
+class KeyStatsOut(BaseModel):
+    volume_ratio: float | None
+    beta_1y: float | None
+    vol_20d: float | None
+    from_high: float | None
+    to_ma120: float | None
+    next_earnings: date | None
+    days_to_earnings: int | None
+
+
+class TechnicalsOut(BaseModel):
+    rsi14: float | None
+    atr14_pct: float | None
+    rs_20d: float | None
+    rs_60d: float | None
+    ma10: float | None
+    ma20: float | None
+    ma120: float | None
+    dist_ma10: float | None
+    dist_ma20: float | None
+    dist_ma120: float | None
+
+
+class SwingCheckOut(BaseModel):
+    trend_up: bool | None
+    above_support: bool | None
+    dist_exit: float | None
+
+
+class RankPoint(BaseModel):
+    date: date
+    rank: int | None
+
+
+class EarningsMove(BaseModel):
+    date: date
+    move: float | None
+
+
+class EarningsOut(BaseModel):
+    next: date | None
+    held_through: bool
+    history: list[EarningsMove]
+
+
+class PeriodOut(BaseModel):
+    start: date
+    end: date
+
+
+class StockProfile(BaseModel):
+    symbol: str
+    as_of: date | None
+    adjusted: bool
+    quote: QuoteOut | None
+    relation: RelationOut
+    periods: dict[str, float | None]
+    periods_qqq: dict[str, float | None]
+    key_stats: KeyStatsOut
+    technicals: TechnicalsOut
+    swing: SwingCheckOut
+    rank_history: list[RankPoint]
+    earnings: EarningsOut
+    holding_periods: list[PeriodOut]
+    trades: list[FillOut]

@@ -9,15 +9,15 @@ from sqlalchemy.orm import Session
 
 from quant.api import queries
 from quant.api.deps import get_session
-from quant.api.schemas import FailureOut, JobStatusOut, QueueStatus
+from quant.api.schemas import FailureOut, JobStatusOut, Mode, QueueStatus
 
 router = APIRouter()
 SessionDep = Annotated[Session, Depends(get_session)]
 
 
 @router.get("/system/jobs")
-def jobs(s: SessionDep) -> list[JobStatusOut]:
-    return queries.job_status(s)
+def jobs(s: SessionDep, mode: Mode | None = None) -> list[JobStatusOut]:
+    return queries.job_status(s, mode)
 
 
 @router.get("/system/failures")

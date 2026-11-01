@@ -61,7 +61,7 @@ def engine(monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
         # 前一交易日：持有 SPY 160 股；信号切换到 QQQ
         s.add(PositionSnapshot(snapshot_date=PREV, mode="paper", symbol="SPY", qty=160,
                                avg_cost=D("550"), market_value=D("96000")))  # fmt: skip
-        s.add(Signal(strategy=STRATEGY, signal_date=PREV, target_weights={"QQQ": 1.0},
+        s.add(Signal(mode="paper", strategy=STRATEGY, signal_date=PREV, target_weights={"QQQ": 1.0},
                      data_as_of=PREV))  # fmt: skip
     yield eng
     eng.dispose()
@@ -150,7 +150,7 @@ def test_partial_fill_retries_remaining(engine: Engine, broker: FakeBroker, cloc
 def test_no_orders_when_on_target(engine: Engine, clock: Clock) -> None:
     with Session(engine) as s, s.begin():
         s.query(Signal).delete()
-        s.add(Signal(strategy=STRATEGY, signal_date=PREV, target_weights={"SPY": 1.0},
+        s.add(Signal(mode="paper", strategy=STRATEGY, signal_date=PREV, target_weights={"SPY": 1.0},
                      data_as_of=PREV))  # fmt: skip
     broker = FakeBroker(clock, "2000", {"SPY": 160})
     assert make(engine, broker, clock).run(DAY).status == "no_orders"
@@ -341,7 +341,7 @@ def test_foreign_open_order_halts(engine: Engine, broker: FakeBroker, clock: Clo
 
 def _signal(engine: Engine, strategy: str, weights: dict[str, float]) -> None:
     with Session(engine) as s, s.begin():
-        s.add(Signal(strategy=strategy, signal_date=PREV, target_weights=weights,
+        s.add(Signal(mode="paper", strategy=strategy, signal_date=PREV, target_weights=weights,
                      data_as_of=PREV))  # fmt: skip
 
 
@@ -380,3 +380,11 @@ def test_strategy_min_weight_diff_for_combo(engine: Engine, clock: Clock) -> Non
     report = Executor(engine, b, settings(), Notes(), "combo", now=clock.now,
                       sleep=clock.sleep).run(DAY)  # fmt: skip
     assert report.status == "no_orders" and b.placed == []
+
+
+def test_signal_of_other_mode_ignored(engine: Engine, broker: FakeBroker, clock: Clock) -> None:
+    """模拟盘与实盘同时运行时，执行器只读取本账户的信号（#65）。"""
+    with Session(engine) as s, s.begin():
+        s.query(Signal).update({Signal.mode: "live"})
+    with pytest.raises(ExecutionError, match="信号"):
+        make(engine, broker, clock).run(DAY)

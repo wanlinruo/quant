@@ -157,3 +157,7 @@ class Strategy(ABC):
     def run(self, ctx: Context) -> dict[str, float]:
         """调用方使用的入口：计算并校验权重。"""
         return validate_weights(self.target_weights(ctx))
+
+    def run_explained(self, ctx: Context) -> tuple[dict[str, float], dict[str, Any] | None]:
+        """与 run 相同的权重，外加可写入 signals.detail 的明细（子仓、排名等）；默认没有明细。"""
+        return self.run(ctx), None

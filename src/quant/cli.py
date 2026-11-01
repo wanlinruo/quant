@@ -208,6 +208,7 @@ def run_job_command(args: argparse.Namespace, settings: Settings, out: Any = Non
         day,
         lambda: fn(ctx, day),
         ctx.notifier,
+        mode=ctx.mode,
         rerun_failed=args.rerun_failed,
         quiet=QUIET,
     )
@@ -234,7 +235,7 @@ def preview(
     from quant.core.settings import StrategySettings
     from quant.engine.executor import ET
     from quant.jobs.daily import JobContext, _weights_text, build_context, daily_data
-    from quant.strategies.combo import Combo, ComboParams
+    from quant.strategies.combo import ComboParams
     from quant.strategies.momentum_select import MomentumParams, MomentumSelect, rebalance_day
 
     out = out or sys.stdout
@@ -260,22 +261,21 @@ def preview(
         print(f"数据：{daily_data(ctx, d)}", file=out)
     context = build_context(ctx, d)
     strategy = get_strategy(args.strategy)
-    weights = strategy.run(context)
+    weights, detail = strategy.run_explained(context)  # 与 daily_signal 写入的明细相同
     print(f"信号日 {d}，策略 {args.strategy}", file=out)
     print(f"目标仓位：{_weights_text(weights)}", file=out)
-    momentum: MomentumSelect | None = None
-    if isinstance(strategy, Combo):
+    if detail is not None:
         p = ComboParams.from_mapping(params)
-        factor = strategy.timing_factor(context, p)
-        print(f"择时系数：{factor}（{p.vol_symbol} 近 {p.vol_window} 日波动率阈值 "
-              f"{p.vol_threshold:.0%}）", file=out)  # fmt: skip
-        momentum, mparams = strategy.momentum, p.momentum_params()
-    elif isinstance(strategy, MomentumSelect):
-        momentum, mparams = strategy, params
-    if momentum is not None and context.universe is not None:
+        print(f"择时系数：{detail['timing_factor']}（{p.vol_symbol} 近 {p.vol_window} 日"
+              f"波动率阈值 {p.vol_threshold:.0%}）", file=out)  # fmt: skip
+        if detail["universe_size"]:
+            ranked = detail["momentum_rank"]
+            print(f"动量排名（{detail['rebalance_day']}，{detail['universe_size']} 只成分股）"
+                  f"前 10：{', '.join(ranked[:10])}", file=out)  # fmt: skip
+    elif isinstance(strategy, MomentumSelect) and context.universe is not None:
         me = rebalance_day(cal, d)
         n = len(context.universe.members(me))
-        ranked = momentum.ranking(context, me, MomentumParams.from_mapping(mparams))
+        ranked = strategy.ranking(context, me, MomentumParams.from_mapping(params))
         print(f"动量排名（{me}，{n} 只成分股）前 10：{', '.join(ranked[:10])}", file=out)
     return 0
 
