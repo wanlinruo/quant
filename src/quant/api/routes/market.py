@@ -89,7 +89,7 @@ def _reasons(data_dir: Path, as_of: Any) -> dict[str, NewsRefOut]:
 
 @router.get("/market/overview")
 def overview() -> MarketOverview:
-    """首页市场看板：只读 market_data 快照与 market_extras 的宏观、新闻文件；缺失或损坏为 pending。"""
+    """首页看板：只读 market_data 快照与 market_extras 的宏观、新闻文件；缺失或损坏为 pending。"""
     data_dir = get_settings().data_dir
     macro = _macro(data_dir)
     doc = _load(snapshot_path(data_dir))
