@@ -14,6 +14,25 @@ export interface AccountPoint {
   net_liquidation: number;
 }
 
+export interface BacktestAnalysis {
+  id: number;
+  strategy: string;
+  status: string;
+  start: string;
+  end: string;
+  error: string | null;
+  initial_cash: number | null;
+  duration_s: number | null;
+  oos_start: string;
+  stats?: BtStatOut[];
+  series?: BtSeriesOut | null;
+  overview?: BtOverviewOut | null;
+  returns?: BtReturnsOut | null;
+  risk?: BtRiskOut | null;
+  params?: BtParamOut[];
+  repro?: BtReproOut | null;
+}
+
 export interface BacktestDataStatus {
   source: "yfinance" | "tiingo";
   data_end?: string | null;
@@ -94,6 +113,117 @@ export interface BreadthOut {
   above_50: StatOut;
   above_200: StatOut;
   up_volume_ratio: StatOut;
+}
+
+export interface BtBestWorstOut {
+  period: string;
+  best: number | null;
+  best_at: string;
+  worst: number | null;
+  worst_at: string;
+}
+
+export interface BtBetaOut {
+  date: string;
+  beta: number | null;
+}
+
+export interface BtBinOut {
+  lo: number;
+  hi: number;
+  count: number;
+}
+
+export interface BtCheckOut {
+  label: string;
+  passed: boolean | null;
+}
+
+export interface BtEpisodeOut {
+  start: string;
+  trough: string;
+  end: string | null;
+  depth: number | null;
+  down_days: number;
+  recovery_days: number | null;
+  qqq: number | null;
+}
+
+export interface BtMonthRowOut {
+  year: number;
+  months: (number | null)[];
+  year_total: number | null;
+  qqq_year: number | null;
+}
+
+export interface BtOverviewOut {
+  checks: BtCheckOut[];
+  split: Record<string, Record<string, Record<string, unknown> | null>>;
+  yearly: BtYearOut[];
+}
+
+export interface BtParamOut {
+  key: string;
+  value: unknown;
+  default: unknown;
+  changed: boolean;
+}
+
+export interface BtReproOut {
+  source: string | null;
+  data_end: string | null;
+  coverage: unknown;
+  command: string;
+}
+
+export interface BtReturnsOut {
+  monthly: BtMonthRowOut[];
+  distribution: BtBinOut[];
+  best_worst: BtBestWorstOut[];
+  rolling: BtRollingOut[];
+}
+
+export interface BtRiskOut {
+  episodes: BtEpisodeOut[];
+  capture: Record<string, number | null>;
+  table: BtRowOut[];
+  rolling_beta: BtBetaOut[];
+  tail: BtRowOut[];
+}
+
+export interface BtRollingOut {
+  date: string;
+  ret: number | null;
+  sharpe: number | null;
+}
+
+export interface BtRowOut {
+  label: string;
+  value: number | null;
+  qqq?: number | null;
+}
+
+export interface BtSeriesOut {
+  dates: string[];
+  strategy: number[];
+  qqq: (number | null)[] | null;
+  spy: (number | null)[] | null;
+  drawdown: number[];
+  qqq_drawdown: (number | null)[] | null;
+}
+
+export interface BtStatOut {
+  key: string;
+  label: string;
+  value: number | null;
+  qqq: number | null;
+  kind: "pct" | "ratio" | "int";
+}
+
+export interface BtYearOut {
+  year: number;
+  strategy: number | null;
+  qqq: number | null;
 }
 
 export interface CalItemOut {
