@@ -93,4 +93,54 @@ describe("BacktestPage", () => {
     expect(currentLocation()).toBe("/backtest/127?account=paper");
     expect(screen.getByText("#127 · combo")).toBeInTheDocument();
   });
+
+  const TIINGO = (fixedDone: number) => ({
+    source: "tiingo", data_end: fixedDone ? "2026-10-28" : null,
+    fixed: { done: fixedDone, total: 19 }, current: { done: 120, total: 503 }, delisted: { done: 0, total: 260 },
+    unavailable: [], earnings: "none",
+    quota: { hour_used: 12, hour_limit: 50, day_used: 300, day_limit: 1000, month: "2026-11", month_symbols: 139, month_limit: 500 },
+  });
+
+  it("shows backfill progress when empty", async () => {
+    mockApi({ "/api/backtests": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/data-status": [200, TIINGO(0)] });
+    renderPage(<BacktestPage />, "/backtest");
+    expect(await screen.findByText(/补齐中/)).toBeInTheDocument();
+    expect(screen.getByText(/固定标的 0\/19/)).toBeInTheDocument();
+    expect(screen.getByText(/长周期结果偏乐观/)).toBeInTheDocument();
+  });
+
+  it("hides status bar in yfinance mode", async () => {
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS],
+              "/api/backtests/data-status": [200, { source: "yfinance" }] });
+    renderPage(<BacktestPage />, "/backtest");
+    await screen.findByText("#128");
+    expect(screen.queryByText(/回测数据：/)).not.toBeInTheDocument();
+  });
+
+  it("combo form hides etf fields", async () => {
+    mockApi({ "/api/backtests": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/data-status": [200, TIINGO(19)] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click(await screen.findByRole("button", { name: "+ 新建回测" }));
+    expect(screen.getByText("动量回看（交易日）")).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox"), "combo");
+    expect(screen.queryByText("动量回看（交易日）")).not.toBeInTheDocument();
+    expect(screen.getByText(/参数沿用服务器配置/)).toBeInTheDocument();
+  });
+
+  it("end date input is limited to data_end", async () => {
+    mockApi({ "/api/backtests": [200, []], "/api/backtests/defaults": [200, { ...DEFAULTS, end: "2026-10-28", data_end: "2026-10-28" }],
+              "/api/backtests/data-status": [200, TIINGO(19)] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click(await screen.findByRole("button", { name: "+ 新建回测" }));
+    expect(screen.getByLabelText("结束")).toHaveAttribute("max", "2026-10-28");
+  });
+
+  it("shows coverage warning on run", async () => {
+    const r = { ...run(130), metrics: { ...run(130).metrics, data: { source: "tiingo", data_end: "2026-10-28", coverage: 0.82, missing_by_year: {}, earnings: "none" } } };
+    mockApi({ "/api/backtests": [200, [r]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS],
+              "/api/backtests/data-status": [200, TIINGO(19)] });
+    renderPage(<BacktestPage />, "/backtest");
+    expect(await screen.findByText("数据覆盖 82%")).toBeInTheDocument();
+    expect(screen.getByText("历史财报日缺失")).toBeInTheDocument();
+  });
 });
