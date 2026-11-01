@@ -564,6 +564,7 @@ class MarketOverview(BaseModel):
     heatmap: dict[str, list[HeatCellOut]] = {}
     index_candles: dict[str, list[CandleOut]] = {}
     macro: list[TickerItemOut] = []  # VIX、美债、美元、原油、比特币（market_extras）
+    sector_periods: dict[str, dict[str, float | None]] = {}  # 板块 ETF 区间收益（个股页）
 
 
 class NewsItemOut(BaseModel):

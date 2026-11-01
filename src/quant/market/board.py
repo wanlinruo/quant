@@ -13,6 +13,7 @@ from typing import Any
 
 import pandas as pd
 
+from quant.api.analytics import period_returns
 from quant.data.market_store import ETF_SET, SECTOR_ETF, GicsTable, MarketStore
 
 YEAR = 252  # 52 周
@@ -208,6 +209,15 @@ def sectors(close: pd.DataFrame) -> list[SectorRow]:
     return sorted(rows, key=lambda r: -(r.d1 if r.d1 is not None else -math.inf))
 
 
+def sector_periods(close: pd.DataFrame) -> dict[str, dict[str, float | None]]:
+    out = {}
+    for etf in SECTOR_ETF.values():
+        c = _col(close, etf).dropna()
+        if len(c):
+            out[etf] = period_returns(c, c.index[-1].date())
+    return out
+
+
 # ---- 异动个股 ----
 
 
@@ -388,6 +398,8 @@ class MarketSnapshot:
     movers: list[Mover]
     heatmap: dict[str, list[HeatCell]]
     index_candles: dict[str, list[Candle]] = field(default_factory=dict)
+    # 板块 ETF 的区间收益（口径同个股页 period_returns），个股页“板块 ETF”行用（#70 第 3 批）
+    sector_periods: dict[str, dict[str, float | None]] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = _clean(asdict(self))
@@ -435,4 +447,5 @@ def build_snapshot(
         movers=movers(close, p["open"], p["high"], p["low"], p["volume"], gics, caps, held),
         heatmap=heatmap(close, gics, caps),
         index_candles=index_candles(close, p["open"], p["high"], p["low"], p["volume"]),
+        sector_periods=sector_periods(close),
     )

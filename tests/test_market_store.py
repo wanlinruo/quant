@@ -102,3 +102,24 @@ def test_caps_roundtrip(tmp_path: Path) -> None:
     store.write_caps({"AAPL": ms.CapInfo(5.0e12, "Apple Inc.", now)})
     got = store.caps()
     assert got["AAPL"].market_cap == 5.0e12 and got["AAPL"].updated == now
+
+
+# ---- 第 3 批：子行业（#70 第 3 批 Task 2）----
+
+
+def test_parse_gics_sub_industry() -> None:
+    t = ms.parse_gics(csv())
+    assert t.sub_industry("AAPL") == "Hardware" and t.sub_industry("NONE") is None
+    old = ms.parse_gics("Symbol,Security,GICS Sector\nAAPL,Apple Inc.,Information Technology\n")
+    assert old.sub_industry("AAPL") is None and old.sector("AAPL") == "Information Technology"
+
+
+def test_load_gics(tmp_path: Path) -> None:
+    assert ms.load_gics(tmp_path) is None
+    p = ms.gics_path(tmp_path)
+    p.parent.mkdir(parents=True)
+    p.write_text(csv(), encoding="utf-8")
+    t = ms.load_gics(tmp_path)
+    assert t is not None and t.members == ["AAPL", "BRK.B", "XOM"]
+    p.write_text("garbage", encoding="utf-8")
+    assert ms.load_gics(tmp_path) is None

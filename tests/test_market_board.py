@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from quant.data.market_store import ETF_SET, GicsTable
+from quant.data.market_store import ETF_SET, SECTOR_ETF, GicsTable
 from quant.market import board as b
 
 N = 300
@@ -176,3 +176,9 @@ def test_snapshot_json_serializable_no_nan(tmp_path: object) -> None:
     assert len(doc["index_candles"]["SPY"]) == 252
     assert not math.isnan(doc["breadth"]["above_50"]["value"])
     assert "NaN" not in text
+    xlk = doc["sector_periods"]["XLK"]
+    assert list(xlk) == ["1D", "1W", "1M", "3M", "6M", "YTD", "1Y"]
+    d1 = next(r["d1"] for r in doc["sectors"] if r["symbol"] == "XLK")
+    assert xlk["1D"] == pytest.approx(d1) and xlk["6M"] is not None
+    assert xlk["1Y"] is None  # 合成数据 260 个工作日只跨 361 天，不足 1 年时不给
+    assert set(doc["sector_periods"]) == set(SECTOR_ETF.values())

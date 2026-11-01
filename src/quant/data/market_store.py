@@ -11,7 +11,7 @@ import json
 import logging
 import time
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
@@ -85,6 +85,7 @@ def gics_path(data_dir: Path) -> Path:
 @dataclass(frozen=True)
 class GicsTable:
     rows: dict[str, tuple[str, str]]  # 代码 → （公司名，GICS 板块）
+    sub: dict[str, str] = field(default_factory=dict)  # 代码 → GICS 子行业（英文，可能缺）
 
     @property
     def members(self) -> list[str]:
@@ -98,17 +99,32 @@ class GicsTable:
         r = self.rows.get(symbol)
         return r[0] if r else None
 
+    def sub_industry(self, symbol: str) -> str | None:
+        return self.sub.get(symbol) or None
+
 
 def parse_gics(text: str) -> GicsTable:
     reader = csv.DictReader(io.StringIO(text))
     if reader.fieldnames is None or any(c not in reader.fieldnames for c in GICS_COLUMNS):
         raise ValueError("成分表缺少 Symbol / Security / GICS Sector 列")
-    rows = {
-        r["Symbol"].strip(): (r["Security"].strip(), r["GICS Sector"].strip())
-        for r in reader
-        if r.get("Symbol")
-    }
-    return GicsTable(rows)
+    rows: dict[str, tuple[str, str]] = {}
+    subs: dict[str, str] = {}
+    for r in reader:
+        sym = (r.get("Symbol") or "").strip()
+        if not sym:
+            continue
+        rows[sym] = (r["Security"].strip(), r["GICS Sector"].strip())
+        if si := (r.get("GICS Sub-Industry") or "").strip():
+            subs[sym] = si
+    return GicsTable(rows, subs)
+
+
+def load_gics(data_dir: Path) -> GicsTable | None:
+    """只读本地成分表（不下载）；没有或无法解析时为 None。面板接口用。"""
+    try:
+        return parse_gics(gics_path(data_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError, KeyError, csv.Error):
+        return None
 
 
 def sync_gics(

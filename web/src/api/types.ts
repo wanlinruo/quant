@@ -276,6 +276,7 @@ export interface MarketOverview {
   heatmap?: Record<string, HeatCellOut[]>;
   index_candles?: Record<string, CandleOut[]>;
   macro?: TickerItemOut[];
+  sector_periods?: Record<string, Record<string, number | null>>;
 }
 
 export interface Meta {
