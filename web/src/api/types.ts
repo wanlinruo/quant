@@ -258,6 +258,8 @@ export interface BtReproOut {
   data_end: string | null;
   coverage: unknown;
   command: string;
+  code_version?: string | null;
+  log?: string[];
 }
 
 export interface BtReturnsOut {

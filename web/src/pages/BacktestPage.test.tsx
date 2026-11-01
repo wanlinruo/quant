@@ -231,7 +231,11 @@ describe("BacktestPage", () => {
     expect(within(tab).getByText("top_n").closest("tr")).toHaveClass("changed");
     expect(within(tab).getByText("sma").closest("tr")).not.toHaveClass("changed");
     expect(within(tab).getByText(/--param top_n=12/)).toBeInTheDocument();
-    expect(within(tab).getByText(/运行日志未记录/)).toBeInTheDocument();
+    expect(within(tab).getByText("abc1234")).toBeInTheDocument();
+    expect(within(tab).getByText(/开始回测/)).toBeInTheDocument();
+    await userEvent.click(within(tab).getByRole("checkbox", { name: "只看警告" }));
+    expect(within(tab).queryByText(/开始回测/)).not.toBeInTheDocument();
+    expect(within(tab).getByText(/NVDA 数据中断/)).toBeInTheDocument();
   });
 
   it("compare button disabled in single view and bench note shown", async () => {

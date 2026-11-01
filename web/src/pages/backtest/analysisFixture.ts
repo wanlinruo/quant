@@ -48,7 +48,7 @@ export const ANALYSIS = {
     timing: [{ start: "2022-12-11", end: "2022-12-15", days: 5, factor: 0.5, ret: -0.03, est_full: -0.06, saved: 0.03 }],
   },
   params: [{ key: "top_n", value: 12, default: 10, changed: true }, { key: "sma", value: 120, default: 120, changed: false }],
-  repro: { source: "tiingo", data_end: "2026-10-29", coverage: 0.98, command: "uv run quant backtest --strategy combo --start 2016-10-28 --end 2026-10-29 --param top_n=12 --no-db" },
+  repro: { source: "tiingo", data_end: "2026-10-29", coverage: 0.98, code_version: "abc1234", log: ["10:00:00 INFO 开始回测", "10:00:05 WARNING NVDA 数据中断"], command: "uv run quant backtest --strategy combo --start 2016-10-28 --end 2026-10-29 --param top_n=12 --no-db" },
 };
 
 export const TRADES = {

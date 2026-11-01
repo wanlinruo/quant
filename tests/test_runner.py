@@ -175,3 +175,42 @@ def test_stale_holdings_reported(tmp_path: Path) -> None:
     spec = BacktestSpec("combo", date(2025, 1, 2), END, COSTS, params=COMBO_PARAMS)
     info = run_spec(spec, settings(tmp_path)).data_info
     assert info["stale_holdings"] == {"A": "2025-05-30"}
+
+
+# ---- #67 C 批：代码版本与运行日志 ----
+
+
+def test_records_code_version_and_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import logging
+
+    import quant.engine.runner as runner_mod
+
+    monkeypatch.setenv("QUANT_GIT_SHA", "abc1234")
+    real = runner_mod._run_spec
+
+    def noisy(*a: object, **k: object) -> object:
+        lg = logging.getLogger("quant.backtest")
+        lg.info("开始准备数据")
+        lg.warning("某标的数据中断")
+        logging.getLogger("other").warning("不收")
+        return real(*a, **k)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(runner_mod, "_run_spec", noisy)
+    write_fixed(tmp_path, sorted({*get_strategy("etf_momentum").symbols({}), "SPY"}))
+    spec = BacktestSpec("etf_momentum", date(2025, 1, 2), END, COSTS)
+    res = run_spec(spec, settings(tmp_path), provider=Exploding())
+    assert res.code_version == "abc1234"
+    assert any("开始准备数据" in x for x in res.log) and any(
+        "WARNING" in x and "数据中断" in x for x in res.log
+    )
+    assert not any("不收" in x for x in res.log)
+
+
+def test_log_truncated_keeps_head_and_tail() -> None:
+    from quant.engine.runner import trim_log
+
+    lines = [f"l{i}" for i in range(500)]
+    out = trim_log(lines, 200)
+    assert len(out) == 201 and out[0] == "l0" and out[99] == "l99" and out[-1] == "l499"
+    assert "省略 300 行" in out[100]
+    assert trim_log(lines[:10], 200) == lines[:10]

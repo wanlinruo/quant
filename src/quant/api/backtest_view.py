@@ -136,8 +136,16 @@ def analysis(s: Session, run_id: int, settings: Settings) -> BacktestAnalysis | 
         for k, v in run.params.items() if not k.startswith("_")
     ]  # fmt: skip
     data = (run.metrics or {}).get("data") or {}
-    out["repro"] = BtReproOut(source=data.get("source"), data_end=data.get("data_end"),
-                              coverage=data.get("coverage"), command=_command(run))  # fmt: skip
+    metrics = run.metrics or {}
+    log = metrics.get("log")
+    out["repro"] = BtReproOut(
+        source=data.get("source"),
+        data_end=data.get("data_end"),
+        coverage=data.get("coverage"),
+        command=_command(run),
+        code_version=metrics.get("code_version"),
+        log=[str(x) for x in log] if isinstance(log, list) else [],
+    )
     points = s.scalars(select(BacktestEquity).where(BacktestEquity.run_id == run_id)
                        .order_by(BacktestEquity.equity_date)).all()  # fmt: skip
     if run.status != "done" or len(points) < 2:

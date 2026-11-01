@@ -756,6 +756,8 @@ class BtReproOut(BaseModel):
     data_end: str | None
     coverage: Any
     command: str
+    code_version: str | None = None  # 回测时的代码提交号（C 批起记录）
+    log: list[str] = []  # 运行日志（quant.* INFO 及以上，最多约 200 行）
 
 
 class BacktestAnalysis(BaseModel):

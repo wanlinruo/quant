@@ -84,7 +84,12 @@ def setup(
                                               "universe": ["SPY", "QQQ"], "safe_asset": "SHY",
                                               "_costs": costs},
                           IDX[0].date(), IDX[-1].date(), status="running")  # fmt: skip
-        meta = {"cagr": 0.1, "data": {"source": "yfinance", "data_end": "2026-05-01"}}
+        meta = {
+            "cagr": 0.1,
+            "data": {"source": "yfinance", "data_end": "2026-05-01"},
+            "code_version": "abc1234",
+            "log": ["10:00:00 INFO 开始", "10:00:01 WARNING 数据中断"],
+        }
         complete_run(s, done, meta, eq, dd, sample_ledger())
         running = create_run(s, "combo", {}, date(2020, 1, 2), date(2021, 1, 4), status="running")
     eng.dispose()
@@ -112,6 +117,7 @@ def test_analysis_done(setup: tuple[TestClient, dict[str, int]]) -> None:
     assert params["lookback"]["changed"] is True and params["lookback"]["value"] == 99
     assert "_cash" not in params and d["initial_cash"] == 100000
     assert d["repro"]["source"] == "yfinance" and d["repro"]["data_end"] == "2026-05-01"
+    assert d["repro"]["code_version"] == "abc1234" and len(d["repro"]["log"]) == 2
     cmd = d["repro"]["command"]
     assert cmd.startswith("uv run quant backtest --strategy etf_momentum --start 2016-01-04")
     assert "--param lookback=99" in cmd and "--cash 100000" in cmd and "--slippage 0.0005" in cmd

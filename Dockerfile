@@ -40,3 +40,7 @@ USER quant
 
 EXPOSE 8501
 CMD ["uvicorn", "--factory", "quant.api.app:create_app", "--host", "0.0.0.0", "--port", "8501"]
+
+# 回测记录代码版本（#67）：部署工作流构建时传入提交号；放在最后，不影响前面的缓存层
+ARG GIT_SHA=unknown
+ENV QUANT_GIT_SHA=${GIT_SHA}
