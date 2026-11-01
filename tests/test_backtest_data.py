@@ -49,7 +49,7 @@ class FakeProvider(DataProvider):
             raise DataUnavailableError(f"{symbol}：Tiingo 没有该代码的日线")
         df = sample(end)
         if symbol in self.bad:
-            df.iloc[-5, df.columns.get_loc("close")] = 1e6  # 单日暴涨，校验不通过
+            df.loc[df.index[-5], "close"] = 1e6  # 单日暴涨，校验不通过
         return df
 
 
@@ -223,3 +223,34 @@ def test_runner_respects_interval(tmp_path: Path) -> None:
     t[0] += 73
     r.maybe_step()
     assert p.calls == ["QQQ", "SPY"]
+
+
+def test_cli_status_prints_progress(tmp_path: Path) -> None:
+    import io
+
+    from quant.cli import backtest_data_command, build_parser
+    from quant.core.settings import Settings
+
+    env = Env(tmp_path)
+    env.step(FakeProvider(env.ledger))
+    env.ledger.path.rename(bd.quota_path(tmp_path))
+    settings = Settings(broker="sim", TRADING_MODE="sim", data_dir=tmp_path)
+    out = io.StringIO()
+    args = build_parser().parse_args(["backtest-data", "status"])
+    assert backtest_data_command(args, settings, out) == 0
+    text = out.getvalue()
+    assert "固定标的 1/" in text and "本月已用" in text and "/500 个标的" in text
+    assert "数据截止：尚未补齐" in text
+
+
+def test_cli_sync_requires_tiingo(tmp_path: Path) -> None:
+    import io
+
+    from quant.cli import backtest_data_command, build_parser
+    from quant.core.settings import Settings
+
+    settings = Settings(broker="sim", TRADING_MODE="sim", data_dir=tmp_path)
+    out = io.StringIO()
+    args = build_parser().parse_args(["backtest-data", "sync", "--max", "3"])
+    assert backtest_data_command(args, settings, out) == 1
+    assert "QUANT_TIINGO_API_KEY" in out.getvalue()

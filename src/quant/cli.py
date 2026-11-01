@@ -95,6 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
     pv.add_argument("--universe", choices=["sina", "yfinance"], help="覆盖 data.universe")
     pv.add_argument("--param", type=_parse_param, action="append", default=[], metavar="K=V")
 
+    bd = sub.add_parser("backtest-data", help="服务器回测数据（Tiingo）补齐进度与手动补拉")
+    bd_sub = bd.add_subparsers(dest="bd_command", required=True)
+    bd_sub.add_parser("status", help="查看补齐进度与额度")
+    bd_sync = bd_sub.add_parser("sync", help="立即补拉（受额度限制）")
+    bd_sync.add_argument("--max", type=int, default=10, help="最多补几只")
+
     tr = sub.add_parser("trading", help="查看或人工切换熔断开关 trading_enabled")
     tr.add_argument("action", choices=["status", "enable", "disable"])
     tr.add_argument("--reason", default="人工关闭")
@@ -370,6 +376,47 @@ def sync_earnings(args: argparse.Namespace, settings: Settings, out: Any = None)
     return 0
 
 
+def backtest_data_command(args: argparse.Namespace, settings: Settings, out: Any = None) -> int:
+    """服务器回测数据（#66）：status 只读本地状态；sync 立即补拉（需 tiingo 模式与 key）。"""
+    from quant.data import backtest_data as bd
+    from quant.data.quota import QuotaLedger
+    from quant.data.universe import constituents_path, load_constituents
+
+    out = out or sys.stdout
+    cal = get_calendar()
+    data_dir = settings.data_dir
+    if args.bd_command == "sync":
+        runner = bd.make_runner(settings, cal)
+        if runner is None:
+            print("需要 QUANT_DATA__BACKTEST_SOURCE=tiingo 且配置 QUANT_TIINGO_API_KEY", file=out)
+            return 1
+        wanted, today = runner.wanted(), runner.today()
+        for _ in range(max(0, args.max)):
+            r = bd.backfill_step(runner.provider, runner.store, runner.state, runner.ledger,
+                                 wanted, today, cal)  # fmt: skip
+            print(f"{r.symbol or '-'}：{r.outcome}", file=out)
+            if r.outcome in ("idle", "quota"):
+                break
+    path = constituents_path(data_dir)
+    universe = load_constituents(path) if path.exists() else None
+    today = cal.last_completed_trading_day(datetime.now(UTC))
+    wanted = bd.wanted_symbols(universe, today)
+    ledger = QuotaLedger(bd.quota_path(data_dir), settings.tiingo)
+    st = bd.status(wanted, bd.BackfillState.load(bd.state_path(data_dir)), ledger, data_dir)
+    q, lim = st.quota, settings.tiingo
+    progress = (f"固定标的 {st.fixed_done}/{st.fixed_total}",
+                f"当前成分 {st.current_done}/{st.current_total}",
+                f"已退市成分 {st.delisted_done}/{st.delisted_total}")  # fmt: skip
+    print(" · ".join(progress), file=out)
+    print(f"数据截止：{st.data_end or '尚未补齐'} · 历史财报日：{st.earnings}", file=out)
+    quota = (f"额度：本小时 {q.hour_used}/{lim.hourly}", f"今日 {q.day_used}/{lim.daily}",
+             f"本月已用 {q.month_symbols}/{lim.monthly_symbols} 个标的（{q.month}）")  # fmt: skip
+    print(" · ".join(quota), file=out)
+    if st.unavailable:
+        print(f"拿不到或校验未通过：{', '.join(st.unavailable[:30])}", file=out)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
@@ -392,6 +439,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 # 人工排查用：给一行错误即可（数据源不可用、缺配置、网络等），不打印堆栈
                 print(f"错误：{type(e).__name__}: {e}", file=sys.stderr)
                 return 1
+        elif args.command == "backtest-data":
+            return backtest_data_command(args, settings)
         elif args.command == "events":
             return sync_earnings(args, settings)
     except (ConfigError, DataValidationError, ValueError) as e:

@@ -302,8 +302,8 @@ class BackfillRunner:
         user_agent: str | None = None,
     ) -> None:
         self.provider, self.store, self.state, self.ledger = provider, store, state, ledger
-        self._wanted, self.cal, self.interval = wanted, cal, interval
-        self._clock, self._today = clock, today
+        self.wanted, self.cal, self.interval = wanted, cal, interval
+        self._clock, self.today = clock, today
         self.data_dir, self.user_agent = data_dir, user_agent
         self._last: float | None = None
 
@@ -313,7 +313,7 @@ class BackfillRunner:
             return
         self._last = now
         try:
-            wanted, today = self._wanted(), self._today()
+            wanted, today = self.wanted(), self.today()
             r = backfill_step(self.provider, self.store, self.state, self.ledger, wanted, today,
                               self.cal)  # fmt: skip
             if r.outcome != "idle":
