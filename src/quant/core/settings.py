@@ -155,6 +155,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data/parquet")
     notify_webhook_url: SecretStr | None = None
     tiingo_api_key: SecretStr | None = None
+    massive_api_key: SecretStr | None = None  # 首页市场看板（#69），scheduler 使用
     # SEC 要求请求声明联系方式（名称与邮箱）；只发给 SEC，不写日志
     edgar_user_agent: SecretStr | None = None
 

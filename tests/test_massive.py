@@ -1,0 +1,120 @@
+"""Massive 客户端（#69 第 1 批 Task 1）。不访问网络。"""
+
+from collections.abc import Mapping
+from datetime import date
+from typing import Any
+
+import pytest
+from pydantic import SecretStr
+
+from quant.data.providers.base import DataUnavailableError
+from quant.data.providers.massive import MassiveAuthError, MassiveClient, MassiveRateLimited
+
+KEY = SecretStr("mk-secret-1")
+
+
+class FakeFetch:
+    def __init__(self, *responses: tuple[int, Any] | Exception) -> None:
+        self.responses = list(responses)
+        self.calls: list[tuple[str, dict[str, str]]] = []
+
+    def __call__(self, url: str, headers: Mapping[str, str]) -> tuple[int, Any]:
+        self.calls.append((url, dict(headers)))
+        r = self.responses.pop(0) if len(self.responses) > 1 else self.responses[0]
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.t = 100.0
+        self.slept: list[float] = []
+
+    def now(self) -> float:
+        return self.t
+
+    def sleep(self, s: float) -> None:
+        self.slept.append(s)
+        self.t += s
+
+
+def client(fetch: FakeFetch, clock: Clock | None = None) -> MassiveClient:
+    c = clock or Clock()
+    return MassiveClient(KEY, fetch, sleep=c.sleep, clock=c.now)
+
+
+def bar(t: str, o: float, h: float, lo: float, c: float) -> dict[str, Any]:
+    return {"T": t, "o": o, "h": h, "l": lo, "c": c, "v": 1e6, "vw": c, "t": 1}
+
+
+GROUPED = {"status": "OK", "results": [
+    bar("SPY", 761.38, 761.46, 750.36, 755.72), bar("BRK.B", 549.88, 550.47, 542.32, 542.49),
+]}  # fmt: skip
+
+
+def test_grouped_daily_maps_fields() -> None:
+    df = client(FakeFetch((200, GROUPED))).grouped_daily(date(2026, 10, 30))
+    assert list(df.columns) == ["symbol", "open", "high", "low", "close", "volume", "vwap"]
+    assert df.set_index("symbol").loc["BRK.B", "close"] == 542.49
+    assert len(df) == 2
+
+
+def test_empty_day_returns_empty_frame() -> None:
+    df = client(FakeFetch((200, {"status": "OK", "resultsCount": 0}))).grouped_daily(
+        date(2026, 11, 1)
+    )
+    assert df.empty and "close" in df.columns
+
+
+def test_auth_header_not_in_url() -> None:
+    fetch = FakeFetch((200, GROUPED))
+    client(fetch).grouped_daily(date(2026, 10, 30))
+    url, headers = fetch.calls[0]
+    assert (
+        url
+        == "https://api.massive.com/v2/aggs/grouped/locale/us/market/stocks/2026-10-30?adjusted=true"
+    )
+    assert headers["Authorization"] == "Bearer mk-secret-1" and "mk-secret" not in url
+
+
+def test_rate_limit_spacing() -> None:
+    clock = Clock()
+    c = client(FakeFetch((200, GROUPED)), clock)
+    c.grouped_daily(date(2026, 10, 29))
+    clock.t += 2.5
+    c.grouped_daily(date(2026, 10, 30))
+    assert clock.slept == [pytest.approx(10.0)]
+
+
+def test_429_stops_and_raises_rate_limited() -> None:
+    with pytest.raises(MassiveRateLimited):
+        client(FakeFetch((429, {"status": "ERROR"}))).grouped_daily(date(2026, 10, 30))
+
+
+def test_401_raises_auth() -> None:
+    with pytest.raises(MassiveAuthError):
+        client(FakeFetch((401, {"status": "ERROR"}))).grouped_daily(date(2026, 10, 30))
+
+
+def test_ticker_details() -> None:
+    body = {
+        "results": {
+            "name": "Apple Inc.",
+            "market_cap": 5.0e12,
+            "sic_description": "ELECTRONIC COMPUTERS",
+        }
+    }
+    d = client(FakeFetch((200, body))).ticker_details("AAPL")
+    assert d is not None and d.name == "Apple Inc." and d.market_cap == 5.0e12
+    assert client(FakeFetch((404, {}))).ticker_details("ZZZZ") is None
+
+
+def test_key_not_in_error_message() -> None:
+    err = OSError("https://api.massive.com/x Authorization: Bearer mk-secret-1")
+    with pytest.raises(DataUnavailableError) as e:
+        client(FakeFetch(err)).grouped_daily(date(2026, 10, 30))
+    assert "mk-secret-1" not in str(e.value) and e.value.__suppress_context__
+    with pytest.raises(DataUnavailableError) as e:
+        client(FakeFetch((500, {"error": "x"}))).grouped_daily(date(2026, 10, 30))
+    assert not isinstance(e.value, MassiveRateLimited | MassiveAuthError)
