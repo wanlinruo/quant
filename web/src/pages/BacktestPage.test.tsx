@@ -375,4 +375,16 @@ describe("BacktestPage", () => {
     expect(body.strategy).toBe("combo");
     expect(body.params).toEqual({ swing: { stop_pct: 0.05 } });
   });
+
+  it("drawer blocks empty number fields", async () => {
+    const fetch = mockApi({ "/api/backtests": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/param-schema": [200, SCHEMA], "POST /api/backtests": [201, { id: 9 }] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click(await screen.findByRole("button", { name: "+ 新建回测" }));
+    await user.selectOptions(screen.getByRole("combobox"), "combo");
+    const dlg = screen.getByRole("dialog");
+    await user.clear(await within(dlg).findByLabelText("momentum.top_n"));
+    await user.click(within(dlg).getByRole("button", { name: "提交到队列" }));
+    expect(await within(dlg).findByText(/momentum.top_n 须为数字/)).toBeInTheDocument();
+    expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(false);
+  });
 });

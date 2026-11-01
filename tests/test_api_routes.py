@@ -419,3 +419,44 @@ def test_submit_combo_with_param_overrides() -> None:
     )
     _, errors = build_submission(neg, CostSettings(), date(2026, 10, 30))
     assert errors
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"momentum": {"top_n": -1}},
+        {"momentum": {"top_n": None}},
+        {"momentum": {"top_n": {"x": 1}}},
+        {"momentum": {"top_n": 2.5}},
+        {"swing": {"stop_pct": "abc"}},
+        {"swing": {"stop_pct": float("nan")}},
+        {"swing": {"stocks": "AAPL"}},
+        {"swing": {"stocks": ["AAPL", "bad sym"]}},
+        {"swing": {"confirm": "bogus"}},
+        {"swing": {"trend_ma": -500}},
+        {"swing": {"use_inverse": "yes"}},
+        {"swing": {"nested": {"deep": 1}}},
+        {"vol_symbol": "x" * 20000},
+    ],
+)
+def test_submit_rejects_bad_param_values(params: dict[str, object]) -> None:
+    base = BacktestSubmit(**{**valid_submit_body(), "strategy": "combo"})
+    req = base.model_copy(update={"params": params})  # 绕过请求模型校验，直接测提交逻辑
+    _, errors = build_submission(req, CostSettings(), date(2026, 10, 30))
+    assert errors, params
+
+
+def test_submit_accepts_good_param_values() -> None:
+    swing = {"stop_pct": 0.05, "stocks": ["aapl", "NVDA"], "confirm": "close_strength"}
+    params_in = {"momentum": {"top_n": 8}, "swing": swing}
+    req = BacktestSubmit(**{**valid_submit_body(), "strategy": "combo", "params": params_in})
+    params, errors = build_submission(req, CostSettings(), date(2026, 10, 30))
+    assert errors == [] and params["swing"]["stocks"] == ["AAPL", "NVDA"]
+
+
+def test_form_strategy_rejects_params() -> None:
+    req = BacktestSubmit(
+        **{**valid_submit_body(), "strategy": "etf_momentum", "params": {"nope": 1}}
+    )
+    _, errors = build_submission(req, CostSettings(), date(2026, 10, 30))
+    assert errors

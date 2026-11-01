@@ -373,12 +373,15 @@ def compare_view(s: Session, ids: list[int]) -> BacktestCompare:
             continue
         runs.append(run)
         eqs.append(eq)
+    gone = (
+        f"（已跳过未完成或不存在的回测：{'、'.join(f'#{x}' for x in skipped)}）" if skipped else ""
+    )
     if len(runs) < 2:
-        return BacktestCompare(note="至少需要两个已完成的回测才能对比", skipped=skipped)
+        return BacktestCompare(note=f"至少需要两个已完成的回测才能对比{gone}", skipped=skipped)
     rng = ba.common_range(eqs)
     meta = [BtCompareRun(id=r.id, strategy=r.strategy, start=r.start, end=r.end) for r in runs]
     if rng is None:
-        note = "所选回测没有共同区间（至少需要 20 个交易日重叠）"
+        note = f"所选回测没有共同区间（至少需要 20 个交易日重叠）{gone}"
         return BacktestCompare(note=note, skipped=skipped, runs=meta)
     lo, hi = rng
     cut = [e[(e.index >= lo) & (e.index <= hi)] for e in eqs]

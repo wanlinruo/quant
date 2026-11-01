@@ -273,3 +273,9 @@ def test_compare_no_overlap(setup: tuple[TestClient, dict[str, int]], db_url: st
     eng.dispose()
     d = client.get("/api/backtests/compare", params={"ids": [ids["done"], rid]}).json()
     assert d["note"] and "共同区间" in d["note"] and d["series"] == {}
+
+
+def test_compare_note_lists_skipped(setup: tuple[TestClient, dict[str, int]]) -> None:
+    client, ids = setup
+    d = client.get("/api/backtests/compare", params={"ids": [ids["done"], ids["running"]]}).json()
+    assert d["note"] and f"#{ids['running']}" in d["note"]

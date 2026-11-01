@@ -19,6 +19,7 @@ from quant.db.backtests import create_run
 from quant.engine.runner import CASH_KEY, COSTS_KEY
 from quant.strategies import STRATEGIES, get_strategy
 from quant.strategies.etf_momentum import MomentumParams
+from quant.strategies.param_check import check_params
 
 # 取值范围与改版前的面板表单一致
 CASH_RANGE = (Decimal(1000), Decimal(10_000_000))
@@ -60,8 +61,14 @@ def build_submission(
     if req.strategy == FORM_STRATEGY:
         params, form_errors = _form_params(req)
         errors += form_errors
+        if req.params:
+            errors.append(f"{FORM_STRATEGY} 的参数由表单字段提供，不接受 params")
     else:
-        params = _merge(strategy_params or {}, req.params or {})
+        override: dict[str, Any] = {}
+        if req.params:
+            override, param_errors = check_params(req.strategy, req.params)
+            errors += param_errors
+        params = _merge(strategy_params or {}, override)
         if req.strategy in STRATEGIES:
             try:
                 get_strategy(req.strategy).warmup_days(params)  # 校验参数

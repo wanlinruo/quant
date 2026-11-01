@@ -34,6 +34,14 @@ function parse(f: ParamField, text: string): unknown {
   return text;
 }
 
+/** 改过的数字字段是否有效（空或非数字不提交） */
+function invalidFields(fields: ParamField[], edits: Record<string, string>): string[] {
+  return fields
+    .filter((f) => (f.type === "int" || f.type === "float") && edits[fieldId(f)] !== undefined)
+    .filter((f) => !Number.isFinite(Number(edits[fieldId(f)])) || edits[fieldId(f)].trim() === "")
+    .map((f) => `${fieldId(f)} 须为数字`);
+}
+
 /** 只提交与默认值不同的参数；嵌套组只含改过的子键 */
 function changedParams(fields: ParamField[], edits: Record<string, string>): Record<string, unknown> | null {
   const out: Record<string, unknown> = {};
@@ -85,6 +93,11 @@ export function BacktestSubmitDrawer({ defaults, initial, onClose, onSubmitted }
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
 
   async function submit() {
+    const bad = form.strategy === "etf_momentum" ? [] : invalidFields(schema.data?.[form.strategy] ?? [], edits);
+    if (bad.length) {
+      setErrors(bad);
+      return;
+    }
     setBusy(true);
     setErrors([]);
     const body: BacktestSubmit = {
