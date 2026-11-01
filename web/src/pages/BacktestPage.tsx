@@ -1,26 +1,46 @@
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import type { BacktestDataStatus, BacktestDefaults, BacktestRunOut, EquityPoint } from "../api/types";
+import type { BacktestAnalysis, BacktestDataStatus, BacktestDefaults, BacktestRunOut, EquityPoint } from "../api/types";
 import { ApiState } from "../components/ApiState";
 import { DataTable } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { Cell, Grid } from "../components/Grid";
 import { Panel } from "../components/Panel";
-import { Stat } from "../components/Stat";
+import { Tabs } from "../components/Tabs";
 import { LineChart } from "../charts/LineChart";
 import { useApi } from "../hooks/useApi";
-import { pct } from "../lib/format";
 import { fmtMetric, METRICS } from "../lib/metrics";
-import { BacktestSubmitDrawer } from "./BacktestSubmitDrawer";
+import { OverviewTab, ParamsTab, ReturnsTab, RiskTab } from "./backtest/AnalysisTabs";
+import { MainChart } from "./backtest/MainChart";
+import { RunHeader } from "./backtest/RunHeader";
+import { RunList } from "./backtest/RunList";
+import { BacktestSubmitDrawer, type DrawerInitial } from "./BacktestSubmitDrawer";
 
 const MAX_COMPARE = 5;
 const COLORS = ["#2962ff", "#a855f7", "#22c55e", "#f5a623", "#22d3ee"];
-const STATUS_PILL: Record<string, string> = { done: "ok", running: "info", queued: "hold", failed: "err" };
-const STATUS_TEXT: Record<string, string> = { done: "完成", running: "运行中", queued: "排队", failed: "失败" };
 
-function metric(run: BacktestRunOut, key: string): number | undefined {
-  const v = run.metrics[key];
-  return typeof v === "number" ? v : undefined;
+
+const TABS = [
+  { key: "overview", label: "概览" },
+  { key: "returns", label: "收益分析" },
+  { key: "risk", label: "回撤与风险" },
+  { key: "trades", label: "交易明细" },
+  { key: "positions", label: "持仓变化" },
+  { key: "robust", label: "稳健性" },
+  { key: "params", label: "参数与日志" },
+] as const;
+type TabKey = (typeof TABS)[number]["key"];
+
+function exportCsv(a: BacktestAnalysis) {
+  const s = a.series;
+  if (!s) return;
+  const rows = ["date,strategy,qqq,spy,drawdown", ...s.dates.map((d, i) => [d, s.strategy[i], s.qqq?.[i] ?? "", s.spy?.[i] ?? "", s.drawdown[i]].join(","))];
+  const url = URL.createObjectURL(new Blob([rows.join("\n")], { type: "text/csv" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `backtest-${a.id}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export function BacktestPage() {
@@ -28,8 +48,9 @@ export function BacktestPage() {
   const defaults = useApi<BacktestDefaults>("/api/backtests/defaults");
   const dataStatus = useApi<BacktestDataStatus>("/api/backtests/data-status");
   const [checked, setChecked] = useState<number[] | null>(null);
-  const [drawer, setDrawer] = useState(false);
+  const [drawer, setDrawer] = useState<DrawerInitial | "new" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [tab, setTab] = useState<TabKey>("overview");
 
   const { id: routeId } = useParams();
   const navigate = useNavigate();
@@ -40,7 +61,10 @@ export function BacktestPage() {
   const defaultId = list.find((r) => String(r.id) === routeId)?.id ?? firstDone?.id;
   const selected = useMemo(() => checked ?? (defaultId !== undefined ? [defaultId] : []), [checked, defaultId]);
   const current = list.find((r) => r.id === selected[0]);
-  const equity = useApi<EquityPoint[]>(selected.length ? "/api/backtests/equity" : null, { ids: selected });
+  const compare = selected.length >= 2;
+  const equity = useApi<EquityPoint[]>(compare ? "/api/backtests/equity" : null, { ids: selected });
+  const analysis = useApi<BacktestAnalysis>(current && !compare ? `/api/backtests/${current.id}/analysis` : null);
+  const a = analysis.data && analysis.data.id === current?.id ? analysis.data : null;
 
   const series = useMemo(() => {
     const pts = equity.data ?? [];
@@ -58,9 +82,9 @@ export function BacktestPage() {
     [equity.data, selected],
   );
 
-  /** 点行：设为当前查看（排在第一位），对比集合满 5 个时挤掉最后一个；同步网址。 */
+  /** 点行：单个查看时切换到这一个；对比模式下排到第一位（满 5 个时挤掉最后一个）。同步网址。 */
   function open(id: number) {
-    setChecked([id, ...selected.filter((x) => x !== id)].slice(0, MAX_COMPARE));
+    setChecked(compare ? [id, ...selected.filter((x) => x !== id)].slice(0, MAX_COMPARE) : [id]);
     navigate({ pathname: `/backtest/${id}`, search });
   }
 
@@ -74,59 +98,21 @@ export function BacktestPage() {
       {dataStatus.data && <DataStatusBar s={dataStatus.data} />}
       <Grid>
         <Cell span={3}>
-          <Panel
-            title="回测记录"
-            right={<button type="button" className="btn" disabled={!defaults.data} onClick={() => setDrawer(true)}>+ 新建回测</button>}
-          >
-            <ApiState result={runs}>
-              {(rs) => (
-                <div className="runs">
-                  {rs.map((r) => {
-                    const on = selected.includes(r.id);
-                    return (
-                      <div key={r.id} className={`run${r.id === current?.id ? " on" : ""}`} onClick={() => open(r.id)}>
-                        <input
-                          type="checkbox"
-                          aria-label={`对比 #${r.id}`}
-                          checked={on}
-                          disabled={!on && selected.length >= MAX_COMPARE}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={() => toggle(r.id)}
-                        />
-                        <span className={`pill ${STATUS_PILL[r.status] ?? "hold"}`}>{STATUS_TEXT[r.status] ?? r.status}</span>
-                        <b>#{r.id}</b>
-                        <span className="muted">{r.strategy}</span>
-                        <span style={{ flex: 1 }} />
-                        <span className="num up">{metric(r, "cagr") !== undefined ? pct(metric(r, "cagr"), 1) : ""}</span>
-                        <span className="num down">{metric(r, "max_drawdown") !== undefined ? pct(metric(r, "max_drawdown"), 1) : ""}</span>
-                      </div>
-                    );
-                  })}
-                  <div className="muted sm" style={{ marginTop: 6 }}>勾选最多 {MAX_COMPARE} 个进入对比</div>
-                </div>
-              )}
-            </ApiState>
-          </Panel>
+          <RunList
+                result={runs}
+                selected={selected}
+                currentId={current?.id}
+                max={MAX_COMPARE}
+                canCreate={!!defaults.data}
+                onOpen={open}
+                onToggle={toggle}
+                onCreate={() => setDrawer("new")}
+              />
         </Cell>
         <Cell span={9}>
-          {current ? (
+          {current && compare ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <section className="panel">
-                <div className="panel-h">
-                  <b style={{ fontSize: 16 }}>#{current.id} · {current.strategy}</b>
-                  <span style={{ display: "flex", gap: 6 }}>
-                    <CoverageWarnings run={current} />
-                    <span className={`pill ${STATUS_PILL[current.status] ?? "hold"}`}>{STATUS_TEXT[current.status] ?? current.status}</span>
-                  </span>
-                </div>
-                <div className="muted sm">{current.start} → {current.end}{current.error ? ` · ${current.error}` : ""}</div>
-                <div className="statbar">
-                  {METRICS.map((m) => (
-                    <Stat key={m.key} label={m.label} value={fmtMetric(current.metrics[m.key], m.kind)} />
-                  ))}
-                </div>
-              </section>
-              <Panel title="净值（起点 = 1）">
+              <Panel title="净值对比（起点 = 1）">
                 <ApiState result={equity}>{() => <LineChart height={300} series={series} />}</ApiState>
               </Panel>
               <Panel title="回撤">
@@ -143,6 +129,21 @@ export function BacktestPage() {
                 />
               </Panel>
             </div>
+          ) : current ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <RunHeader
+                run={current}
+                a={a}
+                warnings={<CoverageWarnings run={current} />}
+                onParams={() => setTab("params")}
+                onCopy={() => setDrawer({ strategy: current.strategy, start: current.start, end: current.end, params: current.params, costs: current.costs, cash: a?.initial_cash != null ? String(a.initial_cash) : null })}
+                onExport={() => a && exportCsv(a)}
+              />
+              <MainChart s={a?.series} strategy={current.strategy} oosStart={a?.oos_start ?? "2023-01-01"} />
+              <Panel title={TABS.find((t) => t.key === tab)?.label ?? ""} right={<Tabs tabs={TABS.map((t) => ({ key: t.key, label: t.label }))} value={tab} onChange={setTab} />}>
+                <TabBody tab={tab} a={a} loading={analysis.loading} />
+              </Panel>
+            </div>
           ) : (
             <Panel title="回测报告"><EmptyState note="还没有回测记录，点击“+ 新建回测”提交" /></Panel>
           )}
@@ -151,9 +152,10 @@ export function BacktestPage() {
       {drawer && defaults.data && (
         <BacktestSubmitDrawer
           defaults={defaults.data}
-          onClose={() => setDrawer(false)}
+          initial={drawer === "new" ? undefined : drawer}
+          onClose={() => setDrawer(null)}
           onSubmitted={(id) => {
-            setDrawer(false);
+            setDrawer(null);
             setNotice(`已提交回测 #${id}，backtest-worker 执行完成后显示在列表中`);
             runs.reload();
           }}
@@ -161,6 +163,18 @@ export function BacktestPage() {
       )}
     </div>
   );
+}
+
+function TabBody({ tab, a, loading }: { tab: TabKey; a: BacktestAnalysis | null; loading: boolean }) {
+  if (tab === "trades" || tab === "positions")
+    return <EmptyState kind="pending" note="B 批接入（新存储：逐笔交易与每日持仓）" />;
+  if (tab === "robust") return <EmptyState kind="pending" note="待稳健性检验（#68）：参数敏感性、walk-forward、成本与起点敏感性" />;
+  if (!a) return loading ? <div className="muted sm">加载中…</div> : <EmptyState />;
+  if (tab === "params") return <ParamsTab a={a} />;
+  if (a.status !== "done") return <EmptyState note={a.status === "failed" ? `回测失败：${a.error ?? ""}` : "回测尚未完成"} />;
+  if (tab === "overview") return <OverviewTab a={a} />;
+  if (tab === "returns") return <ReturnsTab a={a} />;
+  return <RiskTab a={a} />;
 }
 
 /** 服务器回测数据（Tiingo）的补齐进度；Mac 上的 yfinance 模式不显示。 */

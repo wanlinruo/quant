@@ -636,3 +636,139 @@ class StockExtras(BaseModel):
     metrics_updated: date | None = None
     news: list[NewsItemOut] = []
     news_updated: datetime | None = None
+
+
+# ---- 回测分析（#67 A 批）----
+
+
+class BtStatOut(BaseModel):
+    key: str
+    label: str
+    value: float | None
+    qqq: float | None
+    kind: Literal["pct", "ratio", "int"]
+
+
+class BtSeriesOut(BaseModel):
+    """净值归一化到 1；qqq / spy 缺数据时为 None，个别日期缺失为 None。"""
+
+    dates: list[date]
+    strategy: list[float]
+    qqq: list[float | None] | None
+    spy: list[float | None] | None
+    drawdown: list[float]
+    qqq_drawdown: list[float | None] | None
+
+
+class BtCheckOut(BaseModel):
+    label: str
+    passed: bool | None  # None：数据不足或需稳健性检验（#68）
+
+
+class BtYearOut(BaseModel):
+    year: int
+    strategy: float | None
+    qqq: float | None
+
+
+class BtOverviewOut(BaseModel):
+    checks: list[BtCheckOut]
+    split: dict[str, dict[str, dict[str, Any] | None]]  # full / ins / oos → strategy / qqq → 指标
+    yearly: list[BtYearOut]
+
+
+class BtMonthRowOut(BaseModel):
+    year: int
+    months: list[float | None]
+    year_total: float | None
+    qqq_year: float | None
+
+
+class BtBinOut(BaseModel):
+    lo: float
+    hi: float
+    count: int
+
+
+class BtBestWorstOut(BaseModel):
+    period: str
+    best: float | None
+    best_at: str
+    worst: float | None
+    worst_at: str
+
+
+class BtRollingOut(BaseModel):
+    date: date
+    ret: float | None
+    sharpe: float | None
+
+
+class BtReturnsOut(BaseModel):
+    monthly: list[BtMonthRowOut]
+    distribution: list[BtBinOut]
+    best_worst: list[BtBestWorstOut]
+    rolling: list[BtRollingOut]
+
+
+class BtEpisodeOut(BaseModel):
+    start: date
+    trough: date
+    end: date | None
+    depth: float | None
+    down_days: int
+    recovery_days: int | None
+    qqq: float | None
+
+
+class BtRowOut(BaseModel):
+    label: str
+    value: float | None
+    qqq: float | None = None
+
+
+class BtBetaOut(BaseModel):
+    date: date
+    beta: float | None
+
+
+class BtRiskOut(BaseModel):
+    episodes: list[BtEpisodeOut]
+    capture: dict[str, float | None]
+    table: list[BtRowOut]
+    rolling_beta: list[BtBetaOut]
+    tail: list[BtRowOut]
+
+
+class BtParamOut(BaseModel):
+    key: str
+    value: Any
+    default: Any
+    changed: bool
+
+
+class BtReproOut(BaseModel):
+    source: str | None
+    data_end: str | None
+    coverage: Any
+    command: str
+
+
+class BacktestAnalysis(BaseModel):
+    id: int
+    strategy: str
+    status: str
+    start: date
+    end: date
+    error: str | None
+    initial_cash: float | None
+    duration_s: float | None
+    oos_start: date
+    bench_note: str | None = None  # QQQ 数据不覆盖回测区间时的说明（对照指标为空）
+    stats: list[BtStatOut] = []
+    series: BtSeriesOut | None = None
+    overview: BtOverviewOut | None = None
+    returns: BtReturnsOut | None = None
+    risk: BtRiskOut | None = None
+    params: list[BtParamOut] = []
+    repro: BtReproOut | None = None

@@ -1,9 +1,10 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
 import { ShellContext } from "../shell";
 import { currentLocation, mkMeta, mockApi, renderAt, renderPage } from "../test/utils";
 import { BacktestPage } from "./BacktestPage";
+import { ANALYSIS } from "./backtest/analysisFixture";
 
 const run = (id: number, status = "done") => ({
   id, strategy: "combo", status, start: "2016-10-28", end: "2026-10-29", params: {}, costs: null,
@@ -150,5 +151,101 @@ describe("BacktestPage", () => {
     renderPage(<BacktestPage />, "/backtest");
     expect(await screen.findByText("数据覆盖 82%")).toBeInTheDocument();
     expect(screen.getByText("历史财报日缺失")).toBeInTheDocument();
+  });
+
+  it("filters runs and shows failure reason", async () => {
+    const failed = { ...run(126, "failed"), metrics: {}, error: "回测数据尚未补齐：缺 QQQ" };
+    mockApi({ "/api/backtests": [200, [run(128), failed]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await screen.findByText("#128");
+    await user.click(screen.getByRole("button", { name: "失败" }));
+    expect(screen.queryByText("#128")).not.toBeInTheDocument();
+    expect(screen.getByText("回测数据尚未补齐：缺 QQQ")).toBeInTheDocument();
+  });
+
+  it("stat bar shows qqq comparison from analysis", async () => {
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS] });
+    renderPage(<BacktestPage />, "/backtest");
+    const bar = await screen.findByTestId("statbar");
+    expect(await within(bar).findByText("12.30%")).toBeInTheDocument();
+    expect(within(bar).getByText("QQQ 10.10%")).toBeInTheDocument();
+    expect(within(bar).getAllByText("—").length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText(/初始资金 \$100,000/)).toBeInTheDocument();
+  });
+
+  it("main chart stays mounted across tabs and pending tabs say so", async () => {
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    const chart = await screen.findByTestId("main-chart");
+    await user.click(screen.getByRole("button", { name: "收益分析" }));
+    await user.click(screen.getByRole("button", { name: "交易明细" }));
+    expect(screen.getByText(/B 批接入/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "稳健性" }));
+    expect(screen.getByText(/#68/)).toBeInTheDocument();
+    expect(screen.getByTestId("main-chart")).toBe(chart);
+  });
+
+  it("copy params opens drawer with strategy and dates", async () => {
+    const r = { ...run(128), strategy: "etf_momentum", params: { lookback: 99, top_k: 2 }, start: "2018-01-02", end: "2024-12-31" };
+    mockApi({ "/api/backtests": [200, [r]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, { ...ANALYSIS, strategy: "etf_momentum" }] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click(await screen.findByRole("button", { name: "复制参数新建" }));
+    const dlg = await screen.findByRole("dialog");
+    expect(within(dlg).getByDisplayValue("2018-01-02")).toBeInTheDocument();
+    expect(within(dlg).getByDisplayValue("99")).toBeInTheDocument();
+  });
+
+  async function openTab(name: string) {
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS] });
+    const r = renderPage(<BacktestPage />, "/backtest");
+    await screen.findByText("QQQ 10.10%");
+    await r.user.click(screen.getByRole("button", { name }));
+    return screen.getByTestId(`tab-${name}`);
+  }
+
+  it("overview tab", async () => {
+    const tab = await openTab("概览");
+    expect(within(tab).getByText("待稳健性检验（#68）")).toBeInTheDocument();
+    expect(within(tab).getAllByText("通过").length).toBe(3);
+    expect(within(tab).getByText("未通过")).toBeInTheDocument();
+    expect(within(tab).getByText("样本外（2023 起）")).toBeInTheDocument();
+    expect(within(tab).getByText("15.00%")).toBeInTheDocument();
+    expect(within(tab).getByText("2023")).toBeInTheDocument();
+  });
+
+  it("returns tab", async () => {
+    const tab = await openTab("收益分析");
+    const cell = within(tab).getByText("+5.0%");
+    expect(cell.closest("td")).toHaveClass("up");
+    expect(within(tab).getByText("2023-01-31")).toBeInTheDocument();
+    expect(within(tab).getByText(/子仓贡献.*B 批接入/)).toBeInTheDocument();
+  });
+
+  it("risk tab", async () => {
+    const tab = await openTab("回撤与风险");
+    expect(within(tab).getByText("-21.30%")).toBeInTheDocument();
+    expect(within(tab).getByText("82%")).toBeInTheDocument();
+    expect(within(tab).getByText("VaR 95%（日）")).toBeInTheDocument();
+    expect(within(tab).getByText(/择时效果.*B 批接入/)).toBeInTheDocument();
+  });
+
+  it("params tab", async () => {
+    const tab = await openTab("参数与日志");
+    expect(within(tab).getByText("top_n").closest("tr")).toHaveClass("changed");
+    expect(within(tab).getByText("sma").closest("tr")).not.toHaveClass("changed");
+    expect(within(tab).getByText(/--param top_n=12/)).toBeInTheDocument();
+    expect(within(tab).getByText(/运行日志未记录/)).toBeInTheDocument();
+  });
+
+  it("compare button disabled in single view and bench note shown", async () => {
+    const note = "QQQ 数据只覆盖 2019-01-02 – 2026-10-30，与回测区间不一致，未作对照";
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, { ...ANALYSIS, bench_note: note }] });
+    renderPage(<BacktestPage />, "/backtest");
+    await screen.findByTestId("statbar");
+    const btn = screen.getByRole("button", { name: "加入对比" });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("title", "在左侧再勾选一个回测即可对比");
+    expect(await screen.findByText(note)).toBeInTheDocument();
+    expect(screen.getByText("#128 · combo")).toBeInTheDocument();
   });
 });

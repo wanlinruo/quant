@@ -157,3 +157,28 @@ td.reason { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-s
 td.reason a { color: #d1d4dc; text-decoration: none; }
 td.reason a:hover { text-decoration: underline; }
 .news-upd { text-align: right; padding-bottom: 2px; }
+
+/* 回测页（#67 A 批） */
+.run { flex-direction: column; align-items: stretch; }
+.run-main { display: flex; align-items: center; gap: 6px; }
+.run-err { color: var(--down, #ef4444); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 22px; }
+.statbar .stat { min-width: 0; }
+.stat-v { font-size: 16px; color: #fff; font-weight: 600; }
+.subpanel { border: 1px solid #23262f; border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; min-width: 0; }
+.subpanel-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; gap: 8px; white-space: nowrap; }
+.hbar { position: relative; display: block; height: 10px; min-width: 80px; }
+.hbar i { position: absolute; top: 0; bottom: 0; }
+.hbar i.pos { background: #2962ff; }
+.hbar i.neg { background: #ef4444; }
+.qbar .hbar i.pos { background: #f5a623; }
+.qbar .hbar i.neg { background: #f5a623; opacity: 0.6; }
+.dt.heat td { min-width: 52px; }
+.hist { display: flex; align-items: flex-end; gap: 2px; height: 120px; }
+.hist-col { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+.hist-col i { display: block; width: 100%; background: #22c55e; }
+.hist-col i.neg { background: #ef4444; }
+tr.changed td { background: rgba(250, 204, 21, 0.12); }
+pre.cmd { white-space: pre-wrap; word-break: break-all; font-size: 12px; background: #131722; padding: 6px 8px; border-radius: 4px; margin: 8px 0 0; user-select: all; }
+pre.cmd.err { color: #ef4444; user-select: text; }
+.statbar.statbar-10 { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 8px; }
+.statbar-10 .stat { padding: 6px 8px; white-space: nowrap; overflow: hidden; }
