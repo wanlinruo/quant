@@ -709,6 +709,7 @@ class BtReturnsOut(BaseModel):
     distribution: list[BtBinOut]
     best_worst: list[BtBestWorstOut]
     rolling: list[BtRollingOut]
+    sleeves: BtSleevesOut | None = None  # 子仓累计收益贡献（B 批；旧回测为 None）
 
 
 class BtEpisodeOut(BaseModel):
@@ -738,6 +739,7 @@ class BtRiskOut(BaseModel):
     table: list[BtRowOut]
     rolling_beta: list[BtBetaOut]
     tail: list[BtRowOut]
+    timing: list[BtTimingOut] = []  # 择时减仓时段（B 批）
 
 
 class BtParamOut(BaseModel):
@@ -772,3 +774,108 @@ class BacktestAnalysis(BaseModel):
     risk: BtRiskOut | None = None
     params: list[BtParamOut] = []
     repro: BtReproOut | None = None
+
+
+# ---- 回测交易明细与持仓变化（#67 B 批）----
+
+
+class BtTradeOut(BaseModel):
+    seq: int
+    symbol: str
+    sleeve: str
+    open_date: date
+    open_price: float
+    close_date: date | None
+    close_price: float | None
+    qty: float
+    ret: float | None
+    pnl: float
+    exit_reason: str | None
+    days: int  # 持有交易日数（未平仓算到回测最后一天）
+    adjustments: list[dict[str, Any]]
+
+
+class BtTradeRef(BaseModel):
+    symbol: str
+    pnl: float
+    ret: float | None
+
+
+class BtTradesSummary(BaseModel):
+    trades: int
+    closed: int
+    win_rate: float | None
+    profit_factor: float | None
+    avg_days: float | None
+    avg_ret: float | None
+    best: BtTradeRef | None
+    worst: BtTradeRef | None
+
+
+class BtReasonOut(BaseModel):
+    reason: str
+    count: int
+    win_rate: float | None
+    avg_ret: float | None
+    pnl: float
+
+
+class BtSymbolOut(BaseModel):
+    symbol: str
+    trades: int
+    pnl: float
+    win_rate: float | None
+    days: int
+
+
+class BacktestTrades(BaseModel):
+    note: str | None = None  # 没有交易记录时的说明
+    summary: BtTradesSummary | None = None
+    trades: list[BtTradeOut] = []
+    by_reason: list[BtReasonOut] = []
+    by_symbol: list[BtSymbolOut] = []
+
+
+class BtDailyPosOut(BaseModel):
+    date: date
+    cash: float
+    sleeves: dict[str, float]
+    timing_factor: float | None
+
+
+class BtHoldingOut(BaseModel):
+    symbol: str
+    sleeve: str
+    weight: float
+
+
+class BtLongestOut(BaseModel):
+    symbol: str
+    sleeve: str
+    days: int
+    open_date: date
+    close_date: date | None
+
+
+class BtTimingOut(BaseModel):
+    start: date
+    end: date
+    days: int
+    factor: float
+    ret: float | None  # 该时段策略收益
+    est_full: float | None  # 估算：系数为 1 时的收益（期间收益 ÷ 平均系数）
+    saved: float | None  # 少亏（或少赚）= ret − est_full
+
+
+class BacktestPositions(BaseModel):
+    note: str | None = None
+    daily: list[BtDailyPosOut] = []
+    timing: list[BtTimingOut] = []
+    day: date | None = None
+    holdings: list[BtHoldingOut] = []
+    longest: list[BtLongestOut] = []
+
+
+class BtSleevesOut(BaseModel):
+    dates: list[date]
+    series: dict[str, list[float]]  # 子仓累计盈亏 ÷ 初始资金

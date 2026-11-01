@@ -129,6 +129,17 @@ def validate_weights(weights: Mapping[str, float]) -> dict[str, float]:
     return out
 
 
+@dataclass(frozen=True)
+class Attribution:
+    """回测记录用的归因（#67）：各子仓对组合的权重贡献（之和等于目标权重）、择时系数、
+    当日的平仓原因（{代码: 原因}），以及子仓的默认平仓原因（目标变为 0 但没给原因时用）。"""
+
+    sleeves: dict[str, dict[str, float]]
+    timing_factor: float | None
+    exits: dict[str, str]
+    default_exit: dict[str, str]
+
+
 class Strategy(ABC):
     name: ClassVar[str]
     # 非 None 时替换订单计算的 min_weight_diff：持有型策略用较大的值，避免价格漂移触发来回调仓
@@ -157,6 +168,12 @@ class Strategy(ABC):
     def run(self, ctx: Context) -> dict[str, float]:
         """调用方使用的入口：计算并校验权重。"""
         return validate_weights(self.target_weights(ctx))
+
+    def run_attributed(self, ctx: Context) -> tuple[dict[str, float], Attribution]:
+        """与 run 相同的权重，外加回测记录用的归因；默认只有一个子仓、没有平仓原因。"""
+        w = self.run(ctx)
+        return w, Attribution(sleeves={"main": dict(w)}, timing_factor=None, exits={},
+                              default_exit={})  # fmt: skip
 
     def run_explained(self, ctx: Context) -> tuple[dict[str, float], dict[str, Any] | None]:
         """与 run 相同的权重，外加可写入 signals.detail 的明细（子仓、排名等）；默认没有明细。"""
