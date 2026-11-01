@@ -119,7 +119,8 @@ def split_metrics(equity: pd.Series, qqq: pd.Series | None) -> dict[str, dict[st
 def _from_dict(d: dict[str, Any] | None) -> Metrics | None:
     if not d:
         return None
-    return Metrics(**{k: (float("nan") if v is None else v) for k, v in d.items()})
+    vals: dict[str, Any] = {k: (float("nan") if v is None else v) for k, v in d.items()}
+    return Metrics(**vals)
 
 
 def checks(split: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -131,7 +132,7 @@ def checks(split: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         return [{"label": lbl, "passed": None} for lbl in CHECK_LABELS]
     q = qfull or full
     res = combo_checks(full, q, ins or full, qins or q, oos or full, qoos or q, [])
-    out = []
+    out: list[dict[str, Any]] = []
     for i, (label, passed) in enumerate(res.items()):
         missing = (i in (1, 3) and qfull is None) or (i == 3 and (ins is None or oos is None))
         if missing or i == 4:
