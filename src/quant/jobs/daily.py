@@ -63,7 +63,7 @@ from quant.strategies.universe import Constituents
 
 log = logging.getLogger("quant.jobs")
 
-JOBS = ("daily_data", "daily_signal", "daily_execute", "daily_report")
+JOBS = ("daily_data", "daily_signal", "daily_execute", "daily_report", "market_data")
 DATA_RETRIES = 3
 DATA_RETRY_SECONDS = 15 * 60
 COMPARE_DAYS = 45
@@ -471,11 +471,39 @@ def _weights_text(weights: dict[str, float]) -> str:
     return "，".join(f"{s} {w:.0%}" for s, w in sorted(weights.items(), key=lambda x: -x[1]))
 
 
+def market_data(ctx: JobContext, d: date) -> str:
+    """首页市场看板（#69）：Massive 全市场日线 → data_dir/market/snapshot.json；与交易无关。"""
+    key = ctx.settings.massive_api_key
+    if key is None or not key.get_secret_value().strip():
+        return "未配置 Massive key（QUANT_MASSIVE_API_KEY），跳过"
+    from quant.data.providers.massive import MassiveClient
+    from quant.market.job import run_market_data
+
+    holdings: set[str] = set()
+    if ctx.engine is not None:
+        with Session(ctx.engine) as s:
+            latest = (
+                select(PositionSnapshot.mode, func.max(PositionSnapshot.snapshot_date))
+                .group_by(PositionSnapshot.mode)
+                .subquery()
+            )
+            holdings = set(s.scalars(
+                select(PositionSnapshot.symbol).join(
+                    latest,
+                    (PositionSnapshot.mode == latest.c.mode)
+                    & (PositionSnapshot.snapshot_date == latest.c[1]),
+                )
+            ))  # fmt: skip
+    return run_market_data(MassiveClient(key), ctx.settings.data_dir, d, ctx.calendar,
+                           ctx.settings.board, holdings)  # fmt: skip
+
+
 JOB_FUNCS: dict[str, Callable[[JobContext, date], str]] = {
     "daily_data": daily_data,
     "daily_signal": daily_signal,
     "daily_execute": daily_execute,
     "daily_report": daily_report,
+    "market_data": market_data,
 }
 
 # 这些异常在抛出前已经通知过
