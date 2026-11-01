@@ -78,6 +78,14 @@ cd /opt/quant && docker compose exec -T scheduler quant job market_data --date <
 cd /opt/quant && docker compose exec -T scheduler quant job market_extras --date <最近交易日>
 ```
 
+个股页新闻与财务指标（#70 第 3 批）：scheduler 每个交易日 21:15 ET 运行 `stock_data`（Finnhub，
+标普 500 成分 ∪ 持仓；新闻每天全部，财务指标每天最旧的 120 只 → `/data/parquet/market/stocks/*.json`），
+约 12 分钟，使用同一个 `FINNHUB_API_KEY`。手动运行：
+
+```
+cd /opt/quant && docker compose exec -T scheduler quant job stock_data --date <最近交易日>
+```
+
 回测数据补齐进度（只读）：
 
 ```

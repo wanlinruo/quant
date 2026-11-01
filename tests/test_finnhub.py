@@ -67,3 +67,15 @@ def test_news_url_must_be_http() -> None:
     ok = {"datetime": 1793526131, "headline": "y", "id": 2, "source": "s", "url": "https://n/2"}
     got = client(FakeFetch((200, [bad, ok]))).market_news()
     assert [(n.headline, n.url) for n in got] == [("x", ""), ("y", "https://n/2")]
+
+
+def test_metrics_selected_keys() -> None:
+    from quant.market.stock_job import METRIC_KEYS
+
+    body = {"metric": {"peTTM": 39.01, "grossMarginTTM": None, "roeTTM": "x", "other": 1},
+            "series": {}}  # fmt: skip
+    fetch = FakeFetch((200, body))
+    got = client(fetch).metrics("BRK.B", METRIC_KEYS)
+    assert fetch.calls[0][0] == "https://finnhub.io/api/v1/stock/metric?symbol=BRK.B&metric=all"
+    assert got["peTTM"] == 39.01 and got["grossMarginTTM"] is None and got["roeTTM"] is None
+    assert "other" not in got and set(got) == set(METRIC_KEYS)

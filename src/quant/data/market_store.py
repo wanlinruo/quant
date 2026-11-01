@@ -9,6 +9,7 @@ import csv
 import io
 import json
 import logging
+import re
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -76,6 +77,16 @@ def calendar_path(data_dir: Path) -> Path:
 
 def ff_events_path(data_dir: Path) -> Path:
     return market_dir(data_dir) / "ff_events.json"
+
+
+STOCK_SYMBOL_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,9}$")
+
+
+def stock_path(data_dir: Path, symbol: str) -> Path | None:
+    """个股新闻与财务指标文件（stock_data 任务写、个股页接口读）；代码不合法时为 None。"""
+    if not STOCK_SYMBOL_RE.match(symbol):
+        return None
+    return market_dir(data_dir) / "stocks" / f"{symbol}.json"
 
 
 def gics_path(data_dir: Path) -> Path:

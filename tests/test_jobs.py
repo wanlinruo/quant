@@ -59,6 +59,7 @@ def test_day_plan_regular() -> None:
         "daily_signal": et(DAY, 17, 0),
         "market_data": et(DAY, 20, 30),
         "market_extras": et(DAY, 21, 0),
+        "stock_data": et(DAY, 21, 15),
     }
     names = [n for n, _ in day_plan(DAY, ScheduleSettings(), get_calendar())]
     assert names.index("daily_execute") < names.index("daily_report")
