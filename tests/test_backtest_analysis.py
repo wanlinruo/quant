@@ -44,8 +44,9 @@ def test_sortino_matches_manual() -> None:
 
 def test_stat_bar() -> None:
     st = ba.stat_bar(EQ, QQQ)
-    assert [s.key for s in st] == ["total_return", "cagr", "sharpe", "sortino", "max_drawdown",
-                                   "calmar", "volatility", "win_rate", "profit_factor", "trades"]  # fmt: skip
+    keys = ["total_return", "cagr", "sharpe", "sortino", "max_drawdown", "calmar", "volatility",
+            "win_rate", "profit_factor", "trades"]  # fmt: skip
+    assert [s.key for s in st] == keys
     assert st[0].value == pytest.approx(EQ.iloc[-1] / EQ.iloc[0] - 1)
     assert st[0].qqq == pytest.approx(QQQ.iloc[-1] / QQQ.iloc[0] - 1)
     assert all(s.value is None and s.qqq is None for s in st[-3:])
@@ -78,6 +79,6 @@ def test_yearly() -> None:
 
 def test_tiny_series_safe() -> None:
     tiny = EQ.iloc[:5]
-    out = [ba.stat_bar(tiny, None), ba.split_metrics(tiny, None), ba.checks(ba.split_metrics(tiny, None)),
-           ba.yearly(tiny, None)]  # fmt: skip
+    sp = ba.split_metrics(tiny, None)
+    out = [ba.stat_bar(tiny, None), sp, ba.checks(sp), ba.yearly(tiny, None)]
     dumps(out)

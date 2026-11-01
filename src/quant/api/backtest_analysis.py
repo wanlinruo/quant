@@ -1,6 +1,7 @@
 """回测页的分析（#67 A 批）：由回测净值与 QQQ / SPY 价格在请求时计算。纯函数，只依赖 pandas。
 
-口径与 engine/metrics.py 一致：252 个交易日年化，无风险利率按 0。任何结果都不含 NaN / inf（转为 None）。
+口径与 engine/metrics.py 一致：252 个交易日年化，无风险利率按 0。
+任何结果都不含 NaN / inf（转为 None）。
 """
 
 from __future__ import annotations
@@ -77,7 +78,8 @@ def _metrics(eq: pd.Series | None) -> Metrics | None:
 
 STATS: tuple[tuple[str, str, Kind], ...] = (
     ("total_return", "总收益", "pct"), ("cagr", "年化", "pct"), ("sharpe", "夏普", "ratio"),
-    ("sortino", "索提诺", "ratio"), ("max_drawdown", "最大回撤", "pct"), ("calmar", "卡玛", "ratio"),
+    ("sortino", "索提诺", "ratio"), ("max_drawdown", "最大回撤", "pct"),
+    ("calmar", "卡玛", "ratio"),
     ("volatility", "年波动", "pct"), ("win_rate", "胜率", "pct"),
     ("profit_factor", "盈亏比", "ratio"), ("trades", "交易笔数", "int"),
 )  # fmt: skip
@@ -104,7 +106,7 @@ def _segments(eq: pd.Series) -> dict[str, pd.Series]:
 
 
 def split_metrics(equity: pd.Series, qqq: pd.Series | None) -> dict[str, dict[str, Any]]:
-    """全区间、样本内（2023 年以前）、样本外（2023 年起）的策略与 QQQ 指标；某段不足 2 天为 None。"""
+    """全区间、样本内（2023 年以前）、样本外（2023 年起）的策略与 QQQ 指标；不足 2 天为 None。"""
     q = align(equity, qqq) if qqq is not None else None
     segs, qsegs = _segments(equity), (_segments(q) if q is not None else {})
     out: dict[str, dict[str, Any]] = {}
@@ -148,9 +150,9 @@ CHECK_LABELS = (
 def _year_returns(eq: pd.Series) -> dict[int, float]:
     out: dict[int, float] = {}
     prev: float | None = None
-    for year, seg in eq.groupby(eq.index.year):
+    for year, seg in eq.groupby(pd.DatetimeIndex(eq.index).year):
         base = prev if prev is not None else float(seg.iloc[0])
-        out[int(year)] = float(seg.iloc[-1]) / base - 1
+        out[int(str(year))] = float(seg.iloc[-1]) / base - 1
         prev = float(seg.iloc[-1])
     return out
 
