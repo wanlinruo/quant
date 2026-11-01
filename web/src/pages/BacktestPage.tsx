@@ -58,7 +58,8 @@ export function BacktestPage() {
     const t = new URLSearchParams(initialSearch).get("tab");
     return TABS.some((x) => x.key === t) ? (t as TabKey) : "overview";
   });
-  const [trade, setTrade] = useState<BtTradeOut | null>(null);
+  // 选中的交易只属于当时查看的回测：切换回测后不再显示（避免旧标记画在新回测上）
+  const [picked, setPicked] = useState<{ run: number; t: BtTradeOut } | null>(null);
 
   const { id: routeId } = useParams();
   const navigate = useNavigate();
@@ -73,6 +74,7 @@ export function BacktestPage() {
   const equity = useApi<EquityPoint[]>(compare ? "/api/backtests/equity" : null, { ids: selected });
   const analysis = useApi<BacktestAnalysis>(current && !compare ? `/api/backtests/${current.id}/analysis` : null);
   const a = analysis.data && analysis.data.id === current?.id ? analysis.data : null;
+  const trade = picked && picked.run === current?.id ? picked.t : null;
 
   const series = useMemo(() => {
     const pts = equity.data ?? [];
@@ -154,7 +156,7 @@ export function BacktestPage() {
                 marks={trade ? [trade.open_date, ...(trade.close_date ? [trade.close_date] : [])] : undefined}
               />
               <Panel title={TABS.find((t) => t.key === tab)?.label ?? ""} right={<Tabs tabs={TABS.map((t) => ({ key: t.key, label: t.label }))} value={tab} onChange={setTab} />}>
-                <TabBody tab={tab} a={a} loading={analysis.loading} runId={current.id} trade={trade?.seq ?? null} onTrade={setTrade} />
+                <TabBody tab={tab} a={a} loading={analysis.loading} runId={current.id} trade={trade?.seq ?? null} onTrade={(t) => setPicked({ run: current.id, t })} />
               </Panel>
             </div>
           ) : (

@@ -78,3 +78,38 @@ def test_combo_attribution_matches_run(day: date) -> None:
     assert total.keys() == w.keys() and all(total[s] == pytest.approx(w[s]) for s in w)
     assert a.timing_factor in (1.0, 0.5)
     assert a.default_exit["momentum"].startswith("动量排名跌出前 ")
+
+
+def test_swing_alone_reports_exit_reasons() -> None:
+    """单独回测 swing_pullback 时也能拿到离场原因（单一子仓）。"""
+    import numpy as np
+    import pandas as pd
+
+    from quant.engine.backtester import field_loader_from_bars
+    from quant.strategies.base import Context
+    from quant.strategies.swing_pullback import SwingPullback
+    from test_swing_pullback import DAYS, STOCKS, SYMS, _bars
+
+    rng = np.random.default_rng(3)
+    n = len(IDX)
+    bars = {
+        s: _bars(100 * np.cumprod(1 + rng.normal(0.002, 0.02, n)), k) for k, s in enumerate(SYMS)
+    }
+    params = {
+        "stocks": list(STOCKS),
+        "trend_ma": 20,
+        "support_ma": 5,
+        "exit_ma": 3,
+        "replay_days": 60,
+    }
+    load = field_loader_from_bars(bars)
+    strat = SwingPullback(CAL)
+    reasons: dict[str, str] = {}
+    for as_of in DAYS[60:]:
+        c = Context(
+            as_of=as_of, loader=lambda s, a, b: pd.DataFrame(), params=params, field_loader=load
+        )
+        w, a = strat.run_attributed(c)
+        assert w == strat.run(c) and a.sleeves == {"main": w} and a.timing_factor is None
+        reasons |= a.exits
+    assert reasons  # 随机游走数据中出现过离场，并带原因

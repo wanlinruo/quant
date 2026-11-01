@@ -83,7 +83,7 @@ export function TradesTab({ runId, selected, onSelect }: { runId: number; select
                       <table className="dt compact" data-testid="trade-table">
                         <thead><tr><th>代码</th><th>子仓</th><th>开仓</th><th className="r">价格</th><th>平仓</th><th className="r">价格</th><th className="r">天数</th><th className="r">收益</th><th className="r">盈亏</th><th>平仓原因</th></tr></thead>
                         <tbody>
-                          {rows.map((t) => (
+                          {rows.flatMap((t) => [
                             <tr key={t.seq} aria-selected={selected === t.seq} className={selected === t.seq ? "sel" : undefined} onClick={() => onSelect(t)} title={t.adjustments.length ? `调整 ${t.adjustments.length} 次` : undefined}>
                               <td><b>{t.symbol}</b></td>
                               <td className="muted">{SLEEVE_TEXT[t.sleeve] ?? t.sleeve}</td>
@@ -94,8 +94,26 @@ export function TradesTab({ runId, selected, onSelect }: { runId: number; select
                               <td className={`r num ${(t.ret ?? 0) >= 0 ? "up" : "down"}`}>{signedPct(t.ret, 1)}</td>
                               <td className={`r num ${t.pnl >= 0 ? "up" : "down"}`}>{num(t.pnl, 0)}</td>
                               <td className="muted">{t.exit_reason ?? "—"}</td>
-                            </tr>
-                          ))}
+                            </tr>,
+                            ...(selected === t.seq
+                              ? [
+                                  <tr key={`${t.seq}-adj`} className="adj">
+                                    <td colSpan={10}>
+                                      {t.adjustments.length ? (
+                                        <span className="adj-list">
+                                          <span className="muted">加减仓：</span>
+                                          {t.adjustments.map((x) => (
+                                            <span key={String(x.date)}>
+                                              {String(x.date)} <b className={Number(x.qty) >= 0 ? "up" : "down"}>{Number(x.qty) >= 0 ? "+" : ""}{num(Number(x.qty), 0)} 股</b>
+                                            </span>
+                                          ))}
+                                        </span>
+                                      ) : <span className="muted">这笔交易没有中途加减仓</span>}
+                                    </td>
+                                  </tr>,
+                                ]
+                              : []),
+                          ])}
                         </tbody>
                       </table>
                     </div>

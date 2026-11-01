@@ -54,8 +54,15 @@ def process_one(engine: Engine, settings: Settings, runner: Runner = run_spec) -
         with Session(engine) as session, session.begin():
             fail_run(session, run_id, detail)
         return run_id
-    with Session(engine) as session, session.begin():
-        save_result(session, run_id, result)
+    try:
+        with Session(engine) as session, session.begin():
+            save_result(session, run_id, result)
+    except Exception as e:  # 写库出错：记为失败并写入真实原因，worker 不退出
+        log.exception("回测 #%s 保存结果失败", run_id)
+        detail = f"保存结果失败：{type(e).__name__}: {e}\n{traceback.format_exc(limit=5)}"
+        with Session(engine) as session, session.begin():
+            fail_run(session, run_id, detail)
+        return run_id
     log.info("回测 #%s 完成：年化 %.2f%%", run_id, result.metrics.cagr * 100)
     return run_id
 

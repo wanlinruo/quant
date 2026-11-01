@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
@@ -38,6 +39,7 @@ from quant.strategies import get_strategy
 from quant.strategies.events import EventCalendar
 
 BENCHMARK = "SPY"
+log = logging.getLogger("quant.backtest")
 COSTS_KEY = "_costs"  # 存入 backtest_runs.params 的成本假设
 CASH_KEY = "_cash"
 
@@ -263,5 +265,10 @@ def save_result(session: Session, run_id: int, result: BacktestResult) -> None:
     }
     if result.data_info:
         metrics["data"] = result.data_info
-    ledger = build_ledger(result.holdings, result.fills, result.attribution, result.equity)
+    try:
+        ledger = build_ledger(result.holdings, result.fills, result.attribution, result.equity)
+    except Exception as e:  # 交易切分出错只降级：净值与指标照常保存
+        log.exception("回测 #%s 交易切分失败", run_id)
+        metrics["ledger_error"] = f"{type(e).__name__}: {e}"
+        ledger = None
     complete_run(session, run_id, metrics, result.equity, result.drawdown, ledger)

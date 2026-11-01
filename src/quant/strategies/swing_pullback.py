@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 from quant.core.calendar import TradingCalendar, get_calendar
-from quant.strategies.base import Context, Strategy
+from quant.strategies.base import Attribution, Context, Strategy, validate_weights
 from quant.strategies.events import EventCalendar
 from quant.strategies.swing_rules import ConfirmMode, long_setup, short_setup
 
@@ -328,6 +328,13 @@ class SwingPullback(Strategy):
 
     def target_weights(self, ctx: Context) -> dict[str, float]:
         return self.target_weights_with_exits(ctx)[0]
+
+    def run_attributed(self, ctx: Context) -> tuple[dict[str, float], Attribution]:
+        """单独回测时的归因：单一子仓，带当日离场原因（与 run 同一次计算）。"""
+        w, exits = self.target_weights_with_exits(ctx)
+        w = validate_weights(w)
+        return w, Attribution(sleeves={"main": dict(w)}, timing_factor=None, exits=exits,
+                              default_exit={})  # fmt: skip
 
     def target_weights_with_exits(self, ctx: Context) -> tuple[dict[str, float], dict[str, str]]:
         """唯一的计算路径：目标权重与当日离场原因（回测归因用）。"""

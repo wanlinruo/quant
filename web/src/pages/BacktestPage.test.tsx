@@ -293,4 +293,18 @@ describe("BacktestPage", () => {
     renderPage(<BacktestPage />, "/backtest?tab=trades");
     expect(await screen.findByTestId("trade-table")).toBeInTheDocument();
   });
+
+  it("selected trade expands adjustments and resets on run switch", async () => {
+    mockApi({ "/api/backtests": [200, [run(128), run(127)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS], "/api/backtests/128/trades": [200, TRADES], "/api/backtests/127/analysis": [200, { ...ANALYSIS, id: 127 }], "/api/backtests/127/trades": [200, TRADES] });
+    const { user } = renderPage(<BacktestPage />, "/backtest/128?tab=trades");
+    const table = await screen.findByTestId("trade-table");
+    const row = within(table).getByText("AAA").closest("tr")!;
+    await user.click(row);
+    expect(row).toHaveAttribute("aria-selected", "true");
+    expect(within(table).getByText("2022-12-10")).toBeInTheDocument();
+    expect(within(table).getByText("+20 股")).toBeInTheDocument();
+    await user.click(screen.getByText("#127"));
+    const t2 = await screen.findByTestId("trade-table");
+    expect(within(t2).getAllByRole("row").some((r) => r.getAttribute("aria-selected") === "true")).toBe(false);
+  });
 });

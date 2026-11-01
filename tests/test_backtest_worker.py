@@ -181,3 +181,39 @@ def test_stale_running_marked_failed(engine: Engine) -> None:
     with Session(engine) as s:
         run = s.get(BacktestRun, rid)
         assert run is not None and run.status == "failed" and "重启" in (run.error or "")
+
+
+@pytest.mark.db
+@needs_db
+def test_ledger_error_degrades_not_fails(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """交易切分出错：净值与指标照常保存，metrics 记 ledger_error，不让整个回测失败。"""
+    import quant.engine.runner as runner_mod
+
+    def boom(*a: object, **k: object) -> None:
+        raise ValueError("切分出错")
+
+    monkeypatch.setattr(runner_mod, "build_ledger", boom)
+    (rid,) = _enqueue(engine, 1)
+    assert process_one(engine, SETTINGS, lambda spec, settings: _fake_result()) == rid
+    with Session(engine) as s:
+        run = s.get(BacktestRun, rid)
+        assert run is not None and run.status == "done"
+        assert run.metrics is not None and "切分出错" in run.metrics["ledger_error"]
+        assert s.query(BacktestEquity).filter_by(run_id=rid).count() == 3
+
+
+@pytest.mark.db
+@needs_db
+def test_save_error_recorded_as_failure(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """保存结果出错：记为失败并写入真实原因，worker 不退出。"""
+    import quant.jobs.backtest_worker as w
+
+    def boom(*a: object, **k: object) -> None:
+        raise RuntimeError("写库失败")
+
+    monkeypatch.setattr(w, "save_result", boom)
+    (rid,) = _enqueue(engine, 1)
+    assert process_one(engine, SETTINGS, lambda spec, settings: _fake_result()) == rid
+    with Session(engine) as s:
+        run = s.get(BacktestRun, rid)
+        assert run is not None and run.status == "failed" and "写库失败" in (run.error or "")
