@@ -186,3 +186,4 @@ pre.cmd.err { color: #ef4444; user-select: text; }
 .cards6 .stat { border: 1px solid #23262f; border-radius: 6px; padding: 6px 8px; white-space: nowrap; overflow: hidden; }
 tr.sel td { background: rgba(41, 98, 255, 0.15); }
 i.dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+.vstack { display: flex; flex-direction: column; min-width: 0; }

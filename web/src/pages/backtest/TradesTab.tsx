@@ -102,6 +102,7 @@ export function TradesTab({ runId, selected, onSelect }: { runId: number; select
                   </div>
                 </Cell>
                 <Cell span={4}>
+                  <div className="vstack">
                   <div className="subpanel"><div className="subpanel-h"><b>持有天数 × 收益</b></div><Scatter rows={rows} /></div>
                   <div className="subpanel">
                     <div className="subpanel-h"><b>按平仓原因</b></div>
@@ -116,6 +117,7 @@ export function TradesTab({ runId, selected, onSelect }: { runId: number; select
                       <thead><tr><th>代码</th><th className="r">笔数</th><th className="r">盈亏</th><th className="r">天数</th></tr></thead>
                       <tbody>{(d.by_symbol ?? []).slice(0, 10).map((r) => <tr key={r.symbol}><td>{r.symbol}</td><td className="r num">{r.trades}</td><td className={`r num ${r.pnl >= 0 ? "up" : "down"}`}>{num(r.pnl, 0)}</td><td className="r num">{r.days}</td></tr>)}</tbody>
                     </table>
+                  </div>
                   </div>
                 </Cell>
               </Grid>
