@@ -1,4 +1,4 @@
-import { ColorType, createChart, createSeriesMarkers, LineSeries, LineStyle } from "lightweight-charts";
+import { ColorType, createChart, createSeriesMarkers, HistogramSeries, LineSeries, LineStyle, PriceScaleMode } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 
 export type LineSeriesInput = {
@@ -14,10 +14,14 @@ type Props = {
   percent?: boolean;
   /** 在第一条线上标出的日期（如调仓日），YYYY-MM-DD */
   markers?: string[];
+  /** 对数纵轴（净值对比） */
+  logScale?: boolean;
+  /** 从该日期（YYYY-MM-DD）起加浅蓝底色，如样本外区间 */
+  shadeFrom?: string;
 };
 
 /** 折线图（lightweight-charts）。time 为 YYYY-MM-DD。 */
-export function LineChart({ series, height, percent, markers }: Props) {
+export function LineChart({ series, height, percent, markers, logScale, shadeFrom }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -28,7 +32,7 @@ export function LineChart({ series, height, percent, markers }: Props) {
       autoSize: true,
       layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#787b86", fontSize: 11, attributionLogo: false },
       grid: { vertLines: { color: "#1a1e29" }, horzLines: { color: "#1d212b" } },
-      rightPriceScale: { borderColor: "#232733" },
+      rightPriceScale: { borderColor: "#232733", mode: logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal },
       timeScale: { borderColor: "#232733" },
       localization: percent ? { priceFormatter: (v: number) => `${(v * 100).toFixed(1)}%` } : undefined,
     });
@@ -49,9 +53,16 @@ export function LineChart({ series, height, percent, markers }: Props) {
         );
       }
     });
+    if (shadeFrom && series[0]) {
+      const band = chart.addSeries(HistogramSeries, {
+        priceScaleId: "shade", color: "rgba(41,98,255,0.10)", lastValueVisible: false, priceLineVisible: false,
+      });
+      chart.priceScale("shade").applyOptions({ scaleMargins: { top: 0, bottom: 0 }, visible: false });
+      band.setData(series[0].points.filter((p) => p.time >= shadeFrom).map((p) => ({ time: p.time, value: 1 })));
+    }
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [series, height, percent, markers]);
+  }, [series, height, percent, markers, logScale, shadeFrom]);
 
   return <div ref={ref} style={{ height }} />;
 }

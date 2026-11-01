@@ -1,9 +1,10 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
 import { ShellContext } from "../shell";
 import { currentLocation, mkMeta, mockApi, renderAt, renderPage } from "../test/utils";
 import { BacktestPage } from "./BacktestPage";
+import { ANALYSIS } from "./backtest/analysisFixture";
 
 const run = (id: number, status = "done") => ({
   id, strategy: "combo", status, start: "2016-10-28", end: "2026-10-29", params: {}, costs: null,
@@ -150,5 +151,47 @@ describe("BacktestPage", () => {
     renderPage(<BacktestPage />, "/backtest");
     expect(await screen.findByText("数据覆盖 82%")).toBeInTheDocument();
     expect(screen.getByText("历史财报日缺失")).toBeInTheDocument();
+  });
+
+  it("filters runs and shows failure reason", async () => {
+    const failed = { ...run(126, "failed"), metrics: {}, error: "回测数据尚未补齐：缺 QQQ" };
+    mockApi({ "/api/backtests": [200, [run(128), failed]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await screen.findByText("#128");
+    await user.click(screen.getByRole("button", { name: "失败" }));
+    expect(screen.queryByText("#128")).not.toBeInTheDocument();
+    expect(screen.getByText("回测数据尚未补齐：缺 QQQ")).toBeInTheDocument();
+  });
+
+  it("stat bar shows qqq comparison from analysis", async () => {
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS] });
+    renderPage(<BacktestPage />, "/backtest");
+    const bar = await screen.findByTestId("statbar");
+    expect(await within(bar).findByText("12.30%")).toBeInTheDocument();
+    expect(within(bar).getByText("QQQ 10.10%")).toBeInTheDocument();
+    expect(within(bar).getAllByText("—").length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText(/初始资金 \$100,000/)).toBeInTheDocument();
+  });
+
+  it("main chart stays mounted across tabs and pending tabs say so", async () => {
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    const chart = await screen.findByTestId("main-chart");
+    await user.click(screen.getByRole("button", { name: "收益分析" }));
+    await user.click(screen.getByRole("button", { name: "交易明细" }));
+    expect(screen.getByText(/B 批接入/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "稳健性" }));
+    expect(screen.getByText(/#68/)).toBeInTheDocument();
+    expect(screen.getByTestId("main-chart")).toBe(chart);
+  });
+
+  it("copy params opens drawer with strategy and dates", async () => {
+    const r = { ...run(128), strategy: "etf_momentum", params: { lookback: 99, top_k: 2 }, start: "2018-01-02", end: "2024-12-31" };
+    mockApi({ "/api/backtests": [200, [r]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, { ...ANALYSIS, strategy: "etf_momentum" }] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click(await screen.findByRole("button", { name: "复制参数新建" }));
+    const dlg = await screen.findByRole("dialog");
+    expect(within(dlg).getByDisplayValue("2018-01-02")).toBeInTheDocument();
+    expect(within(dlg).getByDisplayValue("99")).toBeInTheDocument();
   });
 });
