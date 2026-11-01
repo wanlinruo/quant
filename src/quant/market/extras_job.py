@@ -20,6 +20,7 @@ from quant.data.market_store import (
     MarketStore,
     calendar_path,
     ff_events_path,
+    load_gics,
     macro_path,
     news_path,
     snapshot_path,
@@ -90,6 +91,7 @@ def run_market_extras(
 
     # ---- 宏观 ----
     fred_obs: dict[str, list[Obs]] = {}
+    fred_down = False
     if fred is None:
         notes.append("未配置 FRED key，宏观项与经济数据实际值跳过")
     else:
@@ -98,8 +100,8 @@ def run_market_extras(
                 fred_obs[series] = fred.observations(series, today - timedelta(days=MACRO_LOOKBACK))
             except DataUnavailableError as e:
                 fail(f"FRED {series} ", e)
-                if isinstance(e, AUTH_ERRORS):
-                    break
+                fred_down = True  # 一次失败即停：FRED 无响应时每次请求要等 60 秒
+                break
     try:
         btc = btc_daily(fetch, now=now)
     except DataUnavailableError as e:
@@ -127,14 +129,18 @@ def run_market_extras(
         try:
             market = finnhub.market_news()
             top = sorted(movers, key=lambda m: -abs(m.get("change_pct") or 0))[:REASON_TOP]
-            names = {m["symbol"]: m.get("name") for m in movers}
+            gics = load_gics(data_dir)
+            names = {s: gics.name(s) for s in holdings} if gics else {}
+            names |= {m["symbol"]: m.get("name") for m in movers}
             symbols = list(dict.fromkeys([m["symbol"] for m in top] + sorted(holdings)))
             base = as_of or today
             since = datetime.combine(cal.previous_trading_day(base), time(16, 0), ET)
             company: dict[str, list[NewsRaw]] = {}
             for s in symbols:
                 try:
-                    company[s] = finnhub.company_news(s, cal.previous_trading_day(base), today)
+                    company[s] = finnhub.company_news(
+                        s, cal.previous_trading_day(base), today + timedelta(days=1)
+                    )
                 except DataUnavailableError as e:
                     if isinstance(e, AUTH_ERRORS):
                         raise
@@ -149,7 +155,7 @@ def run_market_extras(
                     if r is not None:
                         reasons[sym] = asdict(r)
             feed_since = datetime.combine(prev_day, time(0), ET)
-            feed = build_feed(market, company, holdings, feed_since)
+            feed = build_feed(market, company, holdings, feed_since, names=names)
             _write(news_path(data_dir), {"generated_at": stamp,
                                          "as_of": as_of.isoformat() if as_of else None,
                                          "items": [asdict(i) for i in feed],
@@ -167,7 +173,7 @@ def run_market_extras(
     except DataUnavailableError as e:
         fail("Forex Factory ", e)
     actuals: dict[str, str | None] = {}
-    if fred is not None and not any(isinstance(e, FredAuthError) for e in auth):
+    if fred is not None and not fred_down:
         cache: dict[str, tuple[list[Obs], datetime]] = {}
         start = datetime.combine(prev_day, time(0), ET)
         for ev in ff:
@@ -182,7 +188,7 @@ def run_market_extras(
                                      fred.last_updated(series))  # fmt: skip
             except DataUnavailableError as err:
                 fail(f"FRED {series} ", err)
-                continue
+                break
             obs, upd = cache[series]
             actuals[f"{ev['title']}|{t.date().isoformat()}"] = fred_actual(
                 ev["title"], t.date(), obs, upd

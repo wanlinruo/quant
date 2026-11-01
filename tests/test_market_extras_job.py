@@ -240,3 +240,23 @@ def test_reasons_include_holdings_outside_top(tmp_path: Path) -> None:
     write_snapshot(tmp_path, n=40)  # S35 不在前 30，但是持仓
     run(tmp_path, fred=None, finnhub=FakeFinnhub(), holdings={"S35"})
     assert "S35" in read(tmp_path, "news.json")["reasons"]
+
+
+def test_company_news_end_is_next_day(tmp_path: Path) -> None:
+    write_snapshot(tmp_path)
+    ends: list[date] = []
+
+    class F(FakeFinnhub):
+        def company_news(self, symbol: str, start: date, end: date) -> list[NewsRaw]:
+            ends.append(end)
+            return super().company_news(symbol, start, end)
+
+    run(tmp_path, fred=None, finnhub=F())
+    assert ends and set(ends) == {DAY + timedelta(days=1)}
+
+
+def test_fred_stops_after_network_failure(tmp_path: Path) -> None:
+    fred = FakeFred(fail={"VIXCLS"})
+    summary = run(tmp_path, fred=fred, finnhub=None)
+    assert fred.calls == ["VIXCLS"]  # 宏观与实际值都不再请求
+    assert summary.count("FRED") == 1

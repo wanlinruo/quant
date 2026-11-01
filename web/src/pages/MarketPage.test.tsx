@@ -247,4 +247,11 @@ describe("MarketPage", () => {
       .map((u) => u.searchParams.get("mode"));
     expect(modes).toEqual(["live", "live"]);
   });
+
+  it("sector panel notes price return and heatmap pending note", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [200, { ...OVERVIEW, heatmap: { "1D": [], "1W": [], "1M": [], YTD: [] } }] });
+    renderPage(<MarketPage />, "/");
+    expect(await screen.findByText(/价格涨跌，不含分红/)).toBeInTheDocument();
+    expect(screen.getByText("市值每天补 60 只，约 9 个交易日补齐")).toBeInTheDocument();
+  });
 });

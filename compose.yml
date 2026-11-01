@@ -82,8 +82,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # 执行中被停止时，重启后会先恢复券商订单状态再继续（engine/executor.py）
-    stop_grace_period: 2m
+    # 收到停止信号后等当前任务跑完再退出：stock_data 约 14 分钟，部署时不强杀（#79）。
+    # 执行中仍被停止时，重启后会先恢复券商订单状态再继续（engine/executor.py）
+    stop_grace_period: 20m
 
 volumes:
   pgdata:

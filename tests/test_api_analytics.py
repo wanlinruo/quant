@@ -12,6 +12,7 @@ import pytest
 from quant.api import analytics as a
 from quant.broker.sim import CostModel
 from quant.core.settings import CostSettings
+from quant.market.periods import period_returns
 
 
 def _series(values: list[float], start: date = date(2026, 10, 1)) -> pd.Series:
@@ -168,12 +169,12 @@ def test_estimate_commission_matches_cost_model(qty: int, price: float) -> None:
 def test_period_returns() -> None:
     days = pd.bdate_range("2025-01-02", "2026-10-30")
     close = pd.Series(np.linspace(100, 200, len(days)), index=days)
-    got = a.period_returns(close, date(2026, 10, 30))
+    got = period_returns(close, date(2026, 10, 30))
     assert set(got) == {"1D", "1W", "1M", "3M", "6M", "YTD", "1Y"}
     assert got["1D"] == pytest.approx(close.iloc[-1] / close.iloc[-2] - 1)
     ytd_base = close[close.index <= pd.Timestamp("2025-12-31")].iloc[-1]
     assert got["YTD"] == pytest.approx(close.iloc[-1] / ytd_base - 1)
-    short = a.period_returns(close.iloc[-3:], date(2026, 10, 30))
+    short = period_returns(close.iloc[-3:], date(2026, 10, 30))
     assert short["1Y"] is None and short["1D"] is not None
 
 

@@ -111,3 +111,22 @@ def test_eps_rounded() -> None:
             EarningsRaw("XOM", date(2026, 11, 12), "bmo", 1.95, None)]  # fmt: skip
     _, up = build_calendar([], {}, earn, [], {"AAPL", "MSFT", "XOM"}, set(), NOW, date(2026, 11, 5))
     assert [i.forecast for i in up] == ["2.02", "3.8", "1.95"]
+
+
+def test_fomc_not_duplicated_with_ff() -> None:
+    ff = [{"title": "Federal Funds Rate", "time": "2026-11-18T14:00:00-05:00", "impact": 3,
+           "forecast": "3.75%", "previous": "4.00%"},
+          {"title": "FOMC Statement", "time": "2026-11-18T14:00:00-05:00", "impact": 3,
+           "forecast": "", "previous": ""}]  # fmt: skip
+    _, up = build_calendar(ff, {}, [], [date(2026, 11, 18)], set(), set(), NOW, date(2026, 11, 5))
+    titles = [i.title for i in up]
+    assert titles.count("FOMC 利率决议") == 1 and "Federal Funds Rate" not in titles
+    assert "FOMC Statement" not in titles
+    fomc = up[titles.index("FOMC 利率决议")]
+    assert fomc.forecast == "3.75%" and fomc.previous == "4.00%" and fomc.impact == 3
+
+
+def test_dmh_is_intraday() -> None:
+    earn = [EarningsRaw("AAPL", date(2026, 11, 10), "dmh", 1.0, None)]
+    _, up = build_calendar([], {}, earn, [], {"AAPL"}, set(), NOW, date(2026, 11, 5))
+    assert up[0].session == "盘中" and up[0].date_only is False
