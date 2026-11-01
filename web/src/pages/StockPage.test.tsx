@@ -172,6 +172,12 @@ describe("StockPage", () => {
     const ext = { symbol: "NVDA", covered: true, in_sp500: false, sector_periods: {}, peers: [], metrics: [], news: [], news_updated: "2026-10-30T21:15:00-04:00" };
     render("NVDA", { ...ROUTES, "/api/stock/NVDA/extras": [200, ext] });
     expect(await screen.findByText("非标普 500 成分股，无同板块数据")).toBeInTheDocument();
-    expect(screen.getAllByText("近 7 天无新闻").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("近 7 天无相关新闻").length).toBeGreaterThan(0);
+  });
+
+  it("stock news shows update time", async () => {
+    render("NVDA", ROUTES);
+    const side = await screen.findByTestId("stock-news-side");
+    expect(within(side.closest("section")!).getByText("更新于 10-30 21:15 ET")).toBeInTheDocument();
   });
 });

@@ -11,7 +11,8 @@ import pytest
 from quant.data import market_store as ms
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.finnhub import FinnhubAuthError, NewsRaw
-from quant.market.stock_job import METRIC_KEYS, run_stock_data
+from quant.market.stock_job import run_stock_data
+from quant.market.stock_metrics import METRIC_KEYS
 
 TODAY = date(2026, 10, 30)
 NOW = datetime(2026, 10, 31, 1, 15, tzinfo=UTC)
@@ -103,7 +104,7 @@ def test_stock_data_resumes_oldest_first(tmp_path: Path) -> None:
     ]
     fh = FakeFinnhub()
     run(tmp_path, fh, today=TODAY + timedelta(days=1))
-    assert fh.news_calls[:3] == ["S3", "S4", "S5"]
+    assert fh.metric_calls[:3] == ["S3", "S4", "S5"]  # 上次没取到的先取
 
 
 def test_stock_data_auth_error_raises(tmp_path: Path) -> None:
@@ -135,3 +136,47 @@ def test_scheduler_includes_stock_data() -> None:
     plan = dict(day_plan(TODAY, ScheduleSettings(), get_calendar()))
     assert plan["stock_data"] == datetime(2026, 10, 30, 21, 15, tzinfo=ET)
     assert "stock_data" in JOBS and "stock_data" in JOB_FUNCS
+
+
+class NoisyFinnhub(FakeFinnhub):
+    def company_news(self, symbol: str, start: date, end: date) -> list[NewsRaw]:
+        self._tick()
+        self.news_calls.append(symbol)
+        noise = "5 Best High Growth Stocks Outside Big Tech"
+        good = "Co S0 beats estimates"
+        return [NewsRaw("x", T, noise, "Yahoo", "https://n/x", (symbol,)),
+                NewsRaw("y", T, good, "CNBC", "https://n/y", (symbol,))]  # fmt: skip
+
+
+def test_stock_news_only_relevant(tmp_path: Path) -> None:
+    gics(tmp_path, ["S0", "S1"])
+    run(tmp_path, NoisyFinnhub())
+    assert [n["headline"] for n in doc(tmp_path, "S0")["news"]] == ["Co S0 beats estimates"]
+    d1 = doc(tmp_path, "S1")
+    assert d1["news"] == [] and d1["news_updated"]
+
+
+def test_stock_metrics_before_news_and_stage_in_summary(tmp_path: Path) -> None:
+    gics(tmp_path, ["S0", "S1", "S2"])
+    fh = FakeFinnhub(fail_at=4)  # 3 次指标 + 1 次新闻后限流
+    summary = run(tmp_path, fh)
+    assert fh.metric_calls == ["S0", "S1", "S2"] and fh.news_calls == ["S0"]
+    assert "停在新闻阶段" in summary and doc(tmp_path, "S2")["metrics_updated"]
+
+
+def test_stale_stock_files_removed(tmp_path: Path) -> None:
+    gics(tmp_path, ["S0", "S1"])
+    run(tmp_path, FakeFinnhub(), holdings={"OLD"})
+    gics(tmp_path, ["S0"])
+    run(tmp_path, FakeFinnhub(), today=TODAY + timedelta(days=1))
+    left = sorted(p.stem for p in (tmp_path / "market" / "stocks").glob("*.json"))
+    assert left == ["S0"]
+
+
+def test_no_cleanup_without_gics(tmp_path: Path) -> None:
+    gics(tmp_path, ["S0", "S1"])
+    run(tmp_path, FakeFinnhub())
+    ms.gics_path(tmp_path).unlink()
+    run(tmp_path, FakeFinnhub(), holdings={"S0"}, today=TODAY + timedelta(days=1))
+    left = sorted(p.stem for p in (tmp_path / "market" / "stocks").glob("*.json"))
+    assert left == ["S0", "S1"]

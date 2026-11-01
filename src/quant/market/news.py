@@ -39,27 +39,55 @@ class Reason:
     url: str
 
 
+# 公司名第一个词太泛时用前两个词（如 Bank of America → “Bank of”不够，取 “American Express”）
+GENERIC_FIRST = {
+    "american", "bank", "general", "home", "dollar", "first", "united", "international",
+    "national", "global", "public", "federal", "southern", "western", "eastern", "northern",
+    "digital", "universal", "consolidated", "texas", "pacific", "royal", "the",
+}  # fmt: skip
+# 标题里常用的叫法与公司正式名不同的
+ALIASES: dict[str, tuple[str, ...]] = {
+    "GOOGL": ("Google", "Alphabet"), "GOOG": ("Google", "Alphabet"), "DIS": ("Disney",),
+    "MMM": ("3M",), "META": ("Meta", "Facebook"), "BRK.B": ("Berkshire",),
+    "KO": ("Coca-Cola", "Coke"), "PG": ("Procter",), "JNJ": ("Johnson & Johnson", "J&J"),
+}  # fmt: skip
+
+
+def _plain(text: str) -> str:
+    """去掉撇号与连字符，让 McDonald's / McDonalds、Coca-Cola / CocaCola 等价。"""
+    return re.sub(r"[\'’\-]", "", text)
+
+
 def short_name(name: str | None) -> str | None:
-    """公司简称：去掉 Inc./Corp. 等后缀后的第一个词，至少 3 个字母。"""
+    """公司简称：去掉 Inc./Corp. 等后缀后的第一个词（太泛时取前两个词），至少 3 个字符。"""
     if not name:
         return None
-    words = _SUFFIX_RE.sub(" ", name).split()
+    words = _plain(re.sub(r"\(.*?\)", " ", _SUFFIX_RE.sub(" ", name))).split()
     if not words:
         return None
-    first = re.sub(r"[^A-Za-z]", "", words[0])
-    return first if len(first) >= 3 else None
+    key = " ".join(words[:2]) if words[0].lower() in GENERIC_FIRST and len(words) >= 2 else words[0]
+    key = re.sub(r"[^A-Za-z0-9& ]", "", key).strip()
+    return key if len(key) >= 3 and re.search(r"[A-Za-z]{2}", key) else None
 
 
-def _mentions(headline: str, symbol: str, name: str | None) -> bool:
-    keys = [symbol, *([s] if (s := short_name(name)) else [])]
-    return any(re.search(rf"(?<![A-Za-z0-9]){re.escape(k)}(?![A-Za-z0-9])", headline, re.I)
+def mentions(headline: str, symbol: str, name: str | None) -> bool:
+    """标题是否提到这只股票：代码（区分大小写；1 位代码须写 (X)、$X、:X）、公司简称或别名。"""
+    plain = _plain(headline)
+    if len(symbol) == 1:
+        sym_hit = re.search(rf"(?:\(|\$|:\s?){re.escape(symbol)}(?![A-Za-z0-9])", headline)
+    else:
+        sym_hit = re.search(rf"(?<![A-Za-z0-9.]){re.escape(symbol)}(?![A-Za-z0-9])", headline)
+    if sym_hit:
+        return True
+    keys = [k for k in (short_name(name), *ALIASES.get(symbol, ())) if k]
+    return any(re.search(rf"(?<![A-Za-z0-9]){re.escape(_plain(k))}(?![A-Za-z0-9])", plain, re.I)
                for k in keys)  # fmt: skip
 
 
 def pick_reason(
     symbol: str, name: str | None, items: Iterable[NewsRaw], since: datetime
 ) -> Reason | None:
-    hits = [x for x in items if x.time >= since and _mentions(x.headline, symbol, name)]
+    hits = [x for x in items if x.time >= since and mentions(x.headline, symbol, name)]
     if not hits:
         return None
     x = max(hits, key=lambda x: x.time)
@@ -72,10 +100,15 @@ def build_feed(
     holdings: set[str],
     since: datetime,
     limit: int = 80,
+    names: Mapping[str, str | None] | None = None,
 ) -> list[NewsItem]:
+    """持仓公司新闻只收标题提到代码或公司简称的（Finnhub 公司新闻里有不少泛泛而谈的文章）。"""
+    names = names or {}
     cands: list[tuple[NewsRaw, list[str], str]] = [(x, [], "macro") for x in market]
     for sym in sorted(holdings & set(company)):
-        recent = sorted((x for x in company[sym] if x.time >= since), key=lambda x: x.time,
+        recent = sorted((x for x in company[sym]
+                         if x.time >= since and mentions(x.headline, sym, names.get(sym))),
+                        key=lambda x: x.time,
                         reverse=True)[:PER_SYMBOL]  # fmt: skip
         cands += [(x, [sym], "earnings" if EARNINGS_RE.search(x.headline) else "company")
                   for x in recent]  # fmt: skip

@@ -247,3 +247,60 @@ def test_holdings_always_in_movers(tmp_path: Path) -> None:
     movers = {m["symbol"]: m for m in snapshot(tmp_path)["movers"]}
     assert "S7" not in syms and {"S7", "QQQ"} <= set(movers)
     assert movers["QQQ"]["name"] == "纳指 100" and movers["S7"]["held"] is True
+
+
+# ---- 后续修复（#79）----
+
+
+def test_past_date_rerun_still_backfills(tmp_path: Path) -> None:
+    run(tmp_path, FakeClient())
+    have = len(ms.MarketStore(tmp_path).days())
+    c = FakeClient()
+    run(tmp_path, c, today=CAL.previous_trading_day(TODAY))
+    assert len(ms.MarketStore(tmp_path).days()) > have and c.days
+
+
+def test_today_low_coverage_refetched(tmp_path: Path) -> None:
+    store = ms.MarketStore(tmp_path)
+    half = frame(TODAY)
+    half = half[half["symbol"].isin([f"S{i}" for i in range(225)])]
+    store.write_day(TODAY, half, keep=set(half["symbol"]))
+    c = FakeClient()
+    run(tmp_path, c)
+    assert c.days[0] == TODAY
+    c2 = FakeClient()
+    run(tmp_path, c2)
+    assert TODAY not in c2.days  # 已补全，不再重取
+
+
+def test_empty_day_not_requested_again(tmp_path: Path) -> None:
+    d = CAL.previous_trading_day(TODAY)
+    run(tmp_path, FakeClient(empty={d}))
+    c = FakeClient()
+    run(tmp_path, c)
+    assert d not in c.days
+    run(tmp_path, FakeClient(empty={TODAY}), today=TODAY)
+    assert TODAY not in ms.MarketStore(tmp_path).empty_days()
+
+
+def test_past_date_rerun_checks_splits_up_to_real_day_first(tmp_path: Path) -> None:
+    """补跑过去日期前，先把拆股核对到真实的最近交易日，避免补回来的（已调整的）数据再被换算。"""
+    run(tmp_path, SplitClient())
+    nxt = CAL.next_trading_day(TODAY)
+    order: list[str] = []
+
+    class C(SplitClient):
+        def splits(self, day: date) -> list[Split]:
+            order.append(f"split {day}")
+            return super().splits(day)
+
+        def grouped_daily(self, day: date) -> pd.DataFrame:
+            order.append(f"day {day}")
+            return super().grouped_daily(day)
+
+    run_market_data(C(), tmp_path, CAL.previous_trading_day(TODAY), CAL, SETTINGS, holdings=set(),
+                    fetch_text=lambda url: GICS_CSV, now_day=nxt)  # fmt: skip
+    assert f"split {nxt}" in order
+    first_day = next(i for i, x in enumerate(order) if x.startswith("day "))
+    assert order.index(f"split {nxt}") < first_day
+    assert ms.MarketStore(tmp_path).splits_checked() == nxt

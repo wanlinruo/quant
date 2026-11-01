@@ -70,7 +70,7 @@ def test_news_url_must_be_http() -> None:
 
 
 def test_metrics_selected_keys() -> None:
-    from quant.market.stock_job import METRIC_KEYS
+    from quant.market.stock_metrics import METRIC_KEYS
 
     body = {"metric": {"peTTM": 39.01, "grossMarginTTM": None, "roeTTM": "x", "other": 1},
             "series": {}}  # fmt: skip

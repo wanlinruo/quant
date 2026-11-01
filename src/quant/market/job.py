@@ -27,6 +27,7 @@ from quant.data.quota import atomic_write_text
 from quant.market.board import build_snapshot
 
 log = logging.getLogger("quant.market_data")
+MIN_COVERAGE = 0.95  # 当日成分覆盖率低于此值时重取一次
 SPLIT_DAYS_PER_RUN = 10  # 停跑多日后分几次追上，避免一次占满额度
 
 
@@ -44,8 +45,12 @@ def run_market_data(
     settings: BoardSettings,
     holdings: set[str],
     fetch_text: Callable[[str], str] = http_get_text,
+    now_day: date | None = None,
 ) -> str:
+    """now_day：按真实时间的最近一个已收盘交易日（补跑过去日期时晚于 today）。"""
     gics = sync_gics(data_dir, today, fetch_text)
+    # 取到的数据都已按“取数当时”的拆股调整，所以拆股要先核对到真实的最近交易日，再取数
+    upto = max(today, now_day or today)
     keep = set(gics.members) | set(ETF_SET) | holdings
     store = MarketStore(data_dir)
     notes: list[str] = []
@@ -64,15 +69,17 @@ def run_market_data(
             notes.append(f"限流或故障，停止本轮（{type(e).__name__}）")
             return False
         if df.empty:
+            if day != today:
+                store.mark_empty(day)  # 该日没有数据（如临时停市），以后补历史跳过
             return False
         store.write_day(day, df, keep)
         return True
 
     def check_splits() -> bool:
-        """核对到 today 返回 True；中途限流 / 故障时置 stopped，进度保留到已核对的那天。"""
+        """核对到 upto 返回 True；中途限流 / 故障时置 stopped，进度保留到已核对的那天。"""
         nonlocal stopped
         last = store.splits_checked()
-        days = [today] if last is None else [d for d in cal.trading_days(last, today) if d > last]
+        days = [upto] if last is None else [d for d in cal.trading_days(last, upto) if d > last]
         for d in days[:SPLIT_DAYS_PER_RUN]:
             try:
                 found = client.splits(d)
@@ -87,20 +94,24 @@ def run_market_data(
                     ratio = f"{sp.split_from:g}:{sp.split_to:g}"
                     notes.append(f"{sp.symbol} {sp.execution_date} 拆股 {ratio} 已换算")
             store.set_splits_checked(d)
-        return store.splits_checked() == today
+        return (store.splits_checked() or date.min) >= upto
 
-    if not store.has_day(today):
+    # 拆股：核对上次之后每个交易日执行的拆股，换算之前已存的日线。没核对到 upto 之前，
+    # 不取过去日期的数据（补历史、补跑日的重取），否则这些数据之后会被再换算一次。
+    splits_done = check_splits()
+    members = gics.members
+    low = store.has_day(today) and store.coverage(today, members) < MIN_COVERAGE
+    if (not store.has_day(today) or low) and not stopped and (today == upto or splits_done):
         fetch_day(today)
-        stale = not store.has_day(today)
-        if stale:
-            notes.append(f"{today} 当日数据未取到，沿用上一交易日")
-    # 拆股：核对上次之后每个交易日执行的拆股，换算之前已存的日线。
-    # 补历史取到的数据已按取数当时的拆股调整，所以核对没跟上之前不补历史，避免重复换算。
-    splits_done = check_splits() if not stopped else False
+    stale = not store.has_day(today)
+    if stale:
+        notes.append(f"{today} 当日数据未取到，沿用上一交易日")
     # 补历史：最近 history_days 个交易日中缺的，由近及远
     start = today - timedelta(days=int(settings.history_days * 1.6) + 10)
     window = cal.trading_days(start, today)[-settings.history_days :]
-    missing = [d for d in reversed(window) if d != today and not store.has_day(d)]
+    empty = store.empty_days()
+    missing = [d for d in reversed(window)
+               if d != today and not store.has_day(d) and d not in empty]  # fmt: skip
     fetched = 0
     for d in missing[: settings.history_per_run]:
         if stopped or not splits_done:

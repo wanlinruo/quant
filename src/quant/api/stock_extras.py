@@ -17,13 +17,14 @@ from quant.api.schemas import MetricOut, NewsItemOut, PeerOut, StockExtras
 from quant.data.market_store import (
     ETF_SET,
     SECTOR_ETF,
+    SECTOR_NAME,
     STOCK_SYMBOL_RE,
     MarketStore,
     load_gics,
     snapshot_path,
     stock_path,
 )
-from quant.market.stock_job import METRICS
+from quant.market.stock_metrics import METRICS
 
 log = logging.getLogger("quant.api.stock_extras")
 PEERS = 8
@@ -68,8 +69,6 @@ def stock_extras(data_dir: Path, symbol: str) -> StockExtras:
     empty = StockExtras(symbol=sym, covered=False)
     if not STOCK_SYMBOL_RE.match(sym) or sym in ETF_SET:
         return empty
-    from quant.market.board import SECTOR_NAME
-
     gics = load_gics(data_dir)
     doc = _load(stock_path(data_dir, sym))
     in_gics = gics is not None and sym in gics.rows

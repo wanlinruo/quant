@@ -34,7 +34,10 @@ ACTUALS: dict[str, tuple[str, str, str]] = {
     "Core PCE Price Index m/m": ("PCEPILFE", "pct", "{:.1f}%"),
     "Retail Sales m/m": ("RSAFS", "pct", "{:.1f}%"),
 }
-SESSION = {"bmo": ("盘前", time(8, 0)), "amc": ("盘后", time(16, 5))}
+SESSION = {"bmo": ("盘前", time(8, 0)), "dmh": ("盘中", time(12, 0)), "amc": ("盘后", time(16, 5))}
+# FF 中与 FOMC 决议同一时刻的事件：并入自生成的“FOMC 利率决议”一行，不重复显示
+FOMC_FF_TITLES = {"Federal Funds Rate", "FOMC Statement", "FOMC Press Conference",
+                  "FOMC Economic Projections"}  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -146,18 +149,28 @@ def build_calendar(
     """返回（已公布，按时间降序；接下来，按时间升序）。"""
     start = datetime.combine(prev_day, time(0), ET)
     items: list[tuple[datetime, CalItem]] = []
+    fomc_days = set(fomc)
+    rate: dict[date, Mapping[str, Any]] = {}  # FF 的 Federal Funds Rate：预期 / 前值
     for e in ff:
         t = datetime.fromisoformat(str(e["time"])).astimezone(ET)
+        if e["title"] in FOMC_FF_TITLES:
+            if e["title"] == "Federal Funds Rate":
+                rate[t.date()] = e
+                fomc_days.add(t.date())
+            continue
         key = f"{e['title']}|{t.date().isoformat()}"
         items.append((t, CalItem(t.isoformat(), False, "econ", str(e["title"]), int(e["impact"]),
                                  actuals.get(key), e.get("forecast") or None,
                                  e.get("previous") or None, [], False, None)))  # fmt: skip
     items += _earnings_items(earnings, holdings, big)
     fomc_items = []
-    for d in fomc:
+    for d in sorted(fomc_days):
         t = datetime.combine(d, time(14, 0), ET)
-        fomc_items.append((t, CalItem(t.isoformat(), False, "fomc", "FOMC 利率决议", 3, None,
-                                      None, None, [], False, None)))  # fmt: skip
+        r = rate.get(d, {})
+        fomc_items.append((t, CalItem(t.isoformat(), False, "fomc", "FOMC 利率决议", 3,
+                                      actuals.get(f"Federal Funds Rate|{d.isoformat()}"),
+                                      r.get("forecast") or None, r.get("previous") or None,
+                                      [], False, None)))  # fmt: skip
     released = [(t, i) for t, i in [*items, *fomc_items] if start <= t <= now]
     upcoming = [(t, i) for t, i in items if now < t <= now + timedelta(days=UPCOMING_DAYS)]
     upcoming += [(t, i) for t, i in fomc_items if now < t <= now + timedelta(days=FOMC_DAYS)]

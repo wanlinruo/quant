@@ -26,6 +26,7 @@ jobs:
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
        && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
+    timeout-minutes: 45  # 含等待 scheduler 跑完当前任务（最多 20 分钟）
     env:
       SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
@@ -68,7 +69,8 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE: ghcr.io/${{ github.repository }}:${{ env.SHA }}
         run: |
-          SSH="ssh -i ~/.ssh/deploy_key -o BatchMode=yes"
+          # 保活：部署可能要等 scheduler 跑完当前任务（最多 20 分钟），期间没有输出（#79）
+          SSH="ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10"
           scp -i ~/.ssh/deploy_key -o BatchMode=yes compose.yml compose.server.yml \
             deploy/remote_deploy.sh deploy/backup.sh deploy/Caddyfile \
             deploy/set_dashboard_password.sh "$USER_@$HOST:/opt/quant/"
