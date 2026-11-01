@@ -51,8 +51,9 @@ class ScheduleSettings(_Section):
     daily_signal: str = "17:00"
     daily_execute: str = "09:50"
     market_data: str = "20:30"  # 首页市场看板（#69）：Massive 收盘后数据
+    market_extras: str = "21:00"  # 首页宏观、新闻、财经日历（#69 第 2 批），在 market_data 之后
 
-    @field_validator("daily_data", "daily_signal", "daily_execute", "market_data")
+    @field_validator("daily_data", "daily_signal", "daily_execute", "market_data", "market_extras")
     @classmethod
     def _hhmm(cls, v: str) -> str:
         hh, sep, mm = v.partition(":")
@@ -166,6 +167,8 @@ class Settings(BaseSettings):
     notify_webhook_url: SecretStr | None = None
     tiingo_api_key: SecretStr | None = None
     massive_api_key: SecretStr | None = None  # 首页市场看板（#69），scheduler 使用
+    fred_api_key: SecretStr | None = None  # 首页宏观项与经济数据实际值（#69 第 2 批）
+    finnhub_api_key: SecretStr | None = None  # 首页新闻与财报日历（#69 第 2 批）
     # SEC 要求请求声明联系方式（名称与邮箱）；只发给 SEC，不写日志
     edgar_user_agent: SecretStr | None = None
 
