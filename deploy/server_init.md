@@ -69,6 +69,15 @@ cd /opt/quant && read -rsp "Tiingo key: " k && printf 'TIINGO_API_KEY=%s\n' "$k"
 cd /opt/quant && docker compose exec -T scheduler quant job market_data --date <最近交易日>
 ```
 
+首页宏观、新闻、财经日历（#69 第 2 批）：scheduler 每个交易日 21:00 ET 运行 `market_extras`
+（FRED 宏观序列与经济数据实际值、Coinbase 比特币、Finnhub 新闻与财报日历、Forex Factory 本周经济日历 →
+`/data/parquet/market/{macro,news,calendar}.json`）。需要 `.env` 中的 `FRED_API_KEY`、`FINNHUB_API_KEY`
+（未配置时对应区块跳过）；约 1 分钟。手动运行：
+
+```
+cd /opt/quant && docker compose exec -T scheduler quant job market_extras --date <最近交易日>
+```
+
 回测数据补齐进度（只读）：
 
 ```

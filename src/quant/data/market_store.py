@@ -61,6 +61,23 @@ def snapshot_path(data_dir: Path) -> Path:
     return market_dir(data_dir) / "snapshot.json"
 
 
+# market_extras 任务生成、面板只读的文件（#69 第 2 批）
+def macro_path(data_dir: Path) -> Path:
+    return market_dir(data_dir) / "macro.json"
+
+
+def news_path(data_dir: Path) -> Path:
+    return market_dir(data_dir) / "news.json"
+
+
+def calendar_path(data_dir: Path) -> Path:
+    return market_dir(data_dir) / "calendar.json"
+
+
+def ff_events_path(data_dir: Path) -> Path:
+    return market_dir(data_dir) / "ff_events.json"
+
+
 def gics_path(data_dir: Path) -> Path:
     return market_dir(data_dir) / "sp500_gics.csv"
 

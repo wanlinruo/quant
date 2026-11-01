@@ -73,6 +73,8 @@ services:
       QUANT_DATABASE_URL: postgresql+psycopg://quant:${POSTGRES_PASSWORD}@postgres:5432/quant
       QUANT_NOTIFY_WEBHOOK_URL: ${QUANT_NOTIFY_WEBHOOK_URL:-}
       QUANT_MASSIVE_API_KEY: ${MASSIVE_API_KEY:-}  # 首页市场看板 market_data 任务（#69）
+      QUANT_FRED_API_KEY: ${FRED_API_KEY:-}  # 首页宏观与经济数据实际值 market_extras（#69）
+      QUANT_FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}  # 首页新闻与财报日历 market_extras（#69）
       TIGER_PROPS_PATH: /run/tiger/
     volumes:
       - parquet:/data/parquet
