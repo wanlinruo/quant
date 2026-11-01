@@ -45,7 +45,7 @@ const FILTERS = [
 type FilterKey = (typeof FILTERS)[number]["key"];
 const INDICES = ["SPY", "QQQ", "DIA", "IWM"] as const;
 type IndexKey = (typeof INDICES)[number];
-const HEAT_H = 380;
+const HEAT_H = 470;
 const SIDE_H = 380;
 const ROW_H = 360;
 
@@ -139,7 +139,7 @@ export function MarketPage() {
                 <Heatmap m={m} link={link} />
               </Cell>
               <Cell span={4}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 12, height: HEAT_H + 50 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <BreadthPanel b={m?.breadth ?? null} />
                   <Panel title="风格与因子" right={<span className="muted sm">1日 / 1月</span>} grow>
                     {m && m.styles.length ? (
@@ -232,7 +232,7 @@ function Heatmap({ m, link }: { m: Full | null; link: (s: string) => { pathname:
     <Panel
       title="标普 500 热力图"
       right={<Tabs tabs={PERIODS.map((p) => ({ key: p.key, label: p.label }))} value={period} onChange={setPeriod} />}
-      height={HEAT_H + 50}
+      grow
     >
       <div data-testid="heatmap">
         {groups.length ? <Treemap groups={groups} width={800} height={HEAT_H - 20} /> : <EmptyState kind="pending" note="按板块分组，面积为市值；市值首次补齐约需一周" />}

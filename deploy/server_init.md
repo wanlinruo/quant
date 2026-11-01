@@ -62,6 +62,13 @@ FINNHUB_API_KEY=<Finnhub 免费档 key>
 cd /opt/quant && read -rsp "Tiingo key: " k && printf 'TIINGO_API_KEY=%s\n' "$k" >> .env; unset k
 ```
 
+首页市场看板（#69）：scheduler 每个交易日 20:30 ET 运行 `market_data`（Massive 全市场日线 →
+`/data/parquet/market/snapshot.json`）。首次部署后可手动跑一次，约 25 分钟（Massive 免费档每分钟 5 次）：
+
+```
+cd /opt/quant && docker compose exec -T scheduler quant job market_data --date <最近交易日>
+```
+
 回测数据补齐进度（只读）：
 
 ```
