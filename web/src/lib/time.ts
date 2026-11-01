@@ -31,3 +31,8 @@ export function formatDateTimeET(iso: string | null | undefined): string {
   const et = parts(new Date(iso), "America/New_York");
   return `${et.date} ${et.time}`;
 }
+
+/** ISO 时间对应的美东日期 YYYY-MM-DD。 */
+export function toETDate(iso: string): string {
+  return parts(new Date(iso), "America/New_York").date;
+}

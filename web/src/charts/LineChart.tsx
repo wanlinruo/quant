@@ -1,4 +1,4 @@
-import { ColorType, createChart, LineSeries, LineStyle } from "lightweight-charts";
+import { ColorType, createChart, createSeriesMarkers, LineSeries, LineStyle } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 
 export type LineSeriesInput = {
@@ -8,10 +8,16 @@ export type LineSeriesInput = {
   points: { time: string; value: number }[];
 };
 
-type Props = { series: LineSeriesInput[]; height: number; percent?: boolean };
+type Props = {
+  series: LineSeriesInput[];
+  height: number;
+  percent?: boolean;
+  /** 在第一条线上标出的日期（如调仓日），YYYY-MM-DD */
+  markers?: string[];
+};
 
 /** 折线图（lightweight-charts）。time 为 YYYY-MM-DD。 */
-export function LineChart({ series, height, percent }: Props) {
+export function LineChart({ series, height, percent, markers }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -26,7 +32,7 @@ export function LineChart({ series, height, percent }: Props) {
       timeScale: { borderColor: "#232733" },
       localization: percent ? { priceFormatter: (v: number) => `${(v * 100).toFixed(1)}%` } : undefined,
     });
-    for (const s of series) {
+    series.forEach((s, i) => {
       const line = chart.addSeries(LineSeries, {
         color: s.color,
         lineWidth: 2,
@@ -35,10 +41,17 @@ export function LineChart({ series, height, percent }: Props) {
         priceLineVisible: false,
       });
       line.setData(s.points);
-    }
+      if (i === 0 && markers?.length) {
+        const have = new Set(s.points.map((p) => p.time));
+        createSeriesMarkers(
+          line,
+          markers.filter((t) => have.has(t)).map((t) => ({ time: t, position: "aboveBar", color: "#f5a623", shape: "arrowDown", text: "调仓" })),
+        );
+      }
+    });
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [series, height, percent]);
+  }, [series, height, percent, markers]);
 
   return <div ref={ref} style={{ height }} />;
 }

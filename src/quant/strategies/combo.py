@@ -12,17 +12,18 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields, replace
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any, ClassVar
 
 import pandas as pd
 
 from quant.core.calendar import TradingCalendar, get_calendar
-from quant.strategies.base import Context, Strategy
-from quant.strategies.momentum_select import MomentumParams, MomentumSelect
+from quant.strategies.base import Context, Strategy, validate_weights
+from quant.strategies.momentum_select import MomentumParams, MomentumSelect, rebalance_day
 from quant.strategies.swing_pullback import SwingPullback
 
 TRADING_DAYS = 252
+RANK_KEEP = 50  # 信号明细中保存的动量排名个数
 V2_SWING: Mapping[str, Any] = {
     "trend_ma": 120,
     "slope_days": 10,
@@ -68,13 +69,18 @@ class ComboParams:
         return dict(self.momentum)
 
 
-def vol_factor(close: pd.Series, window: int, threshold: float, scale: float) -> float:
-    """最近 window 个日收益率的年化波动率 > threshold 时为 scale，否则为 1；数据不足时为 1。"""
+def annual_vol(close: pd.Series, window: int) -> float | None:
+    """最近 window 个日收益率的年化波动率；数据不足时为 None。"""
     rets = close.pct_change(fill_method=None).iloc[-window:]
     if rets.count() < window:
-        return 1.0
-    vol = float(rets.std(ddof=1)) * math.sqrt(TRADING_DAYS)
-    return scale if vol > threshold else 1.0
+        return None
+    return float(rets.std(ddof=1)) * math.sqrt(TRADING_DAYS)
+
+
+def vol_factor(close: pd.Series, window: int, threshold: float, scale: float) -> float:
+    """最近 window 个日收益率的年化波动率 > threshold 时为 scale，否则为 1；数据不足时为 1。"""
+    vol = annual_vol(close, window)
+    return scale if vol is not None and vol > threshold else 1.0
 
 
 def merge_weights(
@@ -91,6 +97,20 @@ def merge_weights(
     return {s: w * factor for s, w in out.items()}
 
 
+@dataclass(frozen=True)
+class ComboBreakdown:
+    """一次信号计算的分解：两仓各自的子仓内权重、择时系数与合成后的目标权重。"""
+
+    momentum: dict[str, float]
+    swing: dict[str, float]
+    factor: float
+    weights: dict[str, float]
+    rebalance_day: date
+    ranking: list[str]
+    universe_size: int
+    vol: float | None
+
+
 class Combo(Strategy):
     name = "combo"
     # 择时把动量仓 10% → 5%、V2 仓 15% → 7.5%：阈值必须 < 0.05 才会执行减仓；
@@ -101,6 +121,7 @@ class Combo(Strategy):
 
     def __init__(self, calendar: TradingCalendar | None = None) -> None:
         cal = calendar or get_calendar()
+        self._cal = cal
         self._momentum = MomentumSelect(cal)
         self._swing = SwingPullback(cal)
 
@@ -124,26 +145,68 @@ class Combo(Strategy):
         )
 
     def target_weights(self, ctx: Context) -> dict[str, float]:
+        return self.breakdown(ctx).weights
+
+    def breakdown(self, ctx: Context) -> ComboBreakdown:
+        """唯一的计算路径：target_weights 与信号明细都由这里得出。"""
         p = ComboParams.from_mapping(ctx.params)
-        MomentumParams.from_mapping(p.momentum_params())  # 提前校验参数
-        m = (
-            self._momentum.target_weights(replace(ctx, params=p.momentum_params()))
-            if p.momentum_weight > 0
-            else {}
-        )
+        mp = MomentumParams.from_mapping(p.momentum_params())  # 提前校验参数
+        mctx = replace(ctx, params=p.momentum_params())
+        m = self._momentum.target_weights(mctx) if p.momentum_weight > 0 else {}
         s = (
             self._swing.target_weights(replace(ctx, params=p.swing_params()))
             if p.swing_weight > 0
             else {}
         )
-        factor = self.timing_factor(ctx, p)
-        return merge_weights(m, s, p.momentum_weight, p.swing_weight, factor)
+        vol = self._timing_vol(ctx, p)
+        factor = p.vol_scale if vol is not None and vol > p.vol_threshold else 1.0
+        me = rebalance_day(self._cal, ctx.as_of)
+        ranking: list[str] = []
+        size = 0
+        if p.momentum_weight > 0 and ctx.universe is not None:
+            ranking = self._momentum.ranking(mctx, me, mp)  # 已缓存，不重复计算
+            size = len(ctx.universe.members(me))
+        return ComboBreakdown(
+            momentum=m, swing=s, factor=factor,
+            weights=merge_weights(m, s, p.momentum_weight, p.swing_weight, factor),
+            rebalance_day=me, ranking=list(ranking), universe_size=size, vol=vol,
+        )  # fmt: skip
+
+    def run_explained(self, ctx: Context) -> tuple[dict[str, float], dict[str, Any] | None]:
+        p = ComboParams.from_mapping(ctx.params)
+        b = self.breakdown(ctx)
+        detail: dict[str, Any] = {
+            "sleeves": {"momentum": b.momentum, "swing": b.swing},
+            "sleeve_weights": {"momentum": p.momentum_weight, "swing": p.swing_weight},
+            "timing_factor": b.factor,
+            "vol_symbol": p.vol_symbol,
+            "vol_20d": b.vol,
+            "vol_threshold": p.vol_threshold,
+            "momentum_rank": b.ranking[:RANK_KEEP],
+            # 信号日当天的排名：调仓日排名整月不变，当日排名才能看出“下次调仓会被换掉”
+            "momentum_rank_asof": self._rank_asof(ctx, p)[:RANK_KEEP],
+            "universe_size": b.universe_size,
+            "rebalance_day": b.rebalance_day.isoformat(),
+            "top_n": MomentumParams.from_mapping(p.momentum_params()).top_n,
+        }
+        return validate_weights(b.weights), detail
+
+    def _rank_asof(self, ctx: Context, p: ComboParams) -> list[str]:
+        """只用于信号明细（回测不调用）：以信号日为排序日的动量排名。"""
+        if p.momentum_weight <= 0 or ctx.universe is None:
+            return []
+        mp = MomentumParams.from_mapping(p.momentum_params())
+        return self._momentum.ranking(replace(ctx, params=p.momentum_params()), ctx.as_of, mp)
 
     def timing_factor(self, ctx: Context, p: ComboParams) -> float:
         """信号日的择时系数（1 或 vol_scale）。"""
+        vol = self._timing_vol(ctx, p)
+        return p.vol_scale if vol is not None and vol > p.vol_threshold else 1.0
+
+    def _timing_vol(self, ctx: Context, p: ComboParams) -> float | None:
         start = ctx.as_of - timedelta(days=int((p.vol_window + 5) * 1.6) + 10)
         close = ctx.field([p.vol_symbol], "close", start)[p.vol_symbol]
-        return vol_factor(close, p.vol_window, p.vol_threshold, p.vol_scale)
+        return annual_vol(close, p.vol_window)
 
     @property
     def momentum(self) -> MomentumSelect:

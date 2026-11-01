@@ -6,6 +6,9 @@
    相差 < min_weight_diff 时跳过；
    但清仓（目标为 0）总是执行，避免残留碎仓；新开仓（当前为 0）不受 min_weight_diff 限制
 4. 买单受可用资金约束：现有现金 + 预计卖出所得，按 价格 × (1 + price_margin) 估算成本
+
+面板的“下次调仓预览”在 quant.api.analytics.preview_orders 复刻了 1–3 条（面板不得导入本模块），
+修改上述规则时两边同步。
 """
 
 from __future__ import annotations

@@ -142,7 +142,7 @@ def test_preview_shows_strategy_own_ranking_and_factor(
     from quant.strategies.momentum_select import MomentumSelect
 
     monkeypatch.setattr(MomentumSelect, "ranking", lambda self, ctx, me, p: ["ZZZ", "YYY"])
-    monkeypatch.setattr(Combo, "timing_factor", lambda self, ctx, p: 0.5)
+    monkeypatch.setattr(Combo, "_timing_vol", lambda self, ctx, p: 0.99)  # 高于阈值 → 0.5
     out = _run_preview(tmp_path)
     assert "前 10：ZZZ, YYY" in out and "择时系数：0.5" in out
 

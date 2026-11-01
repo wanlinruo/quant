@@ -23,7 +23,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -49,7 +49,7 @@ from quant.data.universe_bars import (
     universe_store,
 )
 from quant.data.validate import Report, compare_sources
-from quant.db.models import Fill, Signal
+from quant.db.models import Fill, PositionSnapshot, Signal
 from quant.engine.backtester import store_field_loader
 from quant.engine.executor import ET, ExecutionError, Executor
 from quant.engine.reconcile import reconcile, record_snapshot, trading_enabled
@@ -271,19 +271,53 @@ def sync_strategy_extras(ctx: JobContext, d: date) -> tuple[list[str], list[str]
             for sym, why in list(r.excluded.items())[:20]:
                 warnings.append(f"候选池排除 {sym}：{why}")
     symbols = strategy.earnings_symbols(params)
-    if symbols:
-        summary_e, warnings_e = _sync_earnings(ctx, d, symbols)
+    watch = symbols
+    if ctx.engine is not None:  # quant preview 不使用数据库
+        with Session(ctx.engine) as s:
+            watch = earnings_watchlist(s, ctx.mode, symbols)
+    if watch:
+        summary_e, warnings_e = _sync_earnings(ctx, d, watch, symbols)
         summary += summary_e
         warnings += warnings_e
     return summary, warnings
 
 
-def _sync_earnings(ctx: JobContext, d: date, symbols: list[str]) -> tuple[list[str], list[str]]:
-    """实盘财报日。接口失败但本地有文件时沿用并提示；近期没有财报日的股票要提示（否则会持有过财报）。"""
+def earnings_watchlist(session: Session, mode: str, strategy_symbols: Sequence[str]) -> list[str]:
+    """需要同步财报日的股票：策略声明的 ∪ 该账户最新持仓 ∪ 该账户最新信号的目标（设计 7.4）。"""
+    out = set(strategy_symbols)
+    last_snap = session.scalar(
+        select(func.max(PositionSnapshot.snapshot_date)).where(PositionSnapshot.mode == mode)
+    )
+    if last_snap is not None:
+        out.update(session.scalars(
+            select(PositionSnapshot.symbol).where(
+                PositionSnapshot.mode == mode, PositionSnapshot.snapshot_date == last_snap
+            )
+        ))  # fmt: skip
+    target = session.scalar(
+        select(Signal.target_weights)
+        .where(Signal.mode == mode)
+        .order_by(Signal.signal_date.desc())
+        .limit(1)
+    )
+    out.update(target or {})
+    return sorted(out)
+
+
+def _sync_earnings(
+    ctx: JobContext, d: date, symbols: list[str], required: Sequence[str]
+) -> tuple[list[str], list[str]]:
+    """实盘财报日。接口失败但本地有文件时沿用并提示。
+
+    required（策略自己的个股）近期没有财报日时要提示（否则会持有过财报）；其余标的（如持仓里的
+    ETF）没有财报日属于正常，不提示。
+    """
     path = live_earnings_path(ctx.settings.data_dir)
     calendar_fn = getattr(ctx.provider, "earnings_calendar", None)
     if calendar_fn is None:
-        return [], [f"主数据源不提供财报日历：{', '.join(symbols)} 的财报前离场不生效"]
+        if not required:
+            return [], []
+        return [], [f"主数据源不提供财报日历：{', '.join(required)} 的财报前离场不生效"]
     warnings: list[str] = []
     try:
         got = sync_live_earnings(path, lambda a, b: calendar_fn(symbols, a, b, ctx.calendar), d)
@@ -293,18 +327,20 @@ def _sync_earnings(ctx: JobContext, d: date, symbols: list[str]) -> tuple[list[s
         warnings.append(f"财报日历拉取失败，沿用本地文件：{e}")
         got = load_earnings(path)
     lo, hi = d - timedelta(days=EARNINGS_RECENT_DAYS), d + timedelta(days=EARNINGS_AHEAD_DAYS)
-    lacking = [s for s in symbols if not any(lo <= x <= hi for x in got.get(s, ()))]
+    lacking = [s for s in required if not any(lo <= x <= hi for x in got.get(s, ()))]
     if lacking:
         warnings.append(
             f"以下股票在过去 {EARNINGS_RECENT_DAYS} 天至未来 {EARNINGS_AHEAD_DAYS} 天内没有财报日"
             f"（财报前离场可能不生效）：{', '.join(lacking)}"
         )
-    return [f"财报日 {len(symbols) - len(lacking)}/{len(symbols)} 只"], warnings
+    return [
+        f"财报日 {len(required) - len(lacking)}/{len(required)} 只（同步 {len(symbols)} 只）"
+    ], warnings
 
 
 def daily_signal(ctx: JobContext, d: date) -> str:
     with Session(ctx.engine) as s:
-        if job_status(s, "daily_data", d) != "success":
+        if job_status(s, "daily_data", d, ctx.mode) != "success":
             raise RuntimeError(f"{d} 的 daily_data 未成功，不生成信号")
     strategy = get_strategy(ctx.strategy_name)
     params = ctx.settings.strategy.params
@@ -313,21 +349,26 @@ def daily_signal(ctx: JobContext, d: date) -> str:
         last = bars.index[-1].date() if len(bars) else None
         if last != d:
             raise RuntimeError(f"{sym} 最新数据为 {last}，不是 {d}")
-    weights = strategy.run(build_context(ctx, d))
+    weights, detail = strategy.run_explained(build_context(ctx, d))
     with Session(ctx.engine) as s, s.begin():
         prev = s.scalar(
             select(Signal.target_weights)
-            .where(Signal.strategy == ctx.strategy_name, Signal.signal_date < d)
+            .where(
+                Signal.mode == ctx.mode,
+                Signal.strategy == ctx.strategy_name,
+                Signal.signal_date < d,
+            )
             .order_by(Signal.signal_date.desc())
             .limit(1)
         )
         stmt = insert(Signal).values(
-            strategy=ctx.strategy_name, signal_date=d, target_weights=weights, data_as_of=d
-        )
+            mode=ctx.mode, strategy=ctx.strategy_name, signal_date=d,
+            target_weights=weights, data_as_of=d, detail=detail,
+        )  # fmt: skip
         s.execute(
             stmt.on_conflict_do_update(
-                index_elements=[Signal.strategy, Signal.signal_date],
-                set_={"target_weights": weights, "data_as_of": d},
+                index_elements=[Signal.mode, Signal.strategy, Signal.signal_date],
+                set_={"target_weights": weights, "data_as_of": d, "detail": detail},
             )
         )
     nxt = ctx.calendar.next_trading_day(d)

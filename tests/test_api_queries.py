@@ -8,7 +8,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from api_fixtures import SEED_LAST_DAY, needs_db, seed, write_sample_bars
-from quant.api import queries
+from quant.api import queries, stock
+from quant.api.portfolio import Stores
 from quant.api.schemas import QueueStatus
 from quant.core.calendar import get_calendar
 from quant.data.store import ParquetStore
@@ -50,7 +51,7 @@ def test_curve_orders_fills_signals(db_url: str) -> None:
         assert next(o for o in orders if o.status == "CANCELLED").reason == "超时撤单"
         [fill] = queries.fills(s, "paper")
         assert fill.price == 130.5 and fill.commission == 1.17
-        [sig] = queries.latest_signals(s)
+        [sig] = queries.latest_signals(s, "paper")
         assert sig.strategy == "combo" and sig.target_weights == {"NVDA": 0.6, "META": 0.4}
         assert queries.orders(s, "live") == [] and queries.fills(s, "live") == []
     eng.dispose()
@@ -99,5 +100,6 @@ def test_data_status_and_bars(tmp_path: Path) -> None:
     [row] = queries.data_status(store, cal, expected)
     assert row.symbol == "SPY" and row.ok and row.last_date == expected
     assert row.sources == "test" and row.issues == ""
-    assert len(queries.bars(store, "SPY", expected - timedelta(days=30))) > 15
-    assert queries.bars(store, "NOPE", None) == []
+    stores = Stores(store, ParquetStore(tmp_path / "universe_bars"))
+    assert len(stock.bars(stores, "SPY", expected - timedelta(days=30)).bars) > 15
+    assert stock.bars(stores, "NOPE", None).bars == []
