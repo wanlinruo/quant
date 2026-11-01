@@ -156,3 +156,4 @@ table.dt tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
 td.reason { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 td.reason a { color: #d1d4dc; text-decoration: none; }
 td.reason a:hover { text-decoration: underline; }
+.news-upd { text-align: right; padding-bottom: 2px; }

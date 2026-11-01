@@ -62,9 +62,12 @@ def _news(rows: Any) -> list[NewsRaw]:
             continue
         if not headline:
             continue
+        url = str(r.get("url") or "")
+        if not url.startswith(("https://", "http://")):
+            url = ""  # 只接受网页链接（防止 javascript: 等进入页面）
         related = tuple(s.strip() for s in str(r.get("related") or "").split(",") if s.strip())
         out.append(NewsRaw(str(r.get("id", "")), t, headline, str(r.get("source") or ""),
-                           str(r.get("url") or ""), related))  # fmt: skip
+                           url, related))  # fmt: skip
     return out
 
 

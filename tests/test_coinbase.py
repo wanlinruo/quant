@@ -24,3 +24,15 @@ def test_btc_daily_error() -> None:
         btc_daily(FakeFetch((503, "down")))
     with pytest.raises(DataUnavailableError):
         btc_daily(FakeFetch(OSError("x")))
+
+
+def test_btc_daily_drops_unfinished_candle() -> None:
+    """第一根是当前 UTC 日、尚未走完的 K 线：丢掉，只用已收盘的日线。"""
+    from datetime import UTC, datetime
+
+    rows = [[1793491200, 1, 2, 1, 77756.72, 1158.7], [1793404800, 1, 2, 1, 77423.98, 2434.2]]
+    now = datetime(2026, 11, 1, 9, 42, tzinfo=UTC)  # 11-01 那根还没走完
+    got = btc_daily(FakeFetch((200, rows)), now=now)
+    assert [b.date for b in got] == [date(2026, 10, 31)]
+    later = datetime(2026, 11, 2, 0, 0, tzinfo=UTC)
+    assert len(btc_daily(FakeFetch((200, rows)), now=later)) == 2

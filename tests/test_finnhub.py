@@ -59,3 +59,11 @@ def test_malformed_items_skipped() -> None:
     ok = {"datetime": 1793526131, "headline": "ok", "id": 2, "source": "CNBC", "url": "u"}
     body = [{"headline": "no time"}, ok]
     assert [n.headline for n in client(FakeFetch((200, body))).market_news()] == ["ok"]
+
+
+def test_news_url_must_be_http() -> None:
+    bad = {"datetime": 1793526131, "headline": "x", "id": 1, "source": "s",
+           "url": "javascript:alert(1)"}  # fmt: skip
+    ok = {"datetime": 1793526131, "headline": "y", "id": 2, "source": "s", "url": "https://n/2"}
+    got = client(FakeFetch((200, [bad, ok]))).market_news()
+    assert [(n.headline, n.url) for n in got] == [("x", ""), ("y", "https://n/2")]

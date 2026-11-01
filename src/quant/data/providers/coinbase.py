@@ -21,8 +21,11 @@ class Bar:
     volume: float
 
 
-def btc_daily(fetch: Fetch = http_fetch) -> list[Bar]:
-    """最近约 300 天的 BTC-USD 日线，升序。返回格式为 [[时间, 低, 高, 开, 收, 量], ...]。"""
+def btc_daily(fetch: Fetch = http_fetch, now: datetime | None = None) -> list[Bar]:
+    """最近约 300 天的 BTC-USD 日线，升序。返回格式为 [[时间, 低, 高, 开, 收, 量], ...]。
+
+    第一根是当前 UTC 日、尚未走完的 K 线；给出 now 时丢掉 now 尚未收盘的 K 线。
+    """
     try:
         status, body = fetch(URL, {"User-Agent": "quant-dashboard"})
     except Exception as e:
@@ -33,6 +36,8 @@ def btc_daily(fetch: Fetch = http_fetch) -> list[Bar]:
     for r in body:
         try:
             t, lo, hi, op, cl, vol = r[:6]
+            if now is not None and int(t) + 86400 > now.timestamp():
+                continue
             day = datetime.fromtimestamp(int(t), UTC).date()
             out.append(Bar(day, float(op), float(hi), float(lo), float(cl), float(vol)))
         except (TypeError, ValueError):

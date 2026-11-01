@@ -26,6 +26,11 @@ export function NewsPanel({ height, mine }: { height: number; mine: Set<string> 
   return (
     <Panel title="新闻" right={<Tabs tabs={FILTERS.map((x) => ({ key: x.key, label: x.label }))} value={f} onChange={setF} />} height={height}>
       <div className="news-list" data-testid="news" style={{ maxHeight: height - 50 }}>
+        {doc?.generated_at && (
+          <div className="muted sm news-upd">
+            更新于 {etParts(doc.generated_at).date.slice(5)} {etParts(doc.generated_at).time} ET
+          </div>
+        )}
         {!doc ? (
           <EmptyState kind="pending" />
         ) : items.length === 0 ? (

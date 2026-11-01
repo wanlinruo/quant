@@ -101,14 +101,19 @@ def run_market_extras(
                 if isinstance(e, AUTH_ERRORS):
                     break
     try:
-        btc = btc_daily(fetch)
+        btc = btc_daily(fetch, now=now)
     except DataUnavailableError as e:
         btc = None
         fail("Coinbase ", e)
-    items = build_macro(fred_obs, btc)
-    if items:
-        _write(macro_path(data_dir), {"generated_at": stamp, "items": [asdict(i) for i in items]})
-    summary = [f"宏观 {len(items)} 项"]
+    fresh = {i.symbol: asdict(i) for i in build_macro(fred_obs, btc)}
+    # 本次没取到的项沿用上次的（每项带自己的 as_of，页面会注明“截至 MM-DD”）
+    old_doc = _read(macro_path(data_dir))
+    old_items = old_doc.get("items") if isinstance(old_doc, dict) else None
+    old = {i["symbol"]: i for i in old_items or [] if isinstance(i, dict) and "symbol" in i}
+    items = [fresh.get(k) or old[k] for k in (*MACRO_SERIES, "BTC") if k in fresh or k in old]
+    if fresh:
+        _write(macro_path(data_dir), {"generated_at": stamp, "items": items})
+    summary = [f"宏观 {len(fresh)} 项"]
 
     # ---- 新闻与异动原因 ----
     snap = _read(snapshot_path(data_dir))
@@ -137,12 +142,12 @@ def run_market_extras(
                     break
             reasons = {}
             if as_of is not None:
-                for m in top:
-                    r = pick_reason(
-                        m["symbol"], names.get(m["symbol"]), company.get(m["symbol"], []), since
-                    )
+                for sym in symbols:  # 前 30 只与持仓中出现在异动表里的
+                    if sym not in names:
+                        continue
+                    r = pick_reason(sym, names[sym], company.get(sym, []), since)
                     if r is not None:
-                        reasons[m["symbol"]] = asdict(r)
+                        reasons[sym] = asdict(r)
             feed_since = datetime.combine(prev_day, time(0), ET)
             feed = build_feed(market, company, holdings, feed_since)
             _write(news_path(data_dir), {"generated_at": stamp,

@@ -174,6 +174,13 @@ describe("MarketPage", () => {
     expect(within(panel).getAllByRole("link")).toHaveLength(1);
   });
 
+  it("news shows update time", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW], "/api/market/news": [200, { ...NEWS, generated_at: "2026-10-28T21:00:00-04:00" }] });
+    renderPage(<MarketPage />, "/");
+    const panel = await screen.findByTestId("news");
+    expect(await within(panel).findByText("更新于 10-28 21:00 ET")).toBeInTheDocument();
+  });
+
   it("calendar released and upcoming", async () => {
     mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW], "/api/market/calendar": [200, CAL] });
     renderPage(<MarketPage />, "/");

@@ -128,12 +128,9 @@ def test_extras_one_source_failing_keeps_others(tmp_path: Path) -> None:
     run(tmp_path, fred=FakeFred(), finnhub=FakeFinnhub())
     summary = run(tmp_path, fred=FakeFred(), finnhub=FakeFinnhub(),
                   fetch=make_fetch(ff=(200, "<html>"), btc=(503, "down")))  # fmt: skip
-    assert [i["symbol"] for i in read(tmp_path, "macro.json")["items"]] == [
-        "VIX",
-        "US10Y",
-        "USD",
-        "WTI",
-    ]
+    macro = read(tmp_path, "macro.json")["items"]
+    assert [i["symbol"] for i in macro] == ["VIX", "US10Y", "USD", "WTI", "BTC"]  # BTC 沿用上次
+    assert macro[-1]["close"] == 70006.0
     titles = [i["title"] for i in read(tmp_path, "calendar.json")["released"]]
     assert "Non-Farm Employment Change" in titles  # 沿用累积的 FF 事件
     assert "Forex Factory" in summary and "Coinbase" in summary
@@ -215,3 +212,31 @@ def test_job_empty_keys_treated_as_missing(tmp_path: Path, monkeypatch: pytest.M
 
     assert market_extras(Ctx(), DAY) == "ok"  # type: ignore[arg-type]
     assert seen["fred"] is None and seen["finnhub"] is None and seen["today"] == DAY
+
+
+def test_macro_failure_keeps_previous_items(tmp_path: Path) -> None:
+    run(tmp_path, fred=FakeFred(), finnhub=None)
+    run(tmp_path, fred=FakeFred(fail={"VIXCLS", "DGS10"}), finnhub=None)
+    items = read(tmp_path, "macro.json")["items"]
+    assert [i["symbol"] for i in items] == ["VIX", "US10Y", "USD", "WTI", "BTC"]
+
+
+def test_fred_auth_error_raises_after_others_written(tmp_path: Path) -> None:
+    from quant.data.providers.fred import FredAuthError
+
+    class BadFred(FakeFred):
+        def observations(self, series: str, start: date) -> list[Obs]:
+            raise FredAuthError("bad key")
+
+    write_snapshot(tmp_path)
+    with pytest.raises(FredAuthError):
+        run(tmp_path, fred=BadFred(), finnhub=FakeFinnhub())
+    assert read(tmp_path, "news.json")["items"]
+    assert [i["symbol"] for i in read(tmp_path, "macro.json")["items"]] == ["BTC"]
+    assert read(tmp_path, "calendar.json")["released"]
+
+
+def test_reasons_include_holdings_outside_top(tmp_path: Path) -> None:
+    write_snapshot(tmp_path, n=40)  # S35 不在前 30，但是持仓
+    run(tmp_path, fred=None, finnhub=FakeFinnhub(), holdings={"S35"})
+    assert "S35" in read(tmp_path, "news.json")["reasons"]
