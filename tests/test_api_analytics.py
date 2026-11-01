@@ -188,3 +188,37 @@ def test_atr_and_rsi() -> None:
     assert a.atr_pct(high.iloc[:5], low.iloc[:5], close.iloc[:5], 14) is None
     assert a.last(a.rsi(close, 14)) == pytest.approx(100.0)
     assert a.last(pd.Series([np.nan])) is None
+
+
+# ---- 调仓预览与执行器规则一致（#65 最终审查 Important 1）----
+
+PREVIEW_ARGS = {
+    "net_liquidation": 100000.0,
+    "cash_buffer": 0.02,
+    "min_weight_diff": 0.04,
+    "min_trade_usd": 100.0,
+}
+
+
+def test_preview_lists_small_new_position() -> None:
+    """择时减半后动量仓新进 2%：执行器会买（新开仓不受权重阈值限制），预览也要列出。"""
+    rows = a.preview_orders({}, {"NEW": 0.02}, {"NEW": 50.0}, **PREVIEW_ARGS)
+    assert [(r.symbol, r.side) for r in rows] == [("NEW", "BUY")]
+    assert rows[0].qty == int(100000 * 0.98 * 0.02 / 50)
+
+
+def test_preview_lists_small_residual_close() -> None:
+    """不在目标里的 3% 残仓：执行器总是清仓，预览也要列出。"""
+    rows = a.preview_orders({"OLD": 60}, {}, {"OLD": 50.0}, **PREVIEW_ARGS)
+    assert [(r.symbol, r.side, r.qty) for r in rows] == [("OLD", "SELL", 60)]
+
+
+def test_preview_skips_drift_using_effective_weight() -> None:
+    """满仓持有、目标 50%：有效目标 49%，实际 50% 只差 1%，不调。"""
+    rows = a.preview_orders({"KEEP": 1000}, {"KEEP": 0.5}, {"KEEP": 50.0}, **PREVIEW_ARGS)
+    assert rows == []
+
+
+def test_preview_skips_tiny_trade() -> None:
+    rows = a.preview_orders({}, {"TINY": 0.0005}, {"TINY": 50.0}, **PREVIEW_ARGS)
+    assert rows == []

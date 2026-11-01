@@ -13,7 +13,7 @@ from quant.engine.backtester import Backtester, field_loader_from_bars
 from quant.strategies import get_strategy
 from quant.strategies.base import Context
 from quant.strategies.combo import Combo, ComboParams, merge_weights, vol_factor
-from quant.strategies.momentum_select import MomentumSelect
+from quant.strategies.momentum_select import MomentumParams, MomentumSelect
 from quant.strategies.swing_pullback import SwingParams
 from quant.strategies.universe import Constituents
 from test_momentum_select import CAL, IDX, N, _bars, ctx, make_close, make_volume
@@ -133,7 +133,7 @@ def test_run_explained_detail_shape() -> None:
     assert detail is not None
     assert set(detail) == {
         "sleeves", "sleeve_weights", "timing_factor", "vol_symbol", "vol_20d", "vol_threshold",
-        "momentum_rank", "universe_size", "rebalance_day", "top_n",
+        "momentum_rank", "momentum_rank_asof", "universe_size", "rebalance_day", "top_n",
     }  # fmt: skip
     assert set(detail["sleeves"]) == {"momentum", "swing"}
     assert detail["sleeve_weights"] == {"momentum": 0.4, "swing": 0.6}
@@ -179,3 +179,16 @@ def test_backtest_signals_unchanged(amp: float, digest: str) -> None:
     res = bt.run(IDX[-60].date(), IDX[-1].date())
     blob = json.dumps({str(k): v for k, v in sorted(res.signals.items())}, sort_keys=True)
     assert hashlib.sha256(blob.encode()).hexdigest() == digest
+
+
+def test_run_explained_ranks_as_of_signal_day() -> None:
+    """信号日当天的动量排名单独保存（调仓日排名只反映选股时，整月不变）。"""
+    c, _ = _full_ctx(date(2024, 6, 10))
+    combo = Combo(CAL)
+    _, detail = combo.run_explained(c)
+    assert detail is not None
+    p = ComboParams.from_mapping(c.params)
+    want = combo.momentum.ranking(
+        c, date(2024, 6, 10), MomentumParams.from_mapping(p.momentum_params())
+    )
+    assert detail["momentum_rank_asof"] == want[:50]

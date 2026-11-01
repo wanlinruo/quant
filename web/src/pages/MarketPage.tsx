@@ -16,7 +16,7 @@ export function MarketPage() {
   const overview = useApi<PortfolioOverview>(`/api/portfolio/${account}/overview`);
   const o = overview.data;
   const signals = useApi<SignalOut[]>("/api/signals/latest", { mode: account });
-  const jobs = useApi<JobStatusOut[]>("/api/system/jobs");
+  const jobs = useApi<JobStatusOut[]>("/api/system/jobs", { mode: account });
 
   return (
     <div className="page">

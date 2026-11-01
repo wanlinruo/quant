@@ -39,5 +39,10 @@ describe("MarketPage account", () => {
       .filter((u) => u.pathname === "/api/signals/latest")
       .map((u) => u.searchParams.get("mode"));
     expect(modes).toEqual(["live"]);
+    const jobModes = fetch.mock.calls
+      .map(([input]) => new URL(String(input), "http://x"))
+      .filter((u) => u.pathname === "/api/system/jobs")
+      .map((u) => u.searchParams.get("mode"));
+    expect(jobModes).toEqual(["live"]);
   });
 });

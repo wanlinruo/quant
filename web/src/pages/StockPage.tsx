@@ -9,6 +9,7 @@ import { RangeBar } from "../components/RangeBar";
 import { Tabs } from "../components/Tabs";
 import { CandleChart, type TradeMark } from "../charts/CandleChart";
 import { useApi } from "../hooks/useApi";
+import { toCandles } from "../lib/candles";
 import { compact, num, pct, signedPct } from "../lib/format";
 import { formatDateTimeET, toETDate } from "../lib/time";
 import { useShell } from "../shell";
@@ -53,14 +54,7 @@ export function StockPage() {
   const p = prof.data;
   const list = res.data?.bars;
 
-  const candles = useMemo(
-    () =>
-      (list ?? []).map((b) => {
-        const f = adjust && b.close ? b.adj_close / b.close : 1;
-        return { date: b.date, open: b.open * f, high: b.high * f, low: b.low * f, close: b.close * f, volume: b.volume };
-      }),
-    [list, adjust],
-  );
+  const candles = useMemo(() => toCandles(list ?? [], adjust), [list, adjust]);
   const trades = useMemo<TradeMark[]>(
     () => (p?.trades ?? []).map((t) => ({ date: toETDate(t.filled_at), side: t.side === "BUY" ? "BUY" : "SELL" })),
     [p],

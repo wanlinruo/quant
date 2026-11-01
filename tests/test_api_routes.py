@@ -133,6 +133,10 @@ def test_system_endpoints_with_data(client_db: TestClient) -> None:
     assert client_db.get("/api/system/flags").json()["trading_enabled"] == "false"
     jobs = {j["job_name"] for j in client_db.get("/api/system/jobs").json()}
     assert jobs == {"daily_data", "daily_signal"}
+    paper = client_db.get("/api/system/jobs", params={"mode": "paper"}).json()
+    assert {j["job_name"] for j in paper} == {"daily_data", "daily_signal"}
+    assert all(j["mode"] == "paper" for j in paper)
+    assert client_db.get("/api/system/jobs", params={"mode": "live"}).json() == []
     assert len(client_db.get("/api/system/failures").json()) == 2
 
 

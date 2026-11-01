@@ -24,6 +24,7 @@ DETAIL: dict[str, Any] = {
     "sleeve_weights": {"momentum": 0.4, "swing": 0.6},
     "timing_factor": 1.0, "vol_symbol": "QQQ", "vol_20d": 0.22, "vol_threshold": 0.3,
     "momentum_rank": ["AMD", "NVDA", "META"], "universe_size": 503,
+    "momentum_rank_asof": ["AMD", "NVDA", *[f"X{i}" for i in range(9)], "META"],
     "rebalance_day": "2026-09-30", "top_n": 10,
 }  # fmt: skip
 TARGET = {"NVDA": 0.6, "META": 0.2, "AMD": 0.2}
@@ -63,7 +64,7 @@ def _client(db_url: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **kw: 
 
 @pytest.fixture
 def client(db_url: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[TestClient]:
-    yield _client(db_url, monkeypatch, tmp_path, bars=("NVDA", "META", "QQQ", "SPY"))
+    yield _client(db_url, monkeypatch, tmp_path, bars=("NVDA", "META", "AMD", "QQQ", "SPY"))
     _clear()
 
 
@@ -110,7 +111,8 @@ def test_holdings_with_signal_detail(client: TestClient) -> None:
     assert nvda["price"] is not None and nvda["change_pct"] is not None
     assert nvda["unrealized_pnl"] == pytest.approx((nvda["price"] - 130) * 300)
     assert nvda["state"] == "near" and "10 日线" in nvda["state_note"]  # 样本稳步上涨，贴近 10 日线
-    assert meta["state"] == "ok" and meta["state_note"] == "排名 3/10"
+    # 调仓日排第 3，信号日当天已跌到第 12：下次月度调仓会被换掉
+    assert meta["state"] == "exit" and meta["state_note"] == "当日排名 12（调仓日第 3）"
     assert nvda["holding_days"] == 1
 
 
@@ -160,17 +162,25 @@ def test_contributions(client: TestClient) -> None:
     )
 
 
-def test_rebalance_preview_reasons(client: TestClient) -> None:
+def test_rebalance_preview_matches_executor_rules(client: TestClient, tmp_path: Path) -> None:
+    from quant.api import analytics as an
+    from quant.core.settings import load_settings
+
+    price = {sym: float(ParquetStore(tmp_path).read_bars(sym)["close"].iloc[-1])
+             for sym in ("NVDA", "META", "AMD")}  # fmt: skip
+    ex = load_settings().executor
+    want = an.preview_orders(
+        {"NVDA": 300, "META": 60}, TARGET, price, net_liquidation=101000.0,
+        cash_buffer=ex.cash_buffer, min_weight_diff=0.04, min_trade_usd=ex.min_trade_usd,
+    )  # fmt: skip
     p = client.get("/api/portfolio/paper/rebalance-preview").json()
     assert p["signal_date"] == SEED_LAST_DAY.isoformat()
     rows = _by_symbol(p["rows"])
-    assert set(rows) == {"AMD", "META"}  # NVDA 偏差不足 4%
+    assert {(r.symbol, r.side) for r in want} == {(k, v["side"]) for k, v in rows.items()}
     assert rows["AMD"]["side"] == "BUY" and rows["AMD"]["reason"] == "动量排名第 1"
-    assert rows["META"]["side"] == "SELL" and rows["META"]["reason"] == "权重调整"
-    assert rows["META"]["weight_from"] == pytest.approx(38900 / 101000)
-    assert rows["META"]["weight_to"] == pytest.approx(0.2)
-    diffs = [0.6 - 60000 / 101000, 0.2 - 38900 / 101000, 0.2]
-    assert p["turnover"] == pytest.approx(sum(abs(x) for x in diffs) / 2)
+    assert rows["AMD"]["qty"] == next(r.qty for r in want if r.symbol == "AMD")
+    notional = sum(r.qty * price[r.symbol] for r in want)
+    assert p["turnover"] == pytest.approx(notional / 101000 / 2)
     assert p["est_commission"] > 0
 
 

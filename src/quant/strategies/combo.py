@@ -183,11 +183,20 @@ class Combo(Strategy):
             "vol_20d": b.vol,
             "vol_threshold": p.vol_threshold,
             "momentum_rank": b.ranking[:RANK_KEEP],
+            # 信号日当天的排名：调仓日排名整月不变，当日排名才能看出“下次调仓会被换掉”
+            "momentum_rank_asof": self._rank_asof(ctx, p)[:RANK_KEEP],
             "universe_size": b.universe_size,
             "rebalance_day": b.rebalance_day.isoformat(),
             "top_n": MomentumParams.from_mapping(p.momentum_params()).top_n,
         }
         return validate_weights(b.weights), detail
+
+    def _rank_asof(self, ctx: Context, p: ComboParams) -> list[str]:
+        """只用于信号明细（回测不调用）：以信号日为排序日的动量排名。"""
+        if p.momentum_weight <= 0 or ctx.universe is None:
+            return []
+        mp = MomentumParams.from_mapping(p.momentum_params())
+        return self._momentum.ranking(replace(ctx, params=p.momentum_params()), ctx.as_of, mp)
 
     def timing_factor(self, ctx: Context, p: ComboParams) -> float:
         """信号日的择时系数（1 或 vol_scale）。"""

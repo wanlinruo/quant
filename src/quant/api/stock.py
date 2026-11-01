@@ -138,7 +138,7 @@ def profile(
         held=pos is not None,
         weight=float(pos.market_value) / netliq if pos is not None and netliq else None,
         sleeve=det.sleeve_of(symbol, target) if pos is not None or symbol in target else None,
-        momentum_rank=det.rank(symbol),
+        momentum_rank=det.rank_now(symbol),
         universe_size=int(det.raw["universe_size"])
         if det.raw and det.raw.get("universe_size")
         else None,
@@ -207,7 +207,7 @@ def profile(
         symbol=symbol, as_of=as_of, adjusted=adjusted, quote=_quote(df, periods),
         relation=relation, periods=periods, periods_qqq=periods_qqq, key_stats=key_stats,
         technicals=technicals, swing=swing,
-        rank_history=[RankPoint(date=x.signal_date, rank=detail_of(x).rank(symbol))
+        rank_history=[RankPoint(date=x.signal_date, rank=detail_of(x).rank_now(symbol))
                       for x in reversed(sigs) if x.detail is not None],
         earnings=earnings,
         holding_periods=[PeriodOut(start=a, end=b)

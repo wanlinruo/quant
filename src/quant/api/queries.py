@@ -187,17 +187,18 @@ def queue_status(s: Session) -> QueueStatus:
 # ---- 系统 ----
 
 
-def job_status(s: Session) -> list[JobStatusOut]:
-    """每个任务最近一次运行。"""
-    rows = s.scalars(select(JobRun).order_by(JobRun.started_at.desc()).limit(500)).all()
-    seen: set[str] = set()
+def job_status(s: Session, mode: Mode | None = None) -> list[JobStatusOut]:
+    """每个账户、每个任务最近一次运行；给出 mode 时只看该账户。"""
+    q = select(JobRun).order_by(JobRun.started_at.desc()).limit(500)
+    rows = s.scalars(q.where(JobRun.mode == mode) if mode else q).all()
+    seen: set[tuple[str, str]] = set()
     out = []
     for r in rows:
-        if r.job_name in seen:
+        if (r.mode, r.job_name) in seen:
             continue
-        seen.add(r.job_name)
+        seen.add((r.mode, r.job_name))
         out.append(
-            JobStatusOut(job_name=r.job_name, trade_date=r.trade_date, status=r.status,
+            JobStatusOut(mode=r.mode, job_name=r.job_name, trade_date=r.trade_date, status=r.status,
                          started_at=r.started_at, finished_at=r.finished_at,
                          error=_first_line(r.error))
         )  # fmt: skip

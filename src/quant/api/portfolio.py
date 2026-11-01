@@ -34,7 +34,7 @@ from quant.api.schemas import (
     TimingOut,
     TradeStatsOut,
 )
-from quant.core.settings import CostSettings
+from quant.core.settings import CostSettings, ExecutorSettings
 from quant.data.store import ParquetStore, is_valid_symbol
 from quant.db.models import AccountSnapshotRow, JobRun, Order, PositionSnapshot, Signal, SystemFlag
 from quant.db.models import Fill as FillRow
@@ -42,7 +42,6 @@ from quant.strategies import STRATEGIES, get_strategy
 from quant.strategies.events import EventCalendar
 
 BENCHMARKS = ("QQQ", "SPY")
-DEFAULT_MIN_DIFF = 0.01
 EARNINGS_AHEAD_DAYS = 7  # “下周有财报”的范围（自然日）
 MA_EXIT = 10
 
@@ -147,11 +146,19 @@ class Detail:
             return "swing"
         return "exit" if symbol not in target else None
 
-    def rank(self, symbol: str) -> int | None:
+    def rank(self, symbol: str, key: str = "momentum_rank") -> int | None:
         if self.raw is None:
             return None
-        ranks: list[str] = self.raw.get("momentum_rank", [])
+        ranks: list[str] = self.raw.get(key, [])
         return ranks.index(symbol) + 1 if symbol in ranks else None
+
+    @property
+    def has_asof(self) -> bool:
+        return self.raw is not None and "momentum_rank_asof" in self.raw
+
+    def rank_now(self, symbol: str) -> int | None:
+        """信号日当天的排名；旧信号没有时退回调仓日排名。"""
+        return self.rank(symbol, "momentum_rank_asof" if self.has_asof else "momentum_rank")
 
     @property
     def top_n(self) -> int:
@@ -324,9 +331,13 @@ def _state(
         note = f"距 10 日线 {c / ma - 1:+.1%}" if c is not None and ma else ""
         return st, note
     if sleeve == "momentum":
-        r = det.rank(symbol)
+        r = det.rank_now(symbol)
         st = an.signal_state("momentum", None, None, r, det.top_n)
-        return st, f"排名 {r}/{det.top_n}" if r else "排名 50 名之外"
+        if not det.has_asof:
+            return st, f"排名 {r}/{det.top_n}" if r else "排名 50 名之外"
+        reb = det.rank(symbol)
+        now = f"当日排名 {r}" if r else "当日排名 50 名之外"
+        return st, f"{now}（调仓日第 {reb}）" if reb else now
     if sleeve == "exit":
         return "exit", "不在目标中，将卖出"
     return None, ""
@@ -419,12 +430,13 @@ def calendar(s: Session, mode: Mode, month: str | None) -> list[CalendarDayOut]:
 # ---- 下次调仓预览 ----
 
 
-def _min_diff(strategy: str) -> float:
+def _min_diff(strategy: str, configured: float) -> float:
+    """与执行器相同：策略类声明了 min_weight_diff 时用策略的值，否则用配置值。"""
     if strategy in STRATEGIES:
         v = get_strategy(strategy).min_weight_diff
         if v is not None:
             return float(v)
-    return DEFAULT_MIN_DIFF
+    return configured
 
 
 def _reason(sym: str, side: str, held: bool, det: Detail, prev: Detail) -> str:
@@ -452,8 +464,9 @@ def _reason(sym: str, side: str, held: bool, det: Detail, prev: Detail) -> str:
 
 
 def rebalance_preview(
-    s: Session, mode: Mode, stores: Stores, costs: CostSettings
+    s: Session, mode: Mode, stores: Stores, costs: CostSettings, ex: ExecutorSettings
 ) -> RebalancePreview:
+    """按执行器的下单规则（analytics.preview_orders）列出下一个交易日会下的单。"""
     sigs = signals_of(s, mode, 2)
     acct = last_account(s, mode)
     if not sigs or acct is None:
@@ -461,33 +474,34 @@ def rebalance_preview(
     sig = sigs[0]
     det, prev = detail_of(sig), detail_of(sigs[1] if len(sigs) > 1 else None)
     netliq = float(acct.net_liquidation)
-    current = {
-        r.symbol: float(r.market_value) / netliq for r in latest_positions(snapshots_of(s, mode))
-    }
+    qty = {r.symbol: r.qty for r in latest_positions(snapshots_of(s, mode))}
     target = {k: float(v) for k, v in sig.target_weights.items()}
-    min_diff = _min_diff(sig.strategy)
-    rows: list[PreviewRow] = []
-    turnover, fee, has_fee = 0.0, 0.0, False
-    for sym in sorted(set(current) | set(target)):
-        w0, w1 = current.get(sym, 0.0), target.get(sym, 0.0)
-        diff = w1 - w0
-        turnover += abs(diff) / 2
-        if abs(diff) < min_diff:
-            continue
-        side = "BUY" if diff > 0 else "SELL"
-        rows.append(PreviewRow(
-            side=side, symbol=sym, sleeve=det.sleeve_of(sym, target),
-            weight_from=w0, weight_to=w1, reason=_reason(sym, side, sym in current, det, prev),
-        ))  # fmt: skip
-        price = an.last(_close(stores, sym))
-        if price:
-            est = an.estimate_commission(int(abs(diff) * netliq / price), price, costs)
-            if est is not None:
-                fee, has_fee = fee + est, True
+    prices = {sym: an.last(_close(stores, sym)) for sym in set(qty) | set(target)}
+    orders = an.preview_orders(
+        qty, target, {k: v for k, v in prices.items() if v},
+        net_liquidation=netliq, cash_buffer=ex.cash_buffer,
+        min_weight_diff=_min_diff(sig.strategy, ex.min_weight_diff),
+        min_trade_usd=ex.min_trade_usd,
+    )  # fmt: skip
+    rows = [
+        PreviewRow(
+            side=o.side, symbol=o.symbol, sleeve=det.sleeve_of(o.symbol, target), qty=o.qty,
+            weight_from=o.weight_from, weight_to=o.weight_to,
+            reason=_reason(o.symbol, o.side, o.symbol in qty, det, prev),
+        )
+        for o in orders
+    ]  # fmt: skip
+    notional = sum(o.qty * (prices[o.symbol] or 0.0) for o in orders)
+    fees = [
+        f
+        for o in orders
+        if (f := an.estimate_commission(o.qty, prices[o.symbol] or 0.0, costs)) is not None
+    ]
     rows.sort(key=lambda r: (r.side != "SELL", -abs(r.weight_to - r.weight_from)))
     return RebalancePreview(
-        signal_date=sig.signal_date, rows=rows, turnover=turnover,
-        est_commission=fee if has_fee else None,
+        signal_date=sig.signal_date, rows=rows, turnover=notional / netliq / 2,
+        est_commission=sum(fees) if fees else None,
+        missing_prices=sorted(k for k, v in prices.items() if not v),
     )  # fmt: skip
 
 

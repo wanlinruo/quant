@@ -100,6 +100,7 @@ class EquityPoint(BaseModel):
 
 
 class JobStatusOut(BaseModel):
+    mode: Mode
     job_name: str
     trade_date: date
     status: str
@@ -287,6 +288,7 @@ class PreviewRow(BaseModel):
     side: Literal["BUY", "SELL"]
     symbol: str
     sleeve: Sleeve | None
+    qty: int
     weight_from: float
     weight_to: float
     reason: str
@@ -297,6 +299,7 @@ class RebalancePreview(BaseModel):
     rows: list[PreviewRow]
     turnover: float
     est_commission: float | None
+    missing_prices: list[str] = []  # 缺价格无法预估的代码
 
 
 class ClosedTradeOut(BaseModel):

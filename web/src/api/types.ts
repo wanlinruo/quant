@@ -173,6 +173,7 @@ export interface HoldingRow {
 }
 
 export interface JobStatusOut {
+  mode: "sim" | "paper" | "live";
   job_name: string;
   trade_date: string;
   status: string;
@@ -273,6 +274,7 @@ export interface PreviewRow {
   side: "BUY" | "SELL";
   symbol: string;
   sleeve: "momentum" | "swing" | "both" | "exit" | null;
+  qty: number;
   weight_from: number;
   weight_to: number;
   reason: string;
@@ -310,6 +312,7 @@ export interface RebalancePreview {
   rows: PreviewRow[];
   turnover: number;
   est_commission: number | null;
+  missing_prices?: string[];
 }
 
 export interface ReconcileOut {

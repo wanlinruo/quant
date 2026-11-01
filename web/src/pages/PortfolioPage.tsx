@@ -378,12 +378,14 @@ function PreviewPanel({ preview, live }: { preview: ReturnType<typeof useApi<Reb
                 { key: "side", label: "方向", render: (r) => <span className={`pill ${r.side === "BUY" ? "ok" : "err"}`}>{r.side === "BUY" ? "买入" : "卖出"}</span> },
                 { key: "symbol", label: "代码" },
                 { key: "sleeve", label: "子仓", render: (r) => sleeveText(r.sleeve) },
+                { key: "qty", label: "股数", align: "right", render: (r) => (r.qty == null ? "—" : num(r.qty, 0)) },
                 { key: "w", label: "权重变化", align: "right", render: (r) => `${pct(r.weight_from, 1)} → ${pct(r.weight_to, 1)}` },
                 { key: "reason", label: "原因" },
               ]}
             />
             <div className="sm muted" style={{ marginTop: 6 }}>
               预计换手 {pct(d.turnover, 1)} · 佣金（估算）{d.est_commission == null ? "—" : money(d.est_commission)}
+              {d.missing_prices && d.missing_prices.length > 0 && ` · 缺价格未计入：${d.missing_prices.join("、")}`}
             </div>
           </>
         )}

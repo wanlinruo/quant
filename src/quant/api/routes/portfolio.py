@@ -89,7 +89,8 @@ def calendar(mode: Mode, s: SessionDep, month: Month = None) -> list[CalendarDay
 
 @router.get("/portfolio/{mode}/rebalance-preview")
 def rebalance_preview(mode: Mode, s: SessionDep) -> RebalancePreview:
-    return portfolio.rebalance_preview(s, mode, _stores(), get_settings().costs)
+    cfg = get_settings()
+    return portfolio.rebalance_preview(s, mode, _stores(), cfg.costs, cfg.executor)
 
 
 @router.get("/portfolio/{mode}/closed-trades")

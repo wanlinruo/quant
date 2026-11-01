@@ -330,3 +330,52 @@ def period_returns(close: pd.Series, as_of: date) -> dict[str, float | None]:
         out[key] = from_base(t - off)
     out["YTD"] = from_base(pd.Timestamp(year=t.year - 1, month=12, day=31))
     return {k: out[k] for k in ("1D", "1W", "1M", "3M", "6M", "YTD", "1Y")}
+
+
+@dataclass(frozen=True)
+class PreviewOrder:
+    symbol: str
+    side: Literal["BUY", "SELL"]
+    qty: int
+    weight_from: float
+    weight_to: float  # 目标权重（未扣现金缓冲）
+
+
+def preview_orders(
+    positions: Mapping[str, int],
+    target_weights: Mapping[str, float],
+    prices: Mapping[str, float],
+    *,
+    net_liquidation: float,
+    cash_buffer: float,
+    min_weight_diff: float,
+    min_trade_usd: float,
+) -> list[PreviewOrder]:
+    """按执行器的规则（quant.engine.orders.plan_orders，修改时两边同步）列出会下的单：
+
+    目标股数 = floor(净值 × 目标权重 × (1 − 现金缓冲) / 价格)；清仓总是执行；
+    新开仓只受最小金额限制；其余按有效目标权重与当前权重之差 < min_weight_diff 跳过。
+    不含可用资金约束（预览只读，不模拟买单被资金截断）。缺价格的代码跳过。
+    """
+    out: list[PreviewOrder] = []
+    if net_liquidation <= 0:
+        return out
+    investable = net_liquidation * (1 - cash_buffer)
+    for sym in sorted(set(positions) | set(target_weights)):
+        price = prices.get(sym)
+        if not price or price <= 0:
+            continue
+        w = float(target_weights.get(sym, 0.0))
+        current = int(positions.get(sym, 0))
+        target = math.floor(investable * w / price) if w > 0 else 0
+        diff = target - current
+        if diff == 0:
+            continue
+        current_w = current * price / net_liquidation
+        if target != 0:
+            too_small = abs(diff) * price < min_trade_usd
+            drift = abs(w * (1 - cash_buffer) - current_w) < min_weight_diff
+            if too_small or (drift and current != 0):
+                continue
+        out.append(PreviewOrder(sym, "BUY" if diff > 0 else "SELL", abs(diff), current_w, w))
+    return out
