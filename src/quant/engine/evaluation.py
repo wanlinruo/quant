@@ -9,9 +9,12 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 
 from quant.engine.metrics import Metrics
 
+# 样本外起点（组合策略设计：调参区间 2015–2022，样本外 2023-01 起）
+OOS_START = date(2023, 1, 1)
 DRAWDOWN_RATIO = 0.6
 CAGR_RATIO = 0.8
 
