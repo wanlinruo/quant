@@ -83,3 +83,33 @@ table.dt tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
 
 .footer { padding: 4px 12px 12px; font-size: 11px; color: var(--muted); }
 .footer a { color: inherit; }
+
+/* ---- #65 组合页 / 个股页 ---- */
+.live-tag { margin-left: 6px; padding: 0 5px; border-radius: 3px; font-size: 10px; color: #f97316; border: 1px solid rgba(249,115,22,.5); }
+.tabs { display: inline-flex; gap: 2px; margin-left: 8px; }
+.tabs button { background: transparent; border: 1px solid var(--line, #232733); color: var(--muted); font-size: 11px; padding: 2px 8px; border-radius: 3px; cursor: pointer; white-space: nowrap; }
+.tabs button.on { color: #fff; border-color: #2962ff; background: rgba(41,98,255,.15); }
+.dt.compact td, .dt.compact th { padding: 4px 6px; }
+.dt.kv td:first-child { white-space: nowrap; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.alloc { display: flex; flex-direction: column; gap: 10px; }
+.alloc-top { display: flex; gap: 12px; align-items: center; }
+.alloc-top table { flex: 1; }
+.devbar { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.devbar .track { position: relative; width: 60px; height: 6px; background: #1d212b; border-radius: 3px; }
+.devbar .track::after { content: ""; position: absolute; left: 50%; top: -2px; width: 1px; height: 10px; background: #4b5263; }
+.devbar .fill { position: absolute; top: 0; height: 6px; border-radius: 3px; }
+.devbar .fill.over { background: #f5a623; }
+.devbar .fill.under { background: #2962ff; }
+.bars { display: flex; flex-direction: column; gap: 6px; }
+.bar-row { display: grid; grid-template-columns: 70px 1fr 90px; gap: 8px; align-items: center; white-space: nowrap; }
+.bar-row .bar { height: 8px; background: #1a1e29; border-radius: 4px; overflow: hidden; }
+.bar-row .bar span { display: block; height: 100%; }
+.bar-row .bar .pos { background: #22c55e; }
+.bar-row .bar .neg { background: #ef4444; }
+.bar-row .num { text-align: right; }
+.pnlcal { display: flex; flex-direction: column; gap: 8px; }
+.pnlcal-h { display: flex; align-items: center; justify-content: space-between; }
+.pnlcal-g { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.pnlcal-g .wd { text-align: center; }
+.pnlcal-g .day { height: 30px; border-radius: 3px; background: #161a23; display: flex; align-items: center; justify-content: center; font-size: 11px; font-variant-numeric: tabular-nums; }

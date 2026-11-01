@@ -18,3 +18,8 @@ export function money(v: number | null | undefined): string {
   if (v === null || v === undefined) return "-";
   return `$${num(v, 2)}`;
 }
+
+export function signedMoney(v: number | null | undefined): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return "-";
+  return `${v > 0 ? "+" : v < 0 ? "−" : ""}$${num(Math.abs(v), 2)}`;
+}
