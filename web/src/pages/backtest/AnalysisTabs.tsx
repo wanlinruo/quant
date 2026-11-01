@@ -2,6 +2,7 @@ import type { BacktestAnalysis } from "../../api/types";
 import { EmptyState } from "../../components/EmptyState";
 import { Cell, Grid } from "../../components/Grid";
 import { LineChart } from "../../charts/LineChart";
+import { SLEEVE_COLOR, SLEEVE_TEXT } from "../../lib/backtestStatus";
 import { num, pct, signedPct } from "../../lib/format";
 
 type A = { a: BacktestAnalysis };
@@ -160,7 +161,19 @@ export function ReturnsTab({ a }: A) {
           </Sub>
         </Cell>
         <Cell span={4}>
-          <Sub title="子仓累计收益贡献"><EmptyState kind="pending" note="子仓贡献：B 批接入（需要每日持仓记录）" /></Sub>
+          <Sub title="子仓累计收益贡献" note="占初始资金">
+            {r.sleeves ? (
+              <LineChart
+                height={160}
+                percent
+                series={Object.entries(r.sleeves.series).map(([k, vals]) => ({
+                  name: SLEEVE_TEXT[k] ?? k,
+                  color: SLEEVE_COLOR[k] ?? "#787b86",
+                  points: (r.sleeves?.dates ?? []).map((d, i) => ({ time: d, value: vals[i] })),
+                }))}
+              />
+            ) : <EmptyState note="此回测运行于交易记录功能上线之前，重新运行即可查看" />}
+          </Sub>
         </Cell>
       </Grid>
       <Grid>
@@ -221,7 +234,20 @@ export function RiskTab({ a }: A) {
                 <tr><td className="muted">下行捕获率</td><td className="r num">{r.capture.down == null ? "—" : pct(r.capture.down, 0)}</td></tr>
               </tbody>
             </table>
-            <div className="muted sm" style={{ marginTop: 8 }}>择时效果：B 批接入（需要每日择时系数）</div>
+            <div className="subpanel-h" style={{ marginTop: 8 }}><b>择时减仓</b><span className="muted sm">少亏 = 实际 − 系数为 1 的估算</span></div>
+            {r.timing?.length ? (
+              <table className="dt compact">
+                <thead><tr><th>时段</th><th className="r">天数</th><th className="r">系数</th><th className="r">少亏</th></tr></thead>
+                <tbody>
+                  {r.timing.map((t) => (
+                    <tr key={t.start}>
+                      <td>{t.start} → {t.end}</td><td className="r num">{t.days}</td><td className="r num">{num(t.factor, 2)}</td>
+                      <td className={`r num ${tone(t.saved)}`}>{t.saved == null ? "—" : signedPct(t.saved, 2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : <div className="muted sm">没有择时减仓（或此回测运行于记录功能上线之前）</div>}
           </Sub>
         </Cell>
         <Cell span={4}>

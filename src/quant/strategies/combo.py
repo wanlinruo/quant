@@ -18,7 +18,7 @@ from typing import Any, ClassVar
 import pandas as pd
 
 from quant.core.calendar import TradingCalendar, get_calendar
-from quant.strategies.base import Context, Strategy, validate_weights
+from quant.strategies.base import Attribution, Context, Strategy, validate_weights
 from quant.strategies.momentum_select import MomentumParams, MomentumSelect, rebalance_day
 from quant.strategies.swing_pullback import SwingPullback
 
@@ -109,6 +109,7 @@ class ComboBreakdown:
     ranking: list[str]
     universe_size: int
     vol: float | None
+    swing_exits: dict[str, str] = field(default_factory=dict)  # V2 仓当日离场原因（回测归因）
 
 
 class Combo(Strategy):
@@ -153,10 +154,10 @@ class Combo(Strategy):
         mp = MomentumParams.from_mapping(p.momentum_params())  # 提前校验参数
         mctx = replace(ctx, params=p.momentum_params())
         m = self._momentum.target_weights(mctx) if p.momentum_weight > 0 else {}
-        s = (
-            self._swing.target_weights(replace(ctx, params=p.swing_params()))
+        s, s_exits = (
+            self._swing.target_weights_with_exits(replace(ctx, params=p.swing_params()))
             if p.swing_weight > 0
-            else {}
+            else ({}, {})
         )
         vol = self._timing_vol(ctx, p)
         factor = p.vol_scale if vol is not None and vol > p.vol_threshold else 1.0
@@ -170,6 +171,25 @@ class Combo(Strategy):
             momentum=m, swing=s, factor=factor,
             weights=merge_weights(m, s, p.momentum_weight, p.swing_weight, factor),
             rebalance_day=me, ranking=list(ranking), universe_size=size, vol=vol,
+            swing_exits=s_exits,
+        )  # fmt: skip
+
+    def run_attributed(self, ctx: Context) -> tuple[dict[str, float], Attribution]:
+        """回测归因：两个子仓各自对组合的权重贡献（与 merge_weights 同一算法）、择时系数、
+        V2 仓当日离场原因；动量仓清仓的默认原因为“跌出前 top_n”。"""
+        p = ComboParams.from_mapping(ctx.params)
+        b = self.breakdown(ctx)
+        weights = validate_weights(b.weights)
+        sleeves = {
+            "momentum": {
+                s: w * p.momentum_weight * b.factor for s, w in b.momentum.items() if w > 0
+            },
+            "swing": {s: w * p.swing_weight * b.factor for s, w in b.swing.items() if w > 0},
+        }
+        top_n = MomentumParams.from_mapping(p.momentum_params()).top_n
+        return weights, Attribution(
+            sleeves=sleeves, timing_factor=b.factor, exits=dict(b.swing_exits),
+            default_exit={"momentum": f"动量排名跌出前 {top_n}"},
         )  # fmt: skip
 
     def run_explained(self, ctx: Context) -> tuple[dict[str, float], dict[str, Any] | None]:

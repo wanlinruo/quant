@@ -28,6 +28,9 @@ TABLES = {
     "account_snapshots",
     "backtest_runs",
     "backtest_equity",
+    "backtest_trades",
+    "backtest_positions",
+    "backtest_daily",
     "system_flags",
     "job_attempts",
 }
@@ -251,7 +254,7 @@ def test_job_attempts_roundtrip(engine: Engine) -> None:
 @needs_db
 def test_migration_backfills_paper(engine: Engine) -> None:
     cfg = _alembic_cfg()
-    command.downgrade(cfg, "-1")
+    command.downgrade(cfg, "dc3b19a15e9b")  # 回到“按模式区分”迁移之前
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -270,7 +273,68 @@ def test_migration_backfills_paper(engine: Engine) -> None:
         assert conn.scalar(text("SELECT mode FROM signals")) == "paper"
         assert conn.scalar(text("SELECT mode FROM job_runs")) == "paper"
         assert conn.scalar(text("SELECT detail FROM signals")) is None
-    command.downgrade(cfg, "-1")
+    command.downgrade(cfg, "dc3b19a15e9b")  # 回到“按模式区分”迁移之前
     with engine.connect() as conn:
         assert conn.scalar(text("SELECT count(*) FROM signals")) == 1
     command.upgrade(cfg, "head")
+
+
+@pytest.mark.db
+@needs_db
+def test_backtest_ledger_roundtrip_and_cascade(engine: Engine) -> None:
+    import pandas as pd
+    from sqlalchemy import delete
+    from sqlalchemy.orm import Session
+
+    from quant.db.backtests import complete_run, create_run
+    from quant.db.models import BacktestDaily, BacktestPosition, BacktestRun, BacktestTrade
+    from quant.engine.ledger import Ledger, TradeRow
+
+    d = [date(2026, 10, 26), date(2026, 10, 27), date(2026, 10, 28)]
+    eq = pd.Series([100.0, 110.0, 99.0], index=pd.DatetimeIndex(d))
+    dd = eq / eq.cummax() - 1
+    trade = TradeRow(1, "SPY", "main", d[0], 10.0, 5.0, d[2], 11.0, 0.1, 5.0, "目标调整",
+                     [{"date": d[1].isoformat(), "qty": 2.0}])  # fmt: skip
+    led = Ledger(
+        trades=[trade],
+        positions=[(d[0], "SPY", "main", 0.5), (d[1], "SPY", "main", 0.6)],
+        daily=[(x, 0.5, None, {"main": 1.0}) for x in d],
+    )
+    with Session(engine) as s, s.begin():
+        rid = create_run(s, "etf_momentum", {}, d[0], d[2])
+        complete_run(s, rid, {"cagr": 0.1}, eq, dd, led)
+        complete_run(s, rid, {"cagr": 0.1}, eq, dd, led)  # 覆盖，不重复
+    with Session(engine) as s:
+        t = s.query(BacktestTrade).filter_by(run_id=rid).one()
+        assert (t.symbol, t.sleeve, t.exit_reason, t.close_date) == (
+            "SPY",
+            "main",
+            "目标调整",
+            d[2],
+        )
+        assert t.adjustments == [{"date": "2026-10-27", "qty": 2.0}]
+        assert s.query(BacktestPosition).filter_by(run_id=rid).count() == 2
+        assert s.query(BacktestDaily).filter_by(run_id=rid).count() == 3
+    with Session(engine) as s, s.begin():
+        s.execute(delete(BacktestRun).where(BacktestRun.id == rid))
+    with Session(engine) as s:
+        assert s.query(BacktestTrade).count() == 0 and s.query(BacktestDaily).count() == 0
+
+
+@pytest.mark.db
+@needs_db
+def test_ledger_migration_down_and_up_keeps_runs(engine: Engine) -> None:
+    from sqlalchemy.orm import Session
+
+    from quant.db.backtests import create_run
+
+    with Session(engine) as s, s.begin():
+        create_run(s, "etf_momentum", {}, date(2026, 1, 2), date(2026, 2, 2))
+    cfg = _alembic_cfg()
+    command.downgrade(cfg, "7723dfb3f2e6")  # 只回退本次新增的三张表
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM backtest_runs")).scalar_one() == 1
+        assert conn.execute(text("SELECT to_regclass('backtest_trades')")).scalar_one() is None
+    command.upgrade(cfg, "head")
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM backtest_trades")).scalar_one() == 0

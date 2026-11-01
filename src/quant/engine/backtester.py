@@ -27,7 +27,7 @@ from quant.core.models import Bar, Fill, OrderRequest, OrderType, Side, make_cli
 from quant.data.store import ParquetStore
 from quant.engine.metrics import Metrics, buy_and_hold, compute_metrics, drawdown
 from quant.engine.orders import OrderPlanParams, PlannedOrder, plan_orders
-from quant.strategies.base import FIELDS, Context, FieldLoader, Strategy
+from quant.strategies.base import FIELDS, Attribution, Context, FieldLoader, Strategy
 from quant.strategies.events import EventCalendar
 from quant.strategies.universe import Constituents
 
@@ -97,6 +97,9 @@ class BacktestResult:
     benchmark: Metrics | None
     benchmark_equity: pd.Series | None = None
     signals: dict[date, dict[str, float]] = field(default_factory=dict)
+    # #67 B 批：每个信号日的归因（子仓、择时系数、平仓原因）与每日收盘持仓（股数、市值）
+    attribution: dict[date, Attribution] = field(default_factory=dict)
+    holdings: dict[date, dict[str, tuple[float, float]]] = field(default_factory=dict)
     # 数据来源与覆盖（服务器回测，#66）：source、data_end，候选池策略另有 coverage 等
     data_info: dict[str, Any] = field(default_factory=dict)
 
@@ -188,6 +191,8 @@ class Backtester:
         equity: dict[date, Decimal] = {}
         weights: dict[date, dict[str, float]] = {}
         signals: dict[date, dict[str, float]] = {}
+        attribution: dict[date, Attribution] = {}
+        holdings: dict[date, dict[str, tuple[float, float]]] = {}
         traded = Decimal(0)
         pending: tuple[date, dict[str, float]] | None = None  # (信号日, 目标权重)
 
@@ -206,6 +211,7 @@ class Backtester:
             weights[day] = {
                 s: float(p.market_value / acct.net_liquidation) for s, p in positions.items()
             }
+            holdings[day] = {s: (float(p.qty), float(p.market_value)) for s, p in positions.items()}
             if day == days[-1]:
                 break  # 最后一天提交的订单不会成交
             ctx = Context(
@@ -216,8 +222,9 @@ class Backtester:
                 events=self.events,
                 universe=self.universe,
             )
-            target = self.strategy.run(ctx)
+            target, attr = self.strategy.run_attributed(ctx)  # 权重与 run 完全一致
             signals[day] = target
+            attribution[day] = attr
             quotes = broker.get_quotes(sorted(set(target) | set(positions)))
             prices = {s: q.last for s, q in quotes.items()}
             orders = plan_orders(
@@ -252,4 +259,6 @@ class Backtester:
             benchmark=bench,
             benchmark_equity=bench_eq,
             signals=signals,
+            attribution=attribution,
+            holdings=holdings,
         )

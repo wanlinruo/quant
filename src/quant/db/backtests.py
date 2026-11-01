@@ -11,7 +11,14 @@ import pandas as pd
 from sqlalchemy import Engine, create_engine, delete, select, update
 from sqlalchemy.orm import Session
 
-from quant.db.models import BacktestEquity, BacktestRun
+from quant.db.models import (
+    BacktestDaily,
+    BacktestEquity,
+    BacktestPosition,
+    BacktestRun,
+    BacktestTrade,
+)
+from quant.engine.ledger import Ledger
 
 
 def make_engine(url: str) -> Engine:
@@ -40,9 +47,27 @@ def complete_run(
     metrics: Mapping[str, Any],
     equity: pd.Series,
     drawdown: pd.Series,
+    ledger: Ledger | None = None,
 ) -> None:
-    """写入指标与净值曲线，状态改为 done。重复调用会覆盖该次回测的净值曲线。"""
-    session.execute(delete(BacktestEquity).where(BacktestEquity.run_id == run_id))
+    """写入指标、净值曲线与（可选）逐笔交易 / 每日持仓，状态改为 done。重复调用会覆盖。"""
+    for model in (BacktestEquity, BacktestTrade, BacktestPosition, BacktestDaily):
+        session.execute(delete(model).where(model.run_id == run_id))
+    if ledger is not None:
+        session.add_all(
+            BacktestTrade(run_id=run_id, seq=t.seq, symbol=t.symbol, sleeve=t.sleeve,
+                          open_date=t.open_date, open_price=t.open_price, close_date=t.close_date,
+                          close_price=t.close_price, qty=t.qty, ret=t.ret, pnl=t.pnl,
+                          exit_reason=t.exit_reason, adjustments=t.adjustments)
+            for t in ledger.trades
+        )  # fmt: skip
+        session.add_all(
+            BacktestPosition(run_id=run_id, pos_date=d, symbol=s, sleeve=sl, weight=w)
+            for d, s, sl, w in ledger.positions
+        )  # fmt: skip
+        session.add_all(
+            BacktestDaily(run_id=run_id, day=d, cash_weight=c, timing_factor=f, sleeve_pnl=p)
+            for d, c, f, p in ledger.daily
+        )  # fmt: skip
     rows = [
         BacktestEquity(
             run_id=run_id,
