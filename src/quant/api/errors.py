@@ -26,6 +26,8 @@ FIELD_LABELS = {
     "ids": "回测编号",
     "mode": "账户",
     "limit": "条数",
+    "month": "月份",
+    "period": "区间",
 }
 _LOCATIONS = {"body", "query", "path", "header", "cookie"}
 
@@ -49,6 +51,8 @@ def _reason(err: dict[str, Any]) -> str:
         return "格式不正确"
     if t in {"literal_error", "enum"}:
         return "取值无效"
+    if t == "string_pattern_mismatch":
+        return "格式不正确"
     if t == "too_long":
         return "数量过多"
     if t == "json_invalid":

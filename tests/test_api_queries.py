@@ -50,7 +50,7 @@ def test_curve_orders_fills_signals(db_url: str) -> None:
         assert next(o for o in orders if o.status == "CANCELLED").reason == "超时撤单"
         [fill] = queries.fills(s, "paper")
         assert fill.price == 130.5 and fill.commission == 1.17
-        [sig] = queries.latest_signals(s)
+        [sig] = queries.latest_signals(s, "paper")
         assert sig.strategy == "combo" and sig.target_weights == {"NVDA": 0.6, "META": 0.4}
         assert queries.orders(s, "live") == [] and queries.fills(s, "live") == []
     eng.dispose()

@@ -12,7 +12,7 @@ import { useShell } from "../shell";
 export function MarketPage() {
   const { account } = useShell();
   const curve = useApi<AccountPoint[]>(`/api/portfolio/${account}/curve`);
-  const signals = useApi<SignalOut[]>("/api/signals/latest");
+  const signals = useApi<SignalOut[]>("/api/signals/latest", { mode: account });
   const jobs = useApi<JobStatusOut[]>("/api/system/jobs");
 
   return (

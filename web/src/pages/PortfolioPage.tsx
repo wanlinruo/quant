@@ -21,7 +21,7 @@ export function PortfolioPage() {
   const positions = useApi<Position[]>(`${base}/positions`);
   const orders = useApi<OrderOut[]>(`${base}/orders`);
   const fills = useApi<FillOut[]>(`${base}/fills`);
-  const signals = useApi<SignalOut[]>("/api/signals/latest");
+  const signals = useApi<SignalOut[]>("/api/signals/latest", { mode: account });
 
   const last = curve.data?.at(-1);
   const signal = signals.data?.[0];

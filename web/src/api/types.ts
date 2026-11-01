@@ -67,6 +67,35 @@ export interface Bar {
   volume: number;
 }
 
+export interface CalendarDayOut {
+  date: string;
+  pnl: number | null;
+  ret: number | null;
+}
+
+export interface ClosedTradeOut {
+  symbol: string;
+  open_date: string;
+  close_date: string;
+  qty: number;
+  open_price: number;
+  close_price: number;
+  pnl: number;
+  ret: number;
+  days: number;
+}
+
+export interface ClosedTradesOut {
+  trades: ClosedTradeOut[];
+  stats: TradeStatsOut;
+}
+
+export interface ContributionRow {
+  symbol: string;
+  sleeve: "momentum" | "swing" | "both" | "exit" | null;
+  pnl: number;
+}
+
 export interface CostsIn {
   commission_per_share: number | string | null;
   min_commission: number | string | null;
@@ -109,6 +138,24 @@ export interface HTTPValidationError {
   detail?: ValidationError[];
 }
 
+export interface HoldingRow {
+  symbol: string;
+  sleeve: "momentum" | "swing" | "both" | "exit" | null;
+  qty: number;
+  avg_cost: number;
+  price: number | null;
+  change_pct: number | null;
+  market_value: number;
+  weight: number | null;
+  target_weight: number;
+  deviation: number | null;
+  unrealized_pnl: number | null;
+  state: "ok" | "near" | "exit" | null;
+  state_note: string;
+  next_earnings: string | null;
+  holding_days: number;
+}
+
 export interface JobStatusOut {
   job_name: string;
   trade_date: string;
@@ -142,12 +189,62 @@ export interface OrderOut {
   reason: string;
 }
 
+export interface PerfPoint {
+  date: string;
+  nav: number;
+  portfolio: number;
+  qqq: number | null;
+  spy: number | null;
+  drawdown: number;
+}
+
+export interface PerformanceOut {
+  points: PerfPoint[];
+  rebalance_dates: string[];
+}
+
+export interface PortfolioOverview {
+  as_of: string | null;
+  net_liquidation: number | null;
+  cash: number | null;
+  summary: PortfolioSummaryOut;
+  risk: RiskOut;
+  top5: number | null;
+  max_single: number | null;
+  exposure: number | null;
+  timing: TimingOut | null;
+  allocation: SleeveAlloc[];
+  earnings_next_week: string[];
+  reconcile: ReconcileOut;
+}
+
+export interface PortfolioSummaryOut {
+  today_pnl: number | null;
+  today_return: number | null;
+  total_return: number | null;
+  qqq_return: number | null;
+  spy_return: number | null;
+  max_drawdown: number | null;
+  current_drawdown: number | null;
+  ann_vol: number | null;
+  sharpe: number | null;
+}
+
 export interface Position {
   snapshot_date: string;
   symbol: string;
   qty: number;
   avg_cost: number;
   market_value: number;
+}
+
+export interface PreviewRow {
+  side: "BUY" | "SELL";
+  symbol: string;
+  sleeve: "momentum" | "swing" | "both" | "exit" | null;
+  weight_from: number;
+  weight_to: number;
+  reason: string;
 }
 
 export interface QueueStatus {
@@ -157,15 +254,55 @@ export interface QueueStatus {
   failed?: number;
 }
 
+export interface RebalancePreview {
+  signal_date: string | null;
+  rows: PreviewRow[];
+  turnover: number;
+  est_commission: number | null;
+}
+
+export interface ReconcileOut {
+  trading_enabled: boolean;
+  last_report_status: string | null;
+}
+
+export interface RiskOut {
+  beta_spy: number | null;
+  corr_qqq: number | null;
+  var95_1d: number | null;
+}
+
 export interface SignalOut {
+  mode: "sim" | "paper" | "live";
   strategy: string;
   signal_date: string;
   data_as_of: string;
   target_weights: Record<string, number>;
+  detail?: Record<string, unknown> | null;
+}
+
+export interface SleeveAlloc {
+  sleeve: "momentum" | "swing" | "cash" | "other";
+  actual: number;
+  target: number | null;
 }
 
 export interface SubmitResult {
   id: number;
+}
+
+export interface TimingOut {
+  factor: number;
+  vol_symbol: string;
+  vol_20d: number | null;
+  threshold: number;
+}
+
+export interface TradeStatsOut {
+  count: number;
+  win_rate: number | null;
+  avg_pnl: number | null;
+  avg_slippage: number | null;
 }
 
 export interface ValidationError {

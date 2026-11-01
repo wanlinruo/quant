@@ -69,7 +69,7 @@ def test_health_and_meta_without_db(client_no_db: TestClient) -> None:
     [
         "/api/portfolio/paper/positions",
         "/api/portfolio/paper/curve",
-        "/api/signals/latest",
+        "/api/signals/latest?mode=paper",
         "/api/backtests",
         "/api/system/jobs",
         "/api/system/queue",
@@ -116,7 +116,7 @@ def test_portfolio_and_meta_with_data(client_db: TestClient) -> None:
     assert client_db.get("/api/portfolio/live/positions").json() == []
     assert len(client_db.get("/api/portfolio/paper/orders", params={"limit": 1}).json()) == 1
     assert client_db.get("/api/portfolio/paper/fills").json()[0]["symbol"] == "NVDA"
-    assert client_db.get("/api/signals/latest").json()[0]["strategy"] == "combo"
+    assert client_db.get("/api/signals/latest?mode=paper").json()[0]["strategy"] == "combo"
     meta = client_db.get("/api/meta").json()
     assert meta["database_configured"] is True
     assert meta["default_account"] == "paper"

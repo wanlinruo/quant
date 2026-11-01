@@ -10,8 +10,11 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from quant.core.settings import Settings, load_settings
+from quant.data.events import load_events
 from quant.data.store import ParquetStore
+from quant.data.universe_bars import universe_store
 from quant.db.backtests import make_engine
+from quant.strategies.events import EventCalendar
 
 NO_DB = "未配置数据库（QUANT_DATABASE_URL）"
 
@@ -37,3 +40,13 @@ def get_session() -> Iterator[Session]:
 
 def get_store() -> ParquetStore:
     return ParquetStore(get_settings().data_dir)
+
+
+def get_universe_store() -> ParquetStore:
+    """候选池日线（新浪，未复权）：主数据目录没有的股票从这里取。"""
+    return universe_store(get_settings().data_dir)
+
+
+def get_events() -> EventCalendar:
+    """财报日（实盘同步的 + 回测用的，存在时）与 FOMC。"""
+    return load_events(get_settings().data_dir)

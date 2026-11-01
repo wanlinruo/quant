@@ -105,9 +105,11 @@ def account_curve(s: Session, mode: Mode) -> list[AccountPoint]:
     ]  # fmt: skip
 
 
-def latest_signals(s: Session) -> list[SignalOut]:
-    """每个策略最近一次的目标仓位。"""
-    rows = s.scalars(select(Signal).order_by(Signal.signal_date.desc()).limit(50)).all()
+def latest_signals(s: Session, mode: Mode) -> list[SignalOut]:
+    """该账户每个策略最近一次的目标仓位。"""
+    rows = s.scalars(
+        select(Signal).where(Signal.mode == mode).order_by(Signal.signal_date.desc()).limit(50)
+    ).all()
     seen: set[str] = set()
     out = []
     for r in rows:
@@ -115,7 +117,8 @@ def latest_signals(s: Session) -> list[SignalOut]:
             continue
         seen.add(r.strategy)
         out.append(
-            SignalOut(strategy=r.strategy, signal_date=r.signal_date, data_as_of=r.data_as_of,
+            SignalOut(mode=r.mode, strategy=r.strategy, signal_date=r.signal_date,
+                      data_as_of=r.data_as_of, detail=r.detail,
                       target_weights={k: float(v) for k, v in r.target_weights.items()})
         )  # fmt: skip
     return out
