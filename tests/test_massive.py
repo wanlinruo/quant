@@ -1,29 +1,16 @@
 """Massive 客户端（#69 第 1 批 Task 1）。不访问网络。"""
 
-from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
 import pytest
 from pydantic import SecretStr
 
+from fakes import FakeFetch
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.massive import MassiveAuthError, MassiveClient, MassiveRateLimited
 
 KEY = SecretStr("mk-secret-1")
-
-
-class FakeFetch:
-    def __init__(self, *responses: tuple[int, Any] | Exception) -> None:
-        self.responses = list(responses)
-        self.calls: list[tuple[str, dict[str, str]]] = []
-
-    def __call__(self, url: str, headers: Mapping[str, str]) -> tuple[int, Any]:
-        self.calls.append((url, dict(headers)))
-        r = self.responses.pop(0) if len(self.responses) > 1 else self.responses[0]
-        if isinstance(r, Exception):
-            raise r
-        return r
 
 
 class Clock:

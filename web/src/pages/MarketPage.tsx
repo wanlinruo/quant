@@ -10,10 +10,13 @@ import type {
   PortfolioOverview,
   SignalOut,
   StatOut,
+  TickerItemOut,
 } from "../api/types";
 import { ApiState } from "../components/ApiState";
+import { CalendarPanel } from "../components/CalendarPanel";
 import { EmptyState } from "../components/EmptyState";
 import { Cell, Grid } from "../components/Grid";
+import { NewsPanel } from "../components/NewsPanel";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
 import { Tabs } from "../components/Tabs";
@@ -22,10 +25,15 @@ import { CandleChart } from "../charts/CandleChart";
 import { LineChart } from "../charts/LineChart";
 import { useApi } from "../hooks/useApi";
 import { compact, money, num, pct, signedMoney, signedPct } from "../lib/format";
+import { etParts } from "../lib/time";
 import { useShell } from "../shell";
 
-// 行情条里第 2 批（FRED / Coinbase）才接入的项目
-const PENDING_MACRO = ["VIX", "美债 10 年", "美元指数", "原油", "比特币"];
+// 行情条 10 项的固定顺序：ETF 代理来自 market_data 快照，宏观项来自 market_extras（FRED / Coinbase）
+const STRIP_ORDER = [
+  ["SPY", "标普 500"], ["QQQ", "纳指 100"], ["DIA", "道指"], ["IWM", "罗素 2000"], ["VIX", "VIX"],
+  ["US10Y", "美债 10 年"], ["USD", "美元指数"], ["WTI", "原油"], ["GLD", "黄金"], ["BTC", "比特币"],
+] as const;
+const MACRO_KEYS = new Set(["VIX", "US10Y", "USD", "WTI", "BTC"]);
 const PERIODS = [
   { key: "1D", label: "1日" },
   { key: "1W", label: "1周" },
@@ -48,6 +56,26 @@ type IndexKey = (typeof INDICES)[number];
 const HEAT_H = 470;
 const SIDE_H = 380;
 const ROW_H = 360;
+
+function StripItem({ t, asOf }: { t: TickerItemOut; asOf: string | null | undefined }) {
+  const bp = t.unit === "yield";
+  const chg = bp ? (t.change == null ? "—" : `${t.change >= 0 ? "+" : ""}${Math.round(t.change * 100)}bp`) : signedPct(t.change_pct);
+  const stale = t.as_of && asOf && t.as_of !== asOf ? `截至 ${t.as_of.slice(5)}` : null;
+  return (
+    <>
+      <div className="muted sm">
+        <span className="strip-label">{t.label}</span>
+        <span className="etf"> {MACRO_KEYS.has(t.symbol) ? t.note : t.symbol}</span>
+      </div>
+      <div className="num strip-v">{num(t.close)}{bp ? "%" : ""}</div>
+      <div className={`num sm ${tone(bp ? t.change : t.change_pct)}`}>
+        {chg}
+        {stale && <span className="muted"> {stale}</span>}
+      </div>
+      <Sparkline values={t.spark} width={70} height={18} />
+    </>
+  );
+}
 
 function tone(v: number | null | undefined): string {
   return v == null || v === 0 ? "" : v > 0 ? "up" : "down";
@@ -92,7 +120,7 @@ function full(m: MarketOverview | null): Full | null {
     status: "ok", as_of: m.as_of, stale: m.stale ?? false, generated_at: m.generated_at, members: m.members ?? 0,
     coverage: m.coverage, strip: m.strip ?? [], highlights: m.highlights ?? "", breadth: m.breadth,
     styles: m.styles ?? [], sectors: m.sectors ?? [], movers: m.movers ?? [], heatmap: m.heatmap ?? {},
-    index_candles: m.index_candles ?? {},
+    index_candles: m.index_candles ?? {}, macro: m.macro ?? [],
   };
 }
 
@@ -104,26 +132,31 @@ export function MarketPage() {
   const m = useMemo(() => full(market.data), [market.data]);
   const mine = useMemo(() => new Set((holdings.data ?? []).map((h) => h.symbol)), [holdings.data]);
   const link = (sym: string) => ({ pathname: `/stock/${sym}`, search: `?account=${account}` });
+  const stripItems = useMemo(
+    () => new Map([...(m?.strip ?? []), ...(market.data?.macro ?? [])].map((t) => [t.symbol, t])),
+    [m, market.data],
+  );
 
   return (
     <div className="page">
       <Grid>
         <Cell span={12}>
           <section className="panel strip" data-testid="ticker-strip">
-            {(m?.strip ?? []).map((t) => (
-              <Link key={t.symbol} to={link(t.symbol)} className="strip-item">
-                <div className="muted sm">{t.label}<span className="etf"> {t.symbol}</span></div>
-                <div className="num strip-v">{num(t.close)}</div>
-                <div className={`num sm ${tone(t.change_pct)}`}>{signedPct(t.change_pct)}</div>
-                <Sparkline values={t.spark} width={70} height={18} />
-              </Link>
-            ))}
-            {(m ? PENDING_MACRO : ["标普 500", "纳指 100", "道指", "罗素 2000", "黄金", ...PENDING_MACRO]).map((label) => (
-              <div key={label} className="strip-item">
-                <div className="muted sm">{label}</div>
-                <div className="muted sm">数据接入中</div>
-              </div>
-            ))}
+            {STRIP_ORDER.map(([sym, label]) => {
+              const t = stripItems.get(sym);
+              if (!t)
+                return (
+                  <div key={sym} className="strip-item">
+                    <div className="muted sm"><span className="strip-label">{label}</span></div>
+                    <div className="muted sm">数据接入中</div>
+                  </div>
+                );
+              return MACRO_KEYS.has(sym) ? (
+                <div key={sym} className="strip-item"><StripItem t={t} asOf={m?.as_of} /></div>
+              ) : (
+                <Link key={sym} to={link(sym)} className="strip-item"><StripItem t={t} asOf={m?.as_of} /></Link>
+              );
+            })}
           </section>
         </Cell>
       </Grid>
@@ -202,8 +235,8 @@ export function MarketPage() {
         </Cell>
         <Cell span={3}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Panel title="新闻" height={SIDE_H}><EmptyState kind="pending" note="第 2 批接入（Finnhub / Massive）" /></Panel>
-            <Panel title="财经日历" height={SIDE_H - 80}><EmptyState kind="pending" note="第 2 批接入（Forex Factory / FRED）" /></Panel>
+            <NewsPanel height={SIDE_H} mine={mine} />
+            <CalendarPanel height={SIDE_H - 20} />
             <MyStrategy />
           </div>
         </Cell>
@@ -292,7 +325,7 @@ function Movers({ rows, mine, link }: { rows: MoverOut[] | null; mine: Set<strin
           ) : (
             <table className="dt">
               <thead>
-                <tr><th>代码</th><th>名称</th><th>板块</th><th className="r">市值</th><th className="r">收盘</th><th className="r">涨跌</th><th className="r">量比</th><th>信号</th><th>原因</th><th>20 日</th></tr>
+                <tr><th>代码</th><th>名称</th><th>板块</th><th className="r">市值</th><th className="r">收盘</th><th className="r">涨跌</th><th className="r">量比</th><th>信号</th><th>原因（关联新闻）</th><th>20 日</th></tr>
               </thead>
               <tbody>
                 {shown.map((x) => (
@@ -305,7 +338,15 @@ function Movers({ rows, mine, link }: { rows: MoverOut[] | null; mine: Set<strin
                     <td className={`r num ${tone(x.change_pct)}`}>{signedPct(x.change_pct)}</td>
                     <td className="r num">{x.volume_ratio == null ? "—" : num(x.volume_ratio, 1)}</td>
                     <td>{x.signals.map((s) => <span key={s} className="pill info" style={{ marginRight: 4 }}>{s}</span>)}</td>
-                    <td className="muted">—</td>
+                    <td className="reason" data-testid="reason">
+                      {x.reason ? (
+                        <a href={x.reason.url} target="_blank" rel="noreferrer" title={x.reason.headline}>
+                          {`${x.reason.headline} · ${x.reason.source} ${etParts(x.reason.time).time}`}
+                        </a>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
                     <td><Sparkline values={x.spark} /></td>
                   </tr>
                 ))}

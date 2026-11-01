@@ -44,7 +44,35 @@ const BASE = {
   "/api/portfolio/paper/holdings": [200, [{ symbol: "AAPL" }]],
   "/api/signals/latest": [200, []],
   "/api/system/jobs": [200, []],
+  "/api/market/news": [200, { status: "pending" }],
+  "/api/market/calendar": [200, { status: "pending" }],
 } as const;
+
+const MACRO = [
+  { symbol: "VIX", label: "VIX", close: 17.5, change: 0.5, change_pct: 0.0294, spark: [17, 17.5], as_of: "2026-10-29", note: "", unit: "price" },
+  { symbol: "US10Y", label: "美债 10 年", close: 4.98, change: 0.05, change_pct: null, spark: [4.93, 4.98], as_of: "2026-10-30", note: "", unit: "yield" },
+  { symbol: "USD", label: "美元指数", close: 121.3, change: -0.2, change_pct: -0.0016, spark: [], as_of: "2026-10-23", note: "广义美元指数 · 周", unit: "price" },
+  { symbol: "WTI", label: "原油", close: 103.4, change: 1, change_pct: 0.0098, spark: [], as_of: "2026-10-30", note: "WTI", unit: "price" },
+  { symbol: "BTC", label: "比特币", close: 77756.72, change: 333, change_pct: 0.0043, spark: [], as_of: "2026-10-31", note: "Coinbase · UTC 日线", unit: "price" },
+];
+const NEWS = {
+  status: "ok", generated_at: "2026-10-30T21:00:00-04:00",
+  items: [
+    { time: "2026-10-30T20:10:00Z", headline: "Exxon Q3 earnings beat", source: "CNBC", url: "https://n/1", tags: ["XOM"], category: "earnings" },
+    { time: "2026-10-30T18:00:00Z", headline: "Exxon names CFO", source: "Reuters", url: "https://n/2", tags: ["XOM"], category: "company" },
+    { time: "2026-10-29T14:00:00Z", headline: "Fed holds rates", source: "Reuters", url: "https://n/3", tags: [], category: "macro" },
+  ],
+};
+const CAL = {
+  status: "ok", generated_at: "2026-10-30T21:00:00-04:00",
+  released: [
+    { time: "2026-10-30T08:30:00-04:00", date_only: false, kind: "econ", title: "Non-Farm Employment Change", impact: 3, actual: "63K", forecast: "60K", previous: "29K", symbols: [], held: false, session: null },
+  ],
+  upcoming: [
+    { time: "2026-11-02T08:00:00-05:00", date_only: false, kind: "earnings", title: "CVX · XOM 财报", impact: 2, actual: null, forecast: "2.43", previous: null, symbols: ["CVX", "XOM"], held: false, session: "盘前" },
+    { time: "2026-11-04T12:00:00-05:00", date_only: true, kind: "earnings", title: "AAPL 财报", impact: 3, actual: null, forecast: null, previous: null, symbols: ["AAPL"], held: true, session: null },
+  ],
+};
 
 describe("MarketPage", () => {
   it("shows pending when snapshot missing", async () => {
@@ -108,6 +136,80 @@ describe("MarketPage", () => {
     expect(within(table).queryByText("MSFT")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "我的持仓" }));
     expect(within(table).getByText("MSFT")).toBeInTheDocument();
+  });
+
+  it("strip shows macro items in order with yield in bp", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [200, { ...OVERVIEW, macro: MACRO }] });
+    renderPage(<MarketPage />, "/");
+    const strip = await screen.findByTestId("ticker-strip");
+    const labels = [...strip.querySelectorAll(".strip-label")].map((e) => e.textContent);
+    expect(labels).toEqual(["标普 500", "纳指 100", "道指", "罗素 2000", "VIX", "美债 10 年", "美元指数", "原油", "黄金", "比特币"]);
+    expect(within(strip).getByText("+5bp")).toBeInTheDocument();
+    expect(within(strip).getByText("截至 10-29")).toBeInTheDocument();
+    expect(within(strip).getByText("WTI")).toBeInTheDocument();
+    expect(within(strip).queryByText("数据接入中")).not.toBeInTheDocument();
+  });
+
+  it("macro shown even when snapshot pending", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [200, { status: "pending", macro: MACRO.slice(0, 1) }] });
+    renderPage(<MarketPage />, "/");
+    const strip = await screen.findByTestId("ticker-strip");
+    expect(await within(strip).findByText("17.50")).toBeInTheDocument();
+    expect(within(strip).getAllByText("数据接入中")).toHaveLength(9);
+  });
+
+  it("news filters", async () => {
+    mockApi({ ...BASE, "/api/portfolio/paper/holdings": [200, [{ symbol: "XOM" }]], "/api/market/overview": [200, OVERVIEW], "/api/market/news": [200, NEWS] });
+    const { user } = renderPage(<MarketPage />, "/");
+    const panel = await screen.findByTestId("news");
+    expect(await within(panel).findAllByRole("link")).toHaveLength(3);
+    expect(within(panel).getByText("10-29")).toBeInTheDocument();
+    expect(within(panel).getByText("16:10")).toBeInTheDocument();
+    await user.click(within(panel.closest("section")!).getByRole("button", { name: "宏观" }));
+    expect(within(panel).getAllByRole("link")).toHaveLength(1);
+    await user.click(within(panel.closest("section")!).getByRole("button", { name: "持仓" }));
+    expect(within(panel).getAllByRole("link")).toHaveLength(2);
+    await user.click(within(panel.closest("section")!).getByRole("button", { name: "财报" }));
+    expect(within(panel).getByRole("link", { name: "Exxon Q3 earnings beat" })).toHaveAttribute("rel", "noreferrer");
+    expect(within(panel).getAllByRole("link")).toHaveLength(1);
+  });
+
+  it("news shows update time", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW], "/api/market/news": [200, { ...NEWS, generated_at: "2026-10-28T21:00:00-04:00" }] });
+    renderPage(<MarketPage />, "/");
+    const panel = await screen.findByTestId("news");
+    expect(await within(panel).findByText("更新于 10-28 21:00 ET")).toBeInTheDocument();
+  });
+
+  it("calendar released and upcoming", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW], "/api/market/calendar": [200, CAL] });
+    renderPage(<MarketPage />, "/");
+    const panel = await screen.findByTestId("calendar");
+    expect(await within(panel).findByText("实际 63K")).toBeInTheDocument();
+    expect(within(panel).getByText("预期 60K · 前值 29K")).toBeInTheDocument();
+    expect(within(panel).getByText(/盘前/)).toBeInTheDocument();
+    expect(within(panel).getByText(/时间未定/)).toBeInTheDocument();
+    const dots = panel.querySelectorAll("[data-upcoming] .dots");
+    expect([...dots].map((d) => d.querySelectorAll("[data-on]").length)).toEqual([2, 3]);
+    expect(within(panel).getByText("经济数据每周一更新")).toBeInTheDocument();
+  });
+
+  it("mover reason column", async () => {
+    const movers = OVERVIEW.movers.map((x) => (x.symbol === "NVDA" ? { ...x, reason: { headline: "Nvidia extends gains", source: "Reuters", time: "2026-10-30T18:00:00Z", url: "https://n/9" } } : x));
+    mockApi({ ...BASE, "/api/market/overview": [200, { ...OVERVIEW, movers }] });
+    renderPage(<MarketPage />, "/");
+    const table = await screen.findByTestId("movers");
+    const nvda = within(table).getByText("NVDA").closest("tr")!;
+    expect(within(nvda).getByText("Nvidia extends gains · Reuters 14:00")).toBeInTheDocument();
+    const xom = within(table).getByText("XOM").closest("tr")!;
+    expect(within(xom).getByTestId("reason")).toHaveTextContent("—");
+  });
+
+  it("news and calendar pending", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW] });
+    renderPage(<MarketPage />, "/");
+    expect(await within(await screen.findByTestId("news")).findByText("数据接入中")).toBeInTheDocument();
+    expect(await within(await screen.findByTestId("calendar")).findByText("数据接入中")).toBeInTheDocument();
   });
 
   it("heatmap period switch", async () => {

@@ -469,6 +469,9 @@ class TickerItemOut(BaseModel):
     change: float | None
     change_pct: float | None
     spark: list[float]
+    as_of: date | None = None  # 宏观项自己的数据日期（FRED 次日才更新）
+    note: str = ""  # 口径说明，如“广义美元指数 · 周”
+    unit: Literal["price", "yield"] = "price"  # 收益率的涨跌按基点显示
 
 
 class StatOut(BaseModel):
@@ -507,6 +510,13 @@ class SectorRowOut(BaseModel):
     spark: list[float]
 
 
+class NewsRefOut(BaseModel):
+    headline: str
+    source: str
+    time: datetime
+    url: str
+
+
 class MoverOut(BaseModel):
     symbol: str
     name: str | None
@@ -518,6 +528,7 @@ class MoverOut(BaseModel):
     signals: list[str]
     spark: list[float]
     held: bool = False
+    reason: NewsRefOut | None = None  # 关联新闻（market_extras 生成，与快照同一天才合并）
 
 
 class HeatCellOut(BaseModel):
@@ -552,3 +563,40 @@ class MarketOverview(BaseModel):
     movers: list[MoverOut] = []
     heatmap: dict[str, list[HeatCellOut]] = {}
     index_candles: dict[str, list[CandleOut]] = {}
+    macro: list[TickerItemOut] = []  # VIX、美债、美元、原油、比特币（market_extras）
+
+
+class NewsItemOut(BaseModel):
+    time: datetime
+    headline: str
+    source: str
+    url: str
+    tags: list[str]
+    category: Literal["macro", "company", "earnings"]
+
+
+class MarketNews(BaseModel):
+    status: Literal["ok", "pending"]
+    generated_at: datetime | None = None
+    items: list[NewsItemOut] = []
+
+
+class CalItemOut(BaseModel):
+    time: datetime
+    date_only: bool
+    kind: Literal["econ", "earnings", "fomc"]
+    title: str
+    impact: int
+    actual: str | None
+    forecast: str | None
+    previous: str | None
+    symbols: list[str]
+    held: bool
+    session: str | None
+
+
+class MarketCalendar(BaseModel):
+    status: Literal["ok", "pending"]
+    generated_at: datetime | None = None
+    released: list[CalItemOut] = []
+    upcoming: list[CalItemOut] = []

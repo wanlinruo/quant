@@ -1,7 +1,9 @@
-"""测试共用的假券商、假时钟与通知记录器。"""
+"""测试共用的假券商、假时钟、通知记录器与假 HTTP 请求。"""
 
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from quant.broker.base import Broker
 from quant.broker.tiger import BrokerError
@@ -113,3 +115,18 @@ class Notes:
 
     def send(self, title: str, body: str, level: Level = Level.INFO) -> None:
         self.sent.append((title, body, level))
+
+
+class FakeFetch:
+    """按顺序返回给定的 (状态码, 内容)，最后一个重复使用；记录每次调用的网址与请求头。"""
+
+    def __init__(self, *responses: tuple[int, Any] | Exception) -> None:
+        self.responses = list(responses)
+        self.calls: list[tuple[str, dict[str, str]]] = []
+
+    def __call__(self, url: str, headers: Mapping[str, str]) -> tuple[int, Any]:
+        self.calls.append((url, dict(headers)))
+        r = self.responses.pop(0) if len(self.responses) > 1 else self.responses[0]
+        if isinstance(r, Exception):
+            raise r
+        return r

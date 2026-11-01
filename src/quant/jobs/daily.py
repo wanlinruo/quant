@@ -23,6 +23,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
+from pydantic import SecretStr
 from sqlalchemy import Engine, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
@@ -63,7 +64,8 @@ from quant.strategies.universe import Constituents
 
 log = logging.getLogger("quant.jobs")
 
-JOBS = ("daily_data", "daily_signal", "daily_execute", "daily_report", "market_data")
+JOBS = ("daily_data", "daily_signal", "daily_execute", "daily_report", "market_data",
+        "market_extras")  # fmt: skip
 DATA_RETRIES = 3
 DATA_RETRY_SECONDS = 15 * 60
 COMPARE_DAYS = 45
@@ -471,31 +473,61 @@ def _weights_text(weights: dict[str, float]) -> str:
     return "，".join(f"{s} {w:.0%}" for s, w in sorted(weights.items(), key=lambda x: -x[1]))
 
 
+def _all_holdings(ctx: JobContext) -> set[str]:
+    """各账户（模式）最新持仓快照中的代码；没有数据库时为空。"""
+    if ctx.engine is None:
+        return set()
+    with Session(ctx.engine) as s:
+        latest = (
+            select(PositionSnapshot.mode, func.max(PositionSnapshot.snapshot_date))
+            .group_by(PositionSnapshot.mode)
+            .subquery()
+        )
+        return set(s.scalars(
+            select(PositionSnapshot.symbol).join(
+                latest,
+                (PositionSnapshot.mode == latest.c.mode)
+                & (PositionSnapshot.snapshot_date == latest.c[1]),
+            )
+        ))  # fmt: skip
+
+
+def _key(v: SecretStr | None) -> SecretStr | None:
+    return v if v is not None and v.get_secret_value().strip() else None
+
+
 def market_data(ctx: JobContext, d: date) -> str:
     """首页市场看板（#69）：Massive 全市场日线 → data_dir/market/snapshot.json；与交易无关。"""
-    key = ctx.settings.massive_api_key
-    if key is None or not key.get_secret_value().strip():
+    key = _key(ctx.settings.massive_api_key)
+    if key is None:
         return "未配置 Massive key（QUANT_MASSIVE_API_KEY），跳过"
     from quant.data.providers.massive import MassiveClient
     from quant.market.job import run_market_data
 
-    holdings: set[str] = set()
-    if ctx.engine is not None:
-        with Session(ctx.engine) as s:
-            latest = (
-                select(PositionSnapshot.mode, func.max(PositionSnapshot.snapshot_date))
-                .group_by(PositionSnapshot.mode)
-                .subquery()
-            )
-            holdings = set(s.scalars(
-                select(PositionSnapshot.symbol).join(
-                    latest,
-                    (PositionSnapshot.mode == latest.c.mode)
-                    & (PositionSnapshot.snapshot_date == latest.c[1]),
-                )
-            ))  # fmt: skip
+    holdings = _all_holdings(ctx)
     return run_market_data(MassiveClient(key), ctx.settings.data_dir, d, ctx.calendar,
                            ctx.settings.board, holdings)  # fmt: skip
+
+
+def market_extras(ctx: JobContext, d: date) -> str:
+    """首页宏观、新闻、财经日历（#69 第 2 批）→ data_dir/market/{macro,news,calendar}.json。
+
+    FRED、Finnhub 未配置 key 时对应区块跳过；Coinbase 与 Forex Factory 无需 key。与交易无关。
+    """
+    from quant.data.providers.finnhub import FinnhubClient
+    from quant.data.providers.fred import FredClient
+    from quant.market import extras_job
+
+    fred_key, fh_key = _key(ctx.settings.fred_api_key), _key(ctx.settings.finnhub_api_key)
+    return extras_job.run_market_extras(
+        data_dir=ctx.settings.data_dir,
+        now=ctx.now(),
+        today=d,
+        cal=ctx.calendar,
+        holdings=_all_holdings(ctx),
+        fred=FredClient(fred_key) if fred_key else None,
+        finnhub=FinnhubClient(fh_key) if fh_key else None,
+    )
 
 
 JOB_FUNCS: dict[str, Callable[[JobContext, date], str]] = {
@@ -504,6 +536,7 @@ JOB_FUNCS: dict[str, Callable[[JobContext, date], str]] = {
     "daily_execute": daily_execute,
     "daily_report": daily_report,
     "market_data": market_data,
+    "market_extras": market_extras,
 }
 
 # 这些异常在抛出前已经通知过

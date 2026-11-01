@@ -138,3 +138,22 @@ table.dt tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
 .tm-cell .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .tm-cell b { font-weight: 600; }
 .tm-cell .tm-sub { margin-left: 3px; opacity: .85; }
+
+/* 首页右栏：新闻与财经日历（#69 第 2 批） */
+.news-list, .cal-list { overflow-y: auto; }
+.news-row { display: grid; grid-template-columns: 40px auto 1fr; gap: 2px 6px; padding: 5px 0; border-bottom: 1px solid #23262f; font-size: 12px; }
+.news-row .src { justify-self: end; white-space: nowrap; }
+.news-row .hl { grid-column: 1 / -1; color: #d1d4dc; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.news-row .hl:hover { color: #fff; text-decoration: underline; }
+.tag { display: inline-block; padding: 0 4px; margin-right: 3px; border-radius: 3px; background: #23262f; color: #9aa0ac; font-size: 11px; }
+.cal-sub { margin: 6px 0 2px; color: #7d828f; font-size: 11px; }
+.cal-row { display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; padding: 4px 0; border-bottom: 1px solid #23262f; font-size: 12px; }
+.cal-row b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: #d1d4dc; }
+.cal-row > span:first-child { grid-column: 1 / -1; }
+.dots { display: inline-flex; gap: 2px; align-items: center; }
+.dots i { width: 6px; height: 6px; border-radius: 50%; background: #facc15; opacity: 0.25; }
+.dots i[data-on] { opacity: 1; }
+td.reason { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.reason a { color: #d1d4dc; text-decoration: none; }
+td.reason a:hover { text-decoration: underline; }
+.news-upd { text-align: right; padding-bottom: 2px; }

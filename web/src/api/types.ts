@@ -96,6 +96,20 @@ export interface BreadthOut {
   up_volume_ratio: StatOut;
 }
 
+export interface CalItemOut {
+  time: string;
+  date_only: boolean;
+  kind: "econ" | "earnings" | "fomc";
+  title: string;
+  impact: number;
+  actual: string | null;
+  forecast: string | null;
+  previous: string | null;
+  symbols: string[];
+  held: boolean;
+  session: string | null;
+}
+
 export interface CalendarDayOut {
   date: string;
   pnl: number | null;
@@ -233,6 +247,19 @@ export interface KeyStatsOut {
   days_to_earnings: number | null;
 }
 
+export interface MarketCalendar {
+  status: "ok" | "pending";
+  generated_at?: string | null;
+  released?: CalItemOut[];
+  upcoming?: CalItemOut[];
+}
+
+export interface MarketNews {
+  status: "ok" | "pending";
+  generated_at?: string | null;
+  items?: NewsItemOut[];
+}
+
 export interface MarketOverview {
   status: "ok" | "pending";
   as_of?: string | null;
@@ -248,6 +275,7 @@ export interface MarketOverview {
   movers?: MoverOut[];
   heatmap?: Record<string, HeatCellOut[]>;
   index_candles?: Record<string, CandleOut[]>;
+  macro?: TickerItemOut[];
 }
 
 export interface Meta {
@@ -270,6 +298,23 @@ export interface MoverOut {
   signals: string[];
   spark: number[];
   held?: boolean;
+  reason?: NewsRefOut | null;
+}
+
+export interface NewsItemOut {
+  time: string;
+  headline: string;
+  source: string;
+  url: string;
+  tags: string[];
+  category: "macro" | "company" | "earnings";
+}
+
+export interface NewsRefOut {
+  headline: string;
+  source: string;
+  time: string;
+  url: string;
 }
 
 export interface OrderOut {
@@ -511,6 +556,9 @@ export interface TickerItemOut {
   change: number | null;
   change_pct: number | null;
   spark: number[];
+  as_of?: string | null;
+  note?: string;
+  unit?: "price" | "yield";
 }
 
 export interface TimingOut {
