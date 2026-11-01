@@ -30,7 +30,20 @@ class MassiveRateLimited(DataUnavailableError):
 
 
 class MassiveAuthError(DataUnavailableError):
-    """401 / 403：key 无效或无权限。"""
+    """401：key 无效。"""
+
+
+@dataclass(frozen=True)
+class Split:
+    symbol: str
+    execution_date: date
+    split_from: float
+    split_to: float
+
+    @property
+    def factor(self) -> float:
+        """执行日之前的价格乘以该系数（10 拆 1 为 0.1），成交量除以它。"""
+        return self.split_from / self.split_to
 
 
 @dataclass(frozen=True)
@@ -68,8 +81,14 @@ class MassiveClient:
             self._last = self._clock()
         if status == 429:
             raise MassiveRateLimited("Massive 额度已用尽（每分钟 5 次）")
-        if status in (401, 403):
-            raise MassiveAuthError(f"Massive 拒绝访问（{status}），请检查 MASSIVE_API_KEY")
+        if status == 401:
+            raise MassiveAuthError("Massive 拒绝访问（401），请检查 MASSIVE_API_KEY")
+        if status == 403:
+            # 免费档请求超出套餐的时间范围（如当日数据尚未就绪、2 年以前）时返回 403，不是 key 无效
+            msg = body.get("message") if isinstance(body, dict) else None
+            raise DataUnavailableError(
+                f"Massive 403：{str(msg)[:120] if msg else '套餐不含该数据'}"
+            )
         return status, body
 
     def grouped_daily(self, day: date) -> pd.DataFrame:
@@ -85,6 +104,25 @@ class MassiveClient:
             if c not in df.columns:
                 df[c] = pd.Series(dtype="float64" if c != "symbol" else "object")
         return df[list(COLUMNS.values())].reset_index(drop=True)
+
+    def splits(self, day: date) -> list[Split]:
+        """day 当天执行的拆股 / 合股。"""
+        status, body = self._get(
+            f"/v3/reference/splits?execution_date={day.isoformat()}&limit=1000"
+        )
+        if status != 200 or not isinstance(body, dict):
+            raise DataUnavailableError(f"Massive 拆股 {day} 返回 {status}")
+        out = []
+        for r in body.get("results") or []:
+            try:
+                f, t = float(r["split_from"]), float(r["split_to"])
+                if f > 0 and t > 0:
+                    out.append(
+                        Split(str(r["ticker"]), date.fromisoformat(r["execution_date"]), f, t)
+                    )
+            except (KeyError, TypeError, ValueError):
+                continue
+        return out
 
     def ticker_details(self, symbol: str) -> TickerDetails | None:
         status, body = self._get(f"/v3/reference/tickers/{quote(symbol)}")

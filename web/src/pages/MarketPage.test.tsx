@@ -100,6 +100,16 @@ describe("MarketPage", () => {
     expect(within(table).queryByText("NVDA")).not.toBeInTheDocument();
   });
 
+  it("held-only rows appear only under holdings filter", async () => {
+    const held = { symbol: "MSFT", name: "Microsoft", sector: "信息技术", market_cap: 4e12, close: 500, change_pct: 0.003, volume_ratio: 1, signals: [], spark: [], held: true };
+    mockApi({ ...BASE, "/api/portfolio/paper/holdings": [200, [{ symbol: "MSFT" }]], "/api/market/overview": [200, { ...OVERVIEW, movers: [...OVERVIEW.movers, held] }] });
+    const { user } = renderPage(<MarketPage />, "/");
+    const table = await screen.findByTestId("movers");
+    expect(within(table).queryByText("MSFT")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "我的持仓" }));
+    expect(within(table).getByText("MSFT")).toBeInTheDocument();
+  });
+
   it("heatmap period switch", async () => {
     mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW] });
     const { user } = renderPage(<MarketPage />, "/");

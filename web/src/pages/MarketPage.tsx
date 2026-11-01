@@ -60,7 +60,12 @@ function heatColor(r: number | null | undefined): string {
   return r >= 0 ? `rgba(34,197,94,${0.15 + 0.75 * a})` : `rgba(239,68,68,${0.15 + 0.75 * a})`;
 }
 
-function filterMovers(rows: MoverOut[], f: FilterKey, mine: Set<string>): MoverOut[] {
+const MOVER_MIN_CHANGE = 0.02;
+
+function filterMovers(all: MoverOut[], f: FilterKey, mine: Set<string>): MoverOut[] {
+  if (f === "mine") return all.filter((m) => mine.has(m.symbol));
+  // 持仓标的不论涨跌都在表里；其他筛选只看达到门槛或有信号的
+  const rows = all.filter((m) => !m.held || Math.abs(m.change_pct) >= MOVER_MIN_CHANGE || m.signals.length > 0);
   switch (f) {
     case "up":
       return rows.filter((m) => m.change_pct > 0).sort((a, b) => b.change_pct - a.change_pct);
@@ -72,8 +77,6 @@ function filterMovers(rows: MoverOut[], f: FilterKey, mine: Set<string>): MoverO
       return rows.filter((m) => m.signals.includes("跳空"));
     case "hilo":
       return rows.filter((m) => m.signals.some((s) => s.startsWith("52周")));
-    case "mine":
-      return rows.filter((m) => mine.has(m.symbol));
     default:
       return rows;
   }

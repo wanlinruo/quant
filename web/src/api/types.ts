@@ -269,6 +269,7 @@ export interface MoverOut {
   volume_ratio: number | null;
   signals: string[];
   spark: number[];
+  held?: boolean;
 }
 
 export interface OrderOut {

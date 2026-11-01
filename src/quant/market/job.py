@@ -22,15 +22,17 @@ from quant.core.settings import BoardSettings
 from quant.data.market_store import ETF_SET, CapInfo, MarketStore, snapshot_path, sync_gics
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.http import http_get_text
-from quant.data.providers.massive import MassiveAuthError, TickerDetails
+from quant.data.providers.massive import MassiveAuthError, Split, TickerDetails
 from quant.data.quota import atomic_write_text
 from quant.market.board import build_snapshot
 
 log = logging.getLogger("quant.market_data")
+SPLIT_DAYS_PER_RUN = 10  # 停跑多日后分几次追上，避免一次占满额度
 
 
 class Client(Protocol):
     def grouped_daily(self, day: date) -> pd.DataFrame: ...
+    def splits(self, day: date) -> list[Split]: ...
     def ticker_details(self, symbol: str) -> TickerDetails | None: ...
 
 
@@ -66,17 +68,42 @@ def run_market_data(
         store.write_day(day, df, keep)
         return True
 
+    def check_splits() -> bool:
+        """核对到 today 返回 True；中途限流 / 故障时置 stopped，进度保留到已核对的那天。"""
+        nonlocal stopped
+        last = store.splits_checked()
+        days = [today] if last is None else [d for d in cal.trading_days(last, today) if d > last]
+        for d in days[:SPLIT_DAYS_PER_RUN]:
+            try:
+                found = client.splits(d)
+            except MassiveAuthError:
+                raise
+            except DataUnavailableError as e:
+                stopped = True
+                notes.append(f"拆股核对停在 {d}（{type(e).__name__}）")
+                return False
+            for sp in found:
+                if sp.symbol in keep and store.apply_split(sp.symbol, sp.execution_date, sp.factor):
+                    ratio = f"{sp.split_from:g}:{sp.split_to:g}"
+                    notes.append(f"{sp.symbol} {sp.execution_date} 拆股 {ratio} 已换算")
+            store.set_splits_checked(d)
+        return store.splits_checked() == today
+
     if not store.has_day(today):
-        stale = not fetch_day(today) and not stopped
+        fetch_day(today)
+        stale = not store.has_day(today)
         if stale:
-            notes.append(f"{today} 当日数据为空，沿用上一交易日")
+            notes.append(f"{today} 当日数据未取到，沿用上一交易日")
+    # 拆股：核对上次之后每个交易日执行的拆股，换算之前已存的日线。
+    # 补历史取到的数据已按取数当时的拆股调整，所以核对没跟上之前不补历史，避免重复换算。
+    splits_done = check_splits() if not stopped else False
     # 补历史：最近 history_days 个交易日中缺的，由近及远
     start = today - timedelta(days=int(settings.history_days * 1.6) + 10)
     window = cal.trading_days(start, today)[-settings.history_days :]
     missing = [d for d in reversed(window) if d != today and not store.has_day(d)]
     fetched = 0
     for d in missing[: settings.history_per_run]:
-        if stopped:
+        if stopped or not splits_done:
             break
         fetched += fetch_day(d)
     # 市值：从未取过的优先，其次最旧的
@@ -100,7 +127,7 @@ def run_market_data(
             caps[s] = CapInfo(cap, info.name if info else (old.name if old else None), today)
             refreshed += 1
         store.write_caps(caps)
-    snap = build_snapshot(store, gics, today, stale)
+    snap = build_snapshot(store, gics, today, stale, holdings)
     atomic_write_text(snapshot_path(data_dir), json.dumps(snap.to_json(), ensure_ascii=False,
                                                           allow_nan=False))  # fmt: skip
     have = len(store.days())

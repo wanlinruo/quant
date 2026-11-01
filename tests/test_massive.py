@@ -118,3 +118,30 @@ def test_key_not_in_error_message() -> None:
     with pytest.raises(DataUnavailableError) as e:
         client(FakeFetch((500, {"error": "x"}))).grouped_daily(date(2026, 10, 30))
     assert not isinstance(e.value, MassiveRateLimited | MassiveAuthError)
+
+
+# ---- 最终审查修复（#69）----
+
+
+def test_403_is_not_auth_error() -> None:
+    """免费档对超出套餐的时间范围（如当日数据未就绪）返回 403：按暂时拿不到处理，非 key 无效。"""
+    body = {"status": "NOT_AUTHORIZED", "message": "Your plan doesn't include this data timeframe."}
+    with pytest.raises(DataUnavailableError) as e:
+        client(FakeFetch((403, body))).grouped_daily(date(2026, 10, 30))
+    assert not isinstance(e.value, MassiveAuthError | MassiveRateLimited)
+
+
+def test_splits() -> None:
+    body = {
+        "results": [
+            {"ticker": "NVDA", "execution_date": "2026-10-30", "split_from": 1, "split_to": 10}
+        ]
+    }
+    fetch = FakeFetch((200, body))
+    got = client(fetch).splits(date(2026, 10, 30))
+    assert (
+        fetch.calls[0][0]
+        == "https://api.massive.com/v3/reference/splits?execution_date=2026-10-30&limit=1000"
+    )
+    assert len(got) == 1 and got[0].symbol == "NVDA" and got[0].factor == pytest.approx(0.1)
+    assert client(FakeFetch((200, {"results": []}))).splits(date(2026, 10, 29)) == []

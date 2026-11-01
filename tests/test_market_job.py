@@ -3,6 +3,7 @@
 import json
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -12,7 +13,12 @@ from quant.core.settings import BoardSettings
 from quant.data import market_store as ms
 from quant.data.market_store import snapshot_path
 from quant.data.providers.base import DataUnavailableError
-from quant.data.providers.massive import MassiveAuthError, MassiveRateLimited, TickerDetails
+from quant.data.providers.massive import (
+    MassiveAuthError,
+    MassiveRateLimited,
+    Split,
+    TickerDetails,
+)
 from quant.market.job import run_market_data
 
 CAL = get_calendar()
@@ -48,6 +54,9 @@ class FakeClient:
         self.days.append(day)
         return frame(day).iloc[0:0] if day in self.empty else frame(day)
 
+    def splits(self, day: date) -> list[Split]:
+        return []
+
     def ticker_details(self, symbol: str) -> TickerDetails | None:
         self._tick()
         self.details.append(symbol)
@@ -59,7 +68,7 @@ def run(tmp_path: Path, client: FakeClient, today: date = TODAY) -> str:
                            fetch_text=lambda url: GICS_CSV)  # fmt: skip
 
 
-def snapshot(tmp_path: Path) -> dict[str, object]:
+def snapshot(tmp_path: Path) -> dict[str, Any]:
     return json.loads(snapshot_path(tmp_path).read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
 
@@ -162,3 +171,79 @@ def test_job_without_key_skips(tmp_path: Path) -> None:
         engine = None
 
     assert "未配置" in market_data(Ctx(), TODAY)  # type: ignore[arg-type]
+
+
+# ---- 最终审查修复（#69）----
+
+
+class SplitClient(FakeClient):
+    def __init__(self, splits: dict[date, list[Split]] | None = None, **kw: object) -> None:
+        super().__init__(**kw)  # type: ignore[arg-type]
+        self.split_map = splits or {}
+        self.split_days: list[date] = []
+
+    def splits(self, day: date) -> list[Split]:
+        self._tick()
+        self.split_days.append(day)
+        return self.split_map.get(day, [])
+
+
+def test_split_adjusts_stored_history(tmp_path: Path) -> None:
+    """10 拆 1 发生前已存的历史按比例换算；之后补的历史（Massive 已调整）不重复换算。"""
+    prev = CAL.previous_trading_day(TODAY)
+    run(tmp_path, SplitClient(), today=prev)  # prev 及之前 3 天以未拆股价格存下
+    store = ms.MarketStore(tmp_path)
+    before = store.panel("close", ["S5"])["S5"].iloc[-1]
+    vol_before = store.panel("volume", ["S5"])["S5"].iloc[-1]
+    c = SplitClient({TODAY: [Split("S5", TODAY, 1, 10)]})
+    run(tmp_path, c)
+    assert c.split_days == [TODAY]
+    close = store.panel("close", ["S5"])["S5"]
+    assert close.loc[pd.Timestamp(prev)] == pytest.approx(before / 10)
+    assert store.panel("volume", ["S5"])["S5"].loc[pd.Timestamp(prev)] == pytest.approx(
+        vol_before * 10
+    )
+    run(tmp_path, SplitClient({TODAY: [Split("S5", TODAY, 1, 10)]}))  # 再跑一次不重复换算
+    assert store.panel("close", ["S5"])["S5"].loc[pd.Timestamp(prev)] == pytest.approx(before / 10)
+
+
+def test_splits_checked_for_each_day_since_last_check(tmp_path: Path) -> None:
+    d0 = CAL.previous_trading_day(CAL.previous_trading_day(TODAY))
+    run(tmp_path, SplitClient(), today=d0)
+    c = SplitClient()
+    run(tmp_path, c)
+    assert c.split_days == [CAL.next_trading_day(d0), TODAY]
+
+
+def test_today_timeout_marks_stale(tmp_path: Path) -> None:
+    prev = CAL.previous_trading_day(TODAY)
+    run(tmp_path, FakeClient(), today=prev)
+    run(tmp_path, FakeClient(limit_after=0))
+    snap = snapshot(tmp_path)
+    assert snap["stale"] is True and snap["as_of"] == prev.isoformat()
+
+
+def test_job_with_empty_key_skips(tmp_path: Path) -> None:
+    from pydantic import SecretStr
+
+    from quant.core.settings import Settings
+    from quant.jobs.daily import market_data
+
+    class Ctx:
+        settings = Settings(broker="sim", TRADING_MODE="sim", data_dir=tmp_path).model_copy(
+            update={"massive_api_key": SecretStr("")}
+        )
+        engine = None
+
+    assert "未配置" in market_data(Ctx(), TODAY)  # type: ignore[arg-type]
+
+
+def test_holdings_always_in_movers(tmp_path: Path) -> None:
+    """持仓标的不受 2% 门槛限制，一律写入异动表（“我的持仓”筛选）；非成分的 ETF 也在。"""
+    run(tmp_path, FakeClient())
+    syms = {m["symbol"] for m in snapshot(tmp_path)["movers"]}
+    run_market_data(FakeClient(), tmp_path, TODAY, CAL, SETTINGS, holdings={"S7", "QQQ"},
+                    fetch_text=lambda url: GICS_CSV)  # fmt: skip
+    movers = {m["symbol"]: m for m in snapshot(tmp_path)["movers"]}
+    assert "S7" not in syms and {"S7", "QQQ"} <= set(movers)
+    assert movers["QQQ"]["name"] == "纳指 100" and movers["S7"]["held"] is True

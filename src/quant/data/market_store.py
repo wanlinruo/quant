@@ -173,6 +173,41 @@ class MarketStore:
         wide.columns.name = None
         return wide.sort_index()
 
+    def apply_split(self, symbol: str, before: date, factor: float) -> int:
+        """把 before 之前已存的 symbol 日线按拆股系数换算（价格 × factor，成交量 ÷ factor）。
+
+        Massive 的 adjusted=true 只在取数当时生效，已存的文件不会随之更新。返回改写的天数。
+        """
+        n = 0
+        for d in self.days():
+            if d >= before:
+                break
+            path = self._day_path(d)
+            df = pd.read_parquet(path)
+            hit = df["symbol"] == symbol
+            if not hit.any():
+                continue
+            for c in ("open", "high", "low", "close", "vwap"):
+                if c in df.columns:
+                    df.loc[hit, c] = df.loc[hit, c] * factor
+            if "volume" in df.columns:
+                df.loc[hit, "volume"] = df.loc[hit, "volume"] / factor
+            tmp = path.with_suffix(".tmp")
+            df.to_parquet(tmp, index=False)
+            tmp.replace(path)
+            n += 1
+        return n
+
+    def splits_checked(self) -> date | None:
+        """拆股已核对到的日期（含）。"""
+        path = self.root / "splits.json"
+        if not path.exists():
+            return None
+        return date.fromisoformat(json.loads(path.read_text(encoding="utf-8"))["checked"])
+
+    def set_splits_checked(self, day: date) -> None:
+        atomic_write_text(self.root / "splits.json", json.dumps({"checked": day.isoformat()}))
+
     def caps(self) -> dict[str, CapInfo]:
         path = self.root / "caps.json"
         if not path.exists():

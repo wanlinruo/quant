@@ -517,6 +517,7 @@ class MoverOut(BaseModel):
     volume_ratio: float | None
     signals: list[str]
     spark: list[float]
+    held: bool = False
 
 
 class HeatCellOut(BaseModel):

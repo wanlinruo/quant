@@ -474,7 +474,7 @@ def _weights_text(weights: dict[str, float]) -> str:
 def market_data(ctx: JobContext, d: date) -> str:
     """首页市场看板（#69）：Massive 全市场日线 → data_dir/market/snapshot.json；与交易无关。"""
     key = ctx.settings.massive_api_key
-    if key is None:
+    if key is None or not key.get_secret_value().strip():
         return "未配置 Massive key（QUANT_MASSIVE_API_KEY），跳过"
     from quant.data.providers.massive import MassiveClient
     from quant.market.job import run_market_data

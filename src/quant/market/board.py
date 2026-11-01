@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
@@ -222,6 +222,7 @@ class Mover:
     volume_ratio: float | None
     signals: list[str]
     spark: list[float]
+    held: bool = False  # 持仓标的：不受涨跌幅门槛与条数上限限制，供“我的持仓”筛选
 
 
 def _signals(
@@ -252,9 +253,12 @@ def movers(
     volume: pd.DataFrame,
     gics: GicsTable,
     caps: Mapping[str, float | None],
+    held: Iterable[str] = (),
 ) -> list[Mover]:
-    out = []
-    for s in gics.members:
+    hold = set(held)
+    out: list[Mover] = []
+    mine: list[Mover] = []
+    for s in [*gics.members, *sorted(hold - set(gics.members))]:
         c = _col(close, s)
         if len(c) < 2 or c.index[-1] != close.index[-1]:
             continue  # 当日没有数据
@@ -262,15 +266,16 @@ def movers(
         if chg is None:
             continue
         sig, vr = _signals(c, _col(open_, s), _col(high, s), _col(low, s), _col(volume, s))
-        if abs(chg) < MOVER_MIN_CHANGE and not sig:
+        if abs(chg) < MOVER_MIN_CHANGE and not sig and s not in hold:
             continue
         sector = gics.sector(s)
-        out.append(Mover(
-            s, gics.name(s), SECTOR_NAME.get(sector or "", sector), _f(caps.get(s)),
-            float(c.iloc[-1]), chg, vr, sig, _spark(c, 20),
+        name = gics.name(s) or (ETF_SET[s][0] if s in ETF_SET else None)
+        (mine if s in hold else out).append(Mover(
+            s, name, SECTOR_NAME.get(sector or "", sector), _f(caps.get(s)),
+            float(c.iloc[-1]), chg, vr, sig, _spark(c, 20), s in hold,
         ))  # fmt: skip
     out.sort(key=lambda m: -abs(m.change_pct))
-    return out[:MOVER_LIMIT]
+    return sorted([*out[:MOVER_LIMIT], *mine], key=lambda m: -abs(m.change_pct))
 
 
 # ---- 热力图与指数日线 ----
@@ -399,7 +404,9 @@ def _clean(x: Any) -> Any:
     return x
 
 
-def build_snapshot(store: MarketStore, gics: GicsTable, as_of: date, stale: bool) -> MarketSnapshot:
+def build_snapshot(
+    store: MarketStore, gics: GicsTable, as_of: date, stale: bool, held: Iterable[str] = ()
+) -> MarketSnapshot:
     p = {f: store.panel(f, last_n=HISTORY) for f in ("close", "open", "high", "low", "volume")}
     close = p["close"]
     caps = {k: v.market_cap for k, v in store.caps().items()}
@@ -425,7 +432,7 @@ def build_snapshot(store: MarketStore, gics: GicsTable, as_of: date, stale: bool
         breadth=br,
         styles=styles(close),
         sectors=secs,
-        movers=movers(close, p["open"], p["high"], p["low"], p["volume"], gics, caps),
+        movers=movers(close, p["open"], p["high"], p["low"], p["volume"], gics, caps, held),
         heatmap=heatmap(close, gics, caps),
         index_candles=index_candles(close, p["open"], p["high"], p["low"], p["volume"]),
     )
