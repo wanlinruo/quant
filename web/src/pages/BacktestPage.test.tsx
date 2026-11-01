@@ -198,7 +198,7 @@ describe("BacktestPage", () => {
   async function openTab(name: string) {
     mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS] });
     const r = renderPage(<BacktestPage />, "/backtest");
-    await screen.findByTestId("statbar");
+    await screen.findByText("QQQ 10.10%");
     await r.user.click(screen.getByRole("button", { name }));
     return screen.getByTestId(`tab-${name}`);
   }
@@ -235,5 +235,17 @@ describe("BacktestPage", () => {
     expect(within(tab).getByText("sma").closest("tr")).not.toHaveClass("changed");
     expect(within(tab).getByText(/--param top_n=12/)).toBeInTheDocument();
     expect(within(tab).getByText(/运行日志未记录/)).toBeInTheDocument();
+  });
+
+  it("compare button disabled in single view and bench note shown", async () => {
+    const note = "QQQ 数据只覆盖 2019-01-02 – 2026-10-30，与回测区间不一致，未作对照";
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, { ...ANALYSIS, bench_note: note }] });
+    renderPage(<BacktestPage />, "/backtest");
+    await screen.findByTestId("statbar");
+    const btn = screen.getByRole("button", { name: "加入对比" });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("title", "在左侧再勾选一个回测即可对比");
+    expect(await screen.findByText(note)).toBeInTheDocument();
+    expect(screen.getByText("#128 · combo")).toBeInTheDocument();
   });
 });

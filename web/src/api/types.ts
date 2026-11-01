@@ -24,6 +24,7 @@ export interface BacktestAnalysis {
   initial_cash: number | null;
   duration_s: number | null;
   oos_start: string;
+  bench_note?: string | null;
   stats?: BtStatOut[];
   series?: BtSeriesOut | null;
   overview?: BtOverviewOut | null;

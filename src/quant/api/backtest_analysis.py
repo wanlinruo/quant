@@ -35,12 +35,27 @@ def _clean(eq: pd.Series | None) -> pd.Series | None:
 
 
 def align(eq: pd.Series, other: pd.Series | None) -> pd.Series | None:
-    """把基准价格对齐到策略净值的交易日（缺失向前填充），截取同一区间。"""
+    """把基准价格对齐到策略净值的交易日：基准自身日期范围内的缺口向前填充，范围以外不补（不把
+    过期的最后一个价格延续下去）。"""
     if other is None or other.empty:
         return None
     o = other.dropna().astype(float).sort_index()
-    o = o.reindex(o.index.union(eq.index)).ffill().reindex(eq.index)
-    return _clean(o)
+    if o.empty:
+        return None
+    x = o.reindex(o.index.union(eq.index)).ffill().reindex(eq.index)
+    x[(x.index < o.index[0]) | (x.index > o.index[-1])] = float("nan")
+    return _clean(x)
+
+
+def covers(eq: pd.Series, bench: pd.Series | None, tol_days: int = 7) -> bool:
+    """基准是否覆盖整个回测区间（首尾各容忍 tol_days 天）；不覆盖时对照指标不可比。"""
+    if bench is None:
+        return False
+    b = bench.dropna()
+    if b.empty or eq.empty:
+        return False
+    tol = pd.Timedelta(days=tol_days)
+    return bool(b.index[0] <= eq.index[0] + tol and b.index[-1] >= eq.index[-1] - tol)
 
 
 @dataclass(frozen=True)
@@ -57,13 +72,15 @@ def sortino(equity: pd.Series) -> float | None:
     if eq is None:
         return None
     r = eq.pct_change().dropna()
-    neg = r[r < 0]
-    if len(neg) < 2:
+    down = _downside(r)
+    return _f(r.mean() * TRADING_DAYS / down) if down else None
+
+
+def _downside(r: pd.Series) -> float | None:
+    """年化下行偏差：以 0 为目标、对全部样本 sqrt(mean(min(r, 0)^2)) × √252。"""
+    if len(r) < 2:
         return None
-    years = len(r) / TRADING_DAYS
-    cagr = (eq.iloc[-1] / eq.iloc[0]) ** (1 / years) - 1
-    down = neg.std(ddof=1) * math.sqrt(TRADING_DAYS)
-    return _f(cagr / down) if down else None
+    return _f(math.sqrt(float((r.clip(upper=0) ** 2).mean())) * math.sqrt(TRADING_DAYS))
 
 
 def _metrics(eq: pd.Series | None) -> Metrics | None:
@@ -134,7 +151,8 @@ def checks(split: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     res = combo_checks(full, q, ins or full, qins or q, oos or full, qoos or q, [])
     out: list[dict[str, Any]] = []
     for i, (label, passed) in enumerate(res.items()):
-        missing = (i in (1, 3) and qfull is None) or (i == 3 and (ins is None or oos is None))
+        seg_missing = ins is None or oos is None or qins is None or qoos is None
+        missing = (i in (1, 3) and qfull is None) or (i == 3 and seg_missing)
         if missing or i == 4:
             out.append({"label": label, "passed": None})
         else:
@@ -298,7 +316,9 @@ def drawdown_episodes(
     out = []
     for e in sorted(eps, key=lambda e: vals[e["t"]] / vals[e["p"]])[:top]:
         p, t, end = e["p"], e["t"], e["e"]
-        qret = _f(q.iloc[t] / q.iloc[p] - 1) if q is not None and len(q) == len(eq) else None
+        qp = q.get(idx[p]) if q is not None else None
+        qt = q.get(idx[t]) if q is not None else None
+        qret = _f(qt / qp - 1) if qp and qt is not None else None
         out.append({
             "start": str(idx[p].date()), "trough": str(idx[t].date()),
             "end": str(idx[end].date()) if end is not None else None,
@@ -344,8 +364,7 @@ def risk_table(equity: pd.Series, qqq: pd.Series | None) -> list[dict[str, Any]]
     m = _metrics(eq)
     mq = _metrics(align(eq, qqq)) if eq is not None and qqq is not None else None
     r = eq.pct_change().dropna() if eq is not None else pd.Series(dtype=float)
-    neg = r[r < 0]
-    down_vol = _f(neg.std(ddof=1) * math.sqrt(TRADING_DAYS)) if len(neg) > 1 else None
+    down_vol = _downside(r)
 
     def g(mm: Metrics | None, k: str) -> float | None:
         return _f(getattr(mm, k)) if mm else None

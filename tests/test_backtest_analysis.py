@@ -34,12 +34,13 @@ def test_oos_start() -> None:
     assert date(2023, 1, 1) == OOS_START
 
 
-def test_sortino_matches_manual() -> None:
+def test_sortino_standard_definition() -> None:
+    """下行偏差以 0 为目标、对全部样本：sqrt(mean(min(r,0)^2))；分子与夏普同为算术均值年化。"""
     r = EQ.pct_change().dropna()
-    years = len(r) / 252
-    cagr = (EQ.iloc[-1] / EQ.iloc[0]) ** (1 / years) - 1
-    down = r[r < 0].std(ddof=1) * math.sqrt(252)
-    assert ba.sortino(EQ) == pytest.approx(cagr / down)
+    dd = math.sqrt(float((r.clip(upper=0) ** 2).mean())) * math.sqrt(252)
+    assert ba.sortino(EQ) == pytest.approx(r.mean() * 252 / dd)
+    rows = {x["label"]: x for x in ba.risk_table(EQ, None)}
+    assert rows["下行波动"]["value"] == pytest.approx(dd)
 
 
 def test_stat_bar() -> None:
@@ -191,3 +192,30 @@ def test_rolling_beta_and_tail() -> None:
             ba.risk_table(EQ.iloc[:3], None),
         ]
     )
+
+
+# ---- 终审修复：基准覆盖 ----
+
+
+def test_covers() -> None:
+    assert ba.covers(EQ, QQQ)
+    assert not ba.covers(EQ, QQQ["2021":])  # 晚开始
+    assert not ba.covers(EQ, QQQ[:"2024-06-30"])  # 早结束
+    assert not ba.covers(EQ, None)
+
+
+def test_align_does_not_extend_past_benchmark_end() -> None:
+    q = ba.align(EQ, QQQ[:"2024-06-30"])
+    assert q is not None and q.index[-1] <= pd.Timestamp("2024-06-30")
+
+
+def test_episode_qqq_by_date_with_late_benchmark() -> None:
+    eq = two_drawdowns()
+    q = eq.iloc[2:] * 2  # 从第一个高点当天起才有数据
+    eps = ba.drawdown_episodes(eq, q)
+    assert eps[0]["qqq"] == pytest.approx(-0.2)
+
+
+def test_checks_none_when_benchmark_segment_missing() -> None:
+    sp = ba.split_metrics(EQ, QQQ["2023":])  # QQQ 只有样本外
+    assert ba.checks(sp)[3]["passed"] is None

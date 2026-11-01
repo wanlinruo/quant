@@ -55,8 +55,12 @@ def setup(
     eq = prices(1, 0.0006) * 1000
     dd = eq / eq.cummax() - 1
     with Session(eng) as s, s.begin():
+        from quant.core.settings import CostSettings
+
+        costs = {k: str(v) for k, v in CostSettings().model_dump().items() if v is not None}
         done = create_run(s, "etf_momentum", {"lookback": 99, "top_k": 2, "_cash": "100000",
-                                              "_costs": {"slippage": "0.0005"}},
+                                              "universe": ["SPY", "QQQ"], "safe_asset": "SHY",
+                                              "_costs": costs},
                           IDX[0].date(), IDX[-1].date(), status="running")  # fmt: skip
         meta = {"cagr": 0.1, "data": {"source": "yfinance", "data_end": "2026-05-01"}}
         complete_run(s, done, meta, eq, dd)
@@ -107,3 +111,31 @@ def test_analysis_without_benchmark_data(
     d = client.get(f"/api/backtests/{ids['done']}/analysis").json()
     assert d["series"]["qqq"] is None and d["stats"][0]["qqq"] is None
     assert d["stats"][0]["value"] is not None and d["series"]["spy"] is not None
+
+
+def test_command_parses_with_cli(setup: tuple[TestClient, dict[str, int]]) -> None:
+    import shlex
+
+    from quant.cli import build_parser
+
+    client, ids = setup
+    cmd = client.get(f"/api/backtests/{ids['done']}/analysis").json()["repro"]["command"]
+    argv = shlex.split(cmd)
+    assert argv[:3] == ["uv", "run", "quant"]
+    args = build_parser().parse_args(argv[3:])
+    assert args.strategy == "etf_momentum" and dict(args.param)["universe"] == ["SPY", "QQQ"]
+    assert dict(args.param)["safe_asset"] == "SHY" and str(args.slippage) == "0.0005"
+
+
+def test_benchmark_not_covering_run(
+    setup: tuple[TestClient, dict[str, int]], tmp_path: Path
+) -> None:
+    client, ids = setup
+    store = ParquetStore(tmp_path)
+    df = store.read_bars("QQQ")
+    for p in tmp_path.rglob("symbol=QQQ/data.parquet"):
+        p.unlink()  # write_bars 会与已有数据合并，先删再写
+    store.write_bars("QQQ", df[df.index >= "2019-01-01"], "test")
+    d = client.get(f"/api/backtests/{ids['done']}/analysis").json()
+    assert d["stats"][1]["qqq"] is None and d["bench_note"] and "QQQ" in d["bench_note"]
+    assert d["series"]["qqq"][0] is None and d["series"]["qqq"][-1] is not None

@@ -134,11 +134,9 @@ export function BacktestPage() {
               <RunHeader
                 run={current}
                 a={a}
-                inCompare={selected.includes(current.id) && compare}
                 warnings={<CoverageWarnings run={current} />}
                 onParams={() => setTab("params")}
                 onCopy={() => setDrawer({ strategy: current.strategy, start: current.start, end: current.end, params: current.params, costs: current.costs, cash: a?.initial_cash != null ? String(a.initial_cash) : null })}
-                onCompare={() => toggle(current.id)}
                 onExport={() => a && exportCsv(a)}
               />
               <MainChart s={a?.series} strategy={current.strategy} oosStart={a?.oos_start ?? "2023-01-01"} />

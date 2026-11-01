@@ -764,6 +764,7 @@ class BacktestAnalysis(BaseModel):
     initial_cash: float | None
     duration_s: float | None
     oos_start: date
+    bench_note: str | None = None  # QQQ 数据不覆盖回测区间时的说明（对照指标为空）
     stats: list[BtStatOut] = []
     series: BtSeriesOut | None = None
     overview: BtOverviewOut | None = None

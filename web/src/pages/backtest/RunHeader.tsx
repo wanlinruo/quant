@@ -18,16 +18,14 @@ function duration(s: number | null | undefined): string {
 type Props = {
   run: BacktestRunOut;
   a: BacktestAnalysis | null;
-  inCompare: boolean;
   warnings: React.ReactNode;
   onParams: () => void;
   onCopy: () => void;
-  onCompare: () => void;
   onExport: () => void;
 };
 
 /** 标题区与统计条（设计 5.3）：统计条每项附 QQQ 对照；分析未就绪时用回测记录里的指标。 */
-export function RunHeader({ run, a, inCompare, warnings, onParams, onCopy, onCompare, onExport }: Props) {
+export function RunHeader({ run, a, warnings, onParams, onCopy, onExport }: Props) {
   return (
     <section className="panel">
       <div className="panel-h">
@@ -37,7 +35,8 @@ export function RunHeader({ run, a, inCompare, warnings, onParams, onCopy, onCom
           <span className={`pill ${STATUS_PILL[run.status] ?? "hold"}`}>{STATUS_TEXT[run.status] ?? run.status}</span>
           <button type="button" className="btn2" onClick={onParams}>参数</button>
           <button type="button" className="btn2" onClick={onCopy}>复制参数新建</button>
-          <button type="button" className="btn2" aria-pressed={inCompare} onClick={onCompare}>{inCompare ? "移出对比" : "加入对比"}</button>
+          {/* 单个查看时：对比需要至少两个回测，勾选左侧另一个即可（点这里不会改变当前查看） */}
+          <button type="button" className="btn2" disabled title="在左侧再勾选一个回测即可对比">加入对比</button>
           <button type="button" className="btn2" disabled={!a?.series} onClick={onExport}>导出</button>
         </span>
       </div>
@@ -47,6 +46,7 @@ export function RunHeader({ run, a, inCompare, warnings, onParams, onCopy, onCom
         {a && ` · 用时 ${duration(a.duration_s)}`}
         {run.error ? ` · ${run.error}` : ""}
       </div>
+      {a?.bench_note && <div className="sm" style={{ marginTop: 4 }}><span className="pill warn">{a.bench_note}</span></div>}
       <div className="statbar statbar-10" data-testid="statbar">
         {a?.stats?.length
           ? a.stats.map((s) => (

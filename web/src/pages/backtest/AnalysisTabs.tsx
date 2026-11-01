@@ -296,6 +296,7 @@ export function ParamsTab({ a }: A) {
               </tbody>
             </table>
             {rp && <pre className="cmd" title="可复制的命令行">{rp.command}</pre>}
+            {rp && <div className="muted sm">命令行只含佣金与滑点；平台费、费用封顶等其它成本取运行时的配置</div>}
           </Sub>
         </Cell>
       </Grid>

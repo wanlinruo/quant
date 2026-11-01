@@ -65,18 +65,26 @@ def _command(run: BacktestRun) -> str:
     for k, v in run.params.items():
         if k.startswith("_"):
             continue
-        text = v if isinstance(v, str) else json.dumps(v, separators=(",", ":"))
+        text = json.dumps(v, separators=(",", ":"))  # 与 CLI 的 json.loads 往返一致
         parts.append(f"--param {shlex.quote(f'{k}={text}')}")
     if CASH_KEY in run.params:
         parts.append(f"--cash {run.params[CASH_KEY]}")
-    for k, v in (run.params.get(COSTS_KEY) or {}).items():
-        parts.append(f"--{k.replace('_', '-')} {v}")
+    costs = run.params.get(COSTS_KEY) or {}
+    for k in CLI_COSTS:  # CLI 只接受这三项；平台费、封顶等取当前配置
+        if costs.get(k) is not None:
+            parts.append(f"--{k.replace('_', '-')} {costs[k]}")
     parts.append("--no-db")
     return " ".join(parts)
 
 
+CLI_COSTS = ("commission_per_share", "min_commission", "slippage")
+
+
 def _norm(s: pd.Series, index: pd.DatetimeIndex) -> list[float | None]:
+    """归一化到自身第一个有效值；只在基准自身日期范围内向前填充。"""
+    s = s.dropna().sort_index()
     x = s.reindex(s.index.union(index)).ffill().reindex(index)
+    x[(x.index < s.index[0]) | (x.index > s.index[-1])] = float("nan")
     first = x.dropna()
     base = float(first.iloc[0]) if len(first) else 1.0
     return [None if pd.isna(v) else float(v) / base for v in x.to_numpy()]
@@ -115,7 +123,17 @@ def analysis(s: Session, run_id: int, settings: Settings) -> BacktestAnalysis | 
     if out["initial_cash"] is None:
         out["initial_cash"] = float(eq.iloc[0])
     qqq, spy = _bench(settings, "QQQ"), _bench(settings, "SPY")
-    qn = _norm(qqq, idx) if qqq is not None else None
+    if qqq is not None and not ba.covers(eq, qqq):
+        b = qqq.dropna()
+        span = f"{b.index[0].date()} – {b.index[-1].date()}" if len(b) else ""
+        out["bench_note"] = (
+            f"QQQ 数据只覆盖 {span}，与回测区间不一致，未作对照" if span else "没有 QQQ 数据"
+        )
+        qn_partial = _norm(qqq, idx) if len(b) else None
+        qqq = None
+    else:
+        qn_partial = None
+    qn = _norm(qqq, idx) if qqq is not None else qn_partial
     if qn is not None and all(v is None for v in qn):
         qn = qqq = None
     sn = _norm(spy, idx) if spy is not None else None
