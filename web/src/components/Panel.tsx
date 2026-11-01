@@ -9,11 +9,13 @@ type Props = {
   /** 账户相关面板在实盘时标题后加“ · 实盘” */
   live?: boolean;
   height?: number;
+  /** 在纵向排列中占满剩余高度（让同排两列底边对齐） */
+  grow?: boolean;
 };
 
-export function Panel({ title, right, children, scroll, live, height }: Props) {
+export function Panel({ title, right, children, scroll, live, height, grow }: Props) {
   return (
-    <section className={`panel${live ? " live-account" : ""}`} style={height ? { height } : undefined}>
+    <section className={`panel${live ? " live-account" : ""}`} style={{ ...(height ? { height } : {}), ...(grow ? { flex: "1 1 auto" } : {}) }}>
       <div className="panel-h">
         <b>{title}</b>
         <span>{right}</span>

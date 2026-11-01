@@ -34,7 +34,7 @@ const ROW4_H = 330;
 const ROW5_H = 380;
 const SLEEVE_TEXT: Record<string, string> = { momentum: "动量仓", swing: "波段仓", both: "波段+动量", exit: "待卖出", cash: "现金", other: "其他" };
 const SLEEVE_COLOR: Record<string, string> = { momentum: "#a855f7", swing: "#2962ff", cash: "#4b5263", other: "#f5a623" };
-const STATE_CLASS: Record<string, string> = { ok: "ok", near: "hold", exit: "err" };
+const STATE_CLASS: Record<string, string> = { ok: "ok", near: "warn", exit: "err" };
 const RANGES = [
   { key: "1w", label: "1周", days: 7 },
   { key: "1m", label: "1月", days: 31 },
@@ -120,7 +120,7 @@ function StatCards({ o, live }: { o: PortfolioOverview | null; live: boolean }) 
       label: "净值",
       value: o?.net_liquidation != null ? money(o.net_liquidation) : NA,
       sub: s?.today_pnl != null ? `今日 ${signedMoney(s.today_pnl)} (${signedPct(s.today_return)})` : `今日 ${NA}`,
-      tone: tone(s?.today_pnl),
+      tone: undefined,
     },
     {
       label: "累计收益",

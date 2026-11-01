@@ -9,7 +9,7 @@ import { RangeBar } from "../components/RangeBar";
 import { Tabs } from "../components/Tabs";
 import { CandleChart, type TradeMark } from "../charts/CandleChart";
 import { useApi } from "../hooks/useApi";
-import { num, pct, signedPct } from "../lib/format";
+import { compact, num, pct, signedPct } from "../lib/format";
 import { formatDateTimeET, toETDate } from "../lib/time";
 import { useShell } from "../shell";
 
@@ -18,7 +18,6 @@ const MAS = [10, 20, 120];
 const PERIOD_KEYS = ["1D", "1W", "1M", "3M", "6M", "YTD", "1Y"] as const;
 const PERIOD_TEXT: Record<string, string> = { "1D": "1日", "1W": "1周", "1M": "1月", "3M": "3月", "6M": "6月", YTD: "今年", "1Y": "1年" };
 const SLEEVE_TEXT: Record<string, string> = { momentum: "动量仓", swing: "波段仓", both: "波段+动量", exit: "待卖出" };
-const SIDE_H = 214;
 
 function startOf(years: number): string {
   const d = new Date();
@@ -108,8 +107,8 @@ export function StockPage() {
                 <span>开 <b className="num">{num(q.open)}</b></span>
                 <span>高 <b className="num">{num(q.high)}</b></span>
                 <span>低 <b className="num">{num(q.low)}</b></span>
-                <span>量 <b className="num">{num(q.volume / 1e6, 2)}M</b></span>
-                <span>额 <b className="num">${num(q.turnover / 1e9, 2)}B</b></span>
+                <span>量 <b className="num">{compact(q.volume)}</b></span>
+                <span>额 <b className="num">${compact(q.turnover)}</b></span>
                 <span>52 周 <b className="num">{num(q.low_52w)} – {num(q.high_52w)}</b></span>
                 <span>1 月 <b className={`num ${tone(q.ret_1m)}`}>{sp(q.ret_1m)}</b></span>
                 <span>今年 <b className={`num ${tone(q.ytd)}`}>{sp(q.ytd)}</b></span>
@@ -155,6 +154,7 @@ export function StockPage() {
               </ApiState>
             </Panel>
             <Panel
+              grow
               title={tab === "strategy" ? "我的策略" : tab === "news" ? "新闻" : tab === "earnings" ? "财报" : "回测中的表现"}
               right={<Tabs tabs={[{ key: "strategy", label: "我的策略" }, { key: "news", label: "新闻" }, { key: "earnings", label: "财报" }, { key: "backtest", label: "回测中的表现" }]} value={tab} onChange={setTab} />}
             >
@@ -167,7 +167,7 @@ export function StockPage() {
         </Cell>
         <Cell span={3}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Panel title="关键数据" height={SIDE_H + 70}>
+            <Panel title="关键数据">
               {p && q ? (
                 <>
                   <RangeBar low={q.low_52w} high={q.high_52w} value={q.close} />
@@ -187,8 +187,8 @@ export function StockPage() {
                 <EmptyState />
               )}
             </Panel>
-            <Panel title="估值与财务" height={SIDE_H - 100}><EmptyState kind="pending" /></Panel>
-            <Panel title={p?.key_stats.days_to_earnings != null ? `财报 · 还有 ${p.key_stats.days_to_earnings} 个交易日` : "财报"} height={SIDE_H}>
+            <Panel title="估值与财务"><EmptyState kind="pending" /></Panel>
+            <Panel title={p?.key_stats.days_to_earnings != null ? `财报 · 还有 ${p.key_stats.days_to_earnings} 个交易日` : "财报"}>
               {p?.earnings.next || p?.earnings.history.length ? (
                 <div className="sm">
                   <div>下次：<b className="num">{p.earnings.next ?? "—"}</b>{p.earnings.held_through && <span className="pill hold" style={{ marginLeft: 6 }}>财报前持有中</span>}</div>
@@ -201,8 +201,8 @@ export function StockPage() {
                 <EmptyState />
               )}
             </Panel>
-            <Panel title="相关新闻" height={SIDE_H - 100}><EmptyState kind="pending" /></Panel>
-            <Panel title="同板块" height={SIDE_H - 100}><EmptyState kind="pending" /></Panel>
+            <Panel title="相关新闻"><EmptyState kind="pending" /></Panel>
+            <Panel title="同板块" grow><EmptyState kind="pending" /></Panel>
           </div>
         </Cell>
       </Grid>
@@ -217,10 +217,10 @@ function StrategyTab({ p, account, focus, onFocus }: { p: StockProfile | null; a
   return (
     <Grid>
       <Cell span={4}>
-        <Panel title="波段信号" right={<span className="muted sm">V2：120 日线向上、20 日线支撑、10 日线退出</span>}>
+        <Panel title="波段信号" right={<span className="muted sm">V2 规则</span>}>
           <table className="dt compact kv">
             <tbody>
-              <tr><td className="muted">趋势（收盘 &gt; 120 日线且向上）</td><td className="r">{yesNo(p.swing.trend_up, "满足", "不满足")}</td></tr>
+              <tr><td className="muted">站上 120 日线且向上</td><td className="r">{yesNo(p.swing.trend_up, "满足", "不满足")}</td></tr>
               <tr><td className="muted">20 日线支撑</td><td className="r">{yesNo(p.swing.above_support, "站上", "跌破")}</td></tr>
               <tr><td className="muted">距 10 日线（退出线）</td><td className={`r num ${tone(p.swing.dist_exit)}`}>{sp(p.swing.dist_exit, 1)}</td></tr>
             </tbody>
@@ -244,8 +244,10 @@ function StrategyTab({ p, account, focus, onFocus }: { p: StockProfile | null; a
             <tbody>
               <tr><td className="muted">RSI(14)</td><td className="r num">{num(t.rsi14, 1)}</td></tr>
               <tr><td className="muted">ATR(14) / 价格</td><td className="r num">{pct(t.atr14_pct, 2)}</td></tr>
-              <tr><td className="muted">相对 QQQ（20 / 60 日）</td><td className="r num">{sp(t.rs_20d, 1)} / {sp(t.rs_60d, 1)}</td></tr>
-              <tr><td className="muted">距 MA10 / 20 / 120</td><td className="r num">{sp(t.dist_ma10, 1)} / {sp(t.dist_ma20, 1)} / {sp(t.dist_ma120, 1)}</td></tr>
+              <tr><td className="muted">相对 QQQ · 20 日</td><td className="r num">{sp(t.rs_20d, 1)}</td></tr>
+              <tr><td className="muted">相对 QQQ · 60 日</td><td className="r num">{sp(t.rs_60d, 1)}</td></tr>
+              <tr><td className="muted">距 MA10 / MA20</td><td className="r num">{sp(t.dist_ma10, 1)} / {sp(t.dist_ma20, 1)}</td></tr>
+              <tr><td className="muted">距 MA120</td><td className="r num">{sp(t.dist_ma120, 1)}</td></tr>
             </tbody>
           </table>
         </Panel>
