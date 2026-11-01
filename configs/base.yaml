@@ -51,3 +51,10 @@ costs:
   platform_min: "1"
   max_fee_pct: "0.005"
   slippage: "0.0005"
+
+tiingo:
+  # 免费档（https://www.tiingo.com/about/pricing，2026-11-01 核对）：每小时 50 次、每天 1000 次、
+  # 每月 500 个不同标的、每月流量 1 GB；仅限个人内部使用，不得展示或分享给他人
+  hourly: 50
+  daily: 1000
+  monthly_symbols: 500

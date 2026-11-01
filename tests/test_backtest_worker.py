@@ -166,3 +166,18 @@ def test_bad_params_fail_instead_of_crash(engine: Engine) -> None:
     with Session(engine) as s:
         run = s.get(BacktestRun, rid)
         assert run is not None and run.status == "failed"
+
+
+@pytest.mark.db
+@needs_db
+def test_stale_running_marked_failed(engine: Engine) -> None:
+    """worker 被强杀（如内存超限）留下的 running 任务，重启时标为失败，不会永远“运行中”。"""
+    from quant.jobs.backtest_worker import fail_stale_running
+
+    [rid] = _enqueue(engine, 1)
+    with Session(engine) as s, s.begin():
+        claim_next(s)
+    assert fail_stale_running(engine) == [rid]
+    with Session(engine) as s:
+        run = s.get(BacktestRun, rid)
+        assert run is not None and run.status == "failed" and "重启" in (run.error or "")

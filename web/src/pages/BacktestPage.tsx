@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import type { BacktestDefaults, BacktestRunOut, EquityPoint } from "../api/types";
+import type { BacktestDataStatus, BacktestDefaults, BacktestRunOut, EquityPoint } from "../api/types";
 import { ApiState } from "../components/ApiState";
 import { DataTable } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
@@ -26,6 +26,7 @@ function metric(run: BacktestRunOut, key: string): number | undefined {
 export function BacktestPage() {
   const runs = useApi<BacktestRunOut[]>("/api/backtests");
   const defaults = useApi<BacktestDefaults>("/api/backtests/defaults");
+  const dataStatus = useApi<BacktestDataStatus>("/api/backtests/data-status");
   const [checked, setChecked] = useState<number[] | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -70,6 +71,7 @@ export function BacktestPage() {
   return (
     <div className="page">
       {notice && <div className="pill ok" style={{ alignSelf: "flex-start", padding: "4px 10px" }}>{notice}</div>}
+      {dataStatus.data && <DataStatusBar s={dataStatus.data} />}
       <Grid>
         <Cell span={3}>
           <Panel
@@ -112,7 +114,10 @@ export function BacktestPage() {
               <section className="panel">
                 <div className="panel-h">
                   <b style={{ fontSize: 16 }}>#{current.id} · {current.strategy}</b>
-                  <span className={`pill ${STATUS_PILL[current.status] ?? "hold"}`}>{STATUS_TEXT[current.status] ?? current.status}</span>
+                  <span style={{ display: "flex", gap: 6 }}>
+                    <CoverageWarnings run={current} />
+                    <span className={`pill ${STATUS_PILL[current.status] ?? "hold"}`}>{STATUS_TEXT[current.status] ?? current.status}</span>
+                  </span>
                 </div>
                 <div className="muted sm">{current.start} → {current.end}{current.error ? ` · ${current.error}` : ""}</div>
                 <div className="statbar">
@@ -155,5 +160,34 @@ export function BacktestPage() {
         />
       )}
     </div>
+  );
+}
+
+/** 服务器回测数据（Tiingo）的补齐进度；Mac 上的 yfinance 模式不显示。 */
+function DataStatusBar({ s }: { s: BacktestDataStatus }) {
+  if (s.source !== "tiingo" || !s.fixed || !s.current || !s.delisted || !s.quota) return null;
+  const pending = s.fixed.done < s.fixed.total || s.current.done < s.current.total;
+  return (
+    <div className="panel sm" style={{ flexDirection: "row", gap: 12, alignItems: "center", whiteSpace: "nowrap", overflow: "hidden" }}>
+      <span>回测数据：Tiingo · 截至 {s.data_end ?? "—"}</span>
+      <span className="muted">固定标的 {s.fixed.done}/{s.fixed.total} · 当前成分 {s.current.done}/{s.current.total} · 历史成分 {s.delisted.done}/{s.delisted.total}</span>
+      <span className="muted">本月额度 {s.quota.month_symbols}/{s.quota.month_limit}</span>
+      {pending && <span className="pill warn">补齐中</span>}
+      {s.delisted.done < s.delisted.total && <span className="pill warn">缺已退市成分：长周期结果偏乐观</span>}
+      {s.earnings !== "complete" && <span className="pill hold">历史财报日同步中</span>}
+    </div>
+  );
+}
+
+type DataInfo = { coverage?: number; earnings?: string };
+
+function CoverageWarnings({ run }: { run: BacktestRunOut }) {
+  const d = run.metrics.data as DataInfo | undefined;
+  if (!d) return null;
+  return (
+    <>
+      {d.coverage !== undefined && d.coverage < 0.999 && <span className="pill warn">数据覆盖 {Math.round(d.coverage * 100)}%</span>}
+      {d.earnings !== undefined && d.earnings !== "complete" && <span className="pill warn">历史财报日缺失</span>}
+    </>
   );
 }

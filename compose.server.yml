@@ -6,6 +6,13 @@ services:
   dashboard:
     ports:
       - "127.0.0.1:8501:8501"
+    environment:
+      QUANT_DATA__BACKTEST_SOURCE: tiingo  # 面板显示补数进度、按回测数据截止日校验（#66）
+
+  # 服务器 IP 被 Yahoo 限流：回测只读 Tiingo 补齐的本地数据，空闲时按免费档额度补数（#66）
+  backtest-worker:
+    environment:
+      QUANT_DATA__BACKTEST_SOURCE: tiingo
 
   caddy:
     image: caddy:2

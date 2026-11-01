@@ -95,12 +95,23 @@ class DataSettings(_Section):
     secondary: Literal["none", "tiger", "sina"] = "none"
     # 候选池（组合策略的动量仓，约 500 只）：sina 不占老虎额度，拆股记录来自老虎（#47）
     universe: Literal["none", "sina", "yfinance"] = "none"
+    # 回测日线：Mac 用 yfinance（自动拉取）；服务器 Yahoo 被限流，用 tiingo（由 worker 按额度补齐，
+    # 回测只读本地数据，#66）
+    backtest_source: Literal["yfinance", "tiingo"] = "yfinance"
 
     @model_validator(mode="after")
     def _universe_needs_tiger(self) -> DataSettings:
         if self.universe == "sina" and self.primary != "tiger":
             raise ValueError("data.universe=sina 需要 data.primary=tiger（拆股记录来自老虎）")
         return self
+
+
+class TiingoSettings(_Section):
+    """Tiingo 免费档额度（https://www.tiingo.com/about/pricing，2026-11-01 核对）。"""
+
+    hourly: int = Field(50, ge=1)
+    daily: int = Field(1000, ge=1)
+    monthly_symbols: int = Field(500, ge=1)
 
 
 class StrategySettings(_Section):
@@ -143,6 +154,9 @@ class Settings(BaseSettings):
     # Parquet 行情数据根目录（PROJECT_PLAN 7.2）；容器内为 /data/parquet
     data_dir: Path = Path("data/parquet")
     notify_webhook_url: SecretStr | None = None
+    tiingo_api_key: SecretStr | None = None
+    # SEC 要求请求声明联系方式（名称与邮箱）；只发给 SEC，不写日志
+    edgar_user_agent: SecretStr | None = None
 
     market: MarketSettings = MarketSettings()
     schedule: ScheduleSettings = ScheduleSettings()
@@ -151,6 +165,7 @@ class Settings(BaseSettings):
     costs: CostSettings = CostSettings()
     strategy: StrategySettings = StrategySettings()
     data: DataSettings = DataSettings()
+    tiingo: TiingoSettings = TiingoSettings()
 
     @field_validator("tiger_props_path")
     @classmethod
