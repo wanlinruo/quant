@@ -36,3 +36,8 @@ export function formatDateTimeET(iso: string | null | undefined): string {
 export function toETDate(iso: string): string {
   return parts(new Date(iso), "America/New_York").date;
 }
+
+/** 美东的日期（YYYY-MM-DD）、时间（HH:MM）与星期，供首页新闻与财经日历使用。 */
+export function etParts(iso: string): { date: string; time: string; week: string } {
+  return parts(new Date(iso), "America/New_York");
+}
