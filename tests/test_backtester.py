@@ -157,3 +157,17 @@ def test_records_attribution_and_holdings(
         r.weights.loc[pd.Timestamp(some), sym] * r.equity[pd.Timestamp(some)]
     )
     assert set(r.holdings) == {d.date() for d in r.equity.index}
+
+
+def test_ledger_consistent_with_backtest(data: dict[str, pd.DataFrame], cal: TradingCalendar) -> None:
+    from quant.engine.ledger import build_ledger
+
+    r = run(Alternating(cal), data, cal)
+    led = build_ledger(r.holdings, r.fills, r.attribution, r.equity)
+    assert len(led.trades) >= 3 and all(t.sleeve == "main" for t in led.trades)
+    total_trades = sum(t.pnl for t in led.trades)
+    total_daily = sum(sum(x[3].values()) for x in led.daily)
+    assert total_trades == pytest.approx(total_daily, rel=1e-9, abs=1e-6)
+    closed = [t for t in led.trades if t.close_date is not None]
+    assert all(t.close_date > t.open_date for t in closed)
+    assert {t.symbol for t in led.trades} <= {"SPY", "TLT"}
