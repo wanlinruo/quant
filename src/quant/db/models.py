@@ -59,12 +59,16 @@ def _created_at() -> Mapped[datetime]:
 
 
 class JobRun(Base):
-    """定时任务运行记录；(job_name, trade_date) 唯一，保证幂等（PROJECT_PLAN 第 8 章）。"""
+    """定时任务运行记录；(mode, job_name, trade_date) 唯一，保证幂等（PROJECT_PLAN 第 8 章）。
+
+    mode 为运行该任务的 scheduler 的交易模式：模拟盘与实盘同时运行时各自独立。
+    """
 
     __tablename__ = "job_runs"
     STATUSES = ("running", "success", "failed")
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    mode: Mapped[str] = mapped_column(String(8))
     job_name: Mapped[str] = mapped_column(String(64))
     trade_date: Mapped[date] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(16))
@@ -73,24 +77,49 @@ class JobRun(Base):
     error: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
-        UniqueConstraint("job_name", "trade_date"),
+        UniqueConstraint("mode", "job_name", "trade_date"),
         CheckConstraint(_in("status", STATUSES), name="status"),
     )
 
 
+class JobAttempt(Base):
+    """任务每次执行的记录（含重跑），用于系统页“重试后成功”与运行详情；不影响 job_runs 的幂等。"""
+
+    __tablename__ = "job_attempts"
+    RESULTS = ("running", "success", "failed")
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    mode: Mapped[str] = mapped_column(String(8))
+    job_name: Mapped[str] = mapped_column(String(64))
+    trade_date: Mapped[date] = mapped_column(Date)
+    attempt: Mapped[int] = mapped_column(Integer)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[str] = mapped_column(String(16))
+    error: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint("mode", "job_name", "trade_date", "attempt"),
+        CheckConstraint(_in("result", RESULTS), name="result"),
+        Index("ix_job_attempts_mode_trade_date", "mode", "trade_date"),
+    )
+
+
 class Signal(Base):
-    """每日目标仓位。"""
+    """每日目标仓位（按交易模式区分）；detail 为策略给出的子仓明细，没有时为空。"""
 
     __tablename__ = "signals"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    mode: Mapped[str] = mapped_column(String(8))
     strategy: Mapped[str] = mapped_column(String(64))
     signal_date: Mapped[date] = mapped_column(Date)
     target_weights: Mapped[dict[str, float]] = mapped_column(JSONB)
     data_as_of: Mapped[date] = mapped_column(Date)
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = _created_at()
 
-    __table_args__ = (UniqueConstraint("strategy", "signal_date"),)
+    __table_args__ = (UniqueConstraint("mode", "strategy", "signal_date"),)
 
 
 class Order(Base):
