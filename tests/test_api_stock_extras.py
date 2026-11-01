@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from quant.api.app import create_app
 from quant.api.deps import get_engine, get_settings
 from quant.data import market_store as ms
-from quant.market.stock_job import METRIC_KEYS
+from quant.market.stock_metrics import METRIC_KEYS
 
 SUB = "Technology Hardware"
 ROWS = [("AAPL", SUB), ("DELL", SUB), ("HPQ", SUB), ("SMCI", SUB),
@@ -179,3 +179,13 @@ def test_extras_holding_outside_sp500(client: TestClient, tmp_path: Path) -> Non
     d = client.get("/api/stock/TSM/extras").json()
     assert d["covered"] and d["in_sp500"] is False and d["peers"] == []
     assert client.get("/api/stock/AAPL/extras").json()["in_sp500"] is True
+
+
+def test_stock_extras_direct_bad_symbols(tmp_path: Path) -> None:
+    from quant.api.stock_extras import stock_extras
+
+    setup(tmp_path)
+    (tmp_path / "x.json").write_text(json.dumps({"news": [{"headline": "leak"}]}), encoding="utf-8")
+    for sym in ("../x", "..%2Fx", "a b", "A" * 11, "", "."):
+        d = stock_extras(tmp_path / "market" / "..", sym)
+        assert d.covered is False and d.news == [] and d.metrics == [], sym

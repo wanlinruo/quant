@@ -53,6 +53,9 @@ SECTOR_ETF: dict[str, str] = {
     "Communication Services": "XLC",
 }  # fmt: skip
 
+# GICS 板块（英文）→ 中文名（取板块 ETF 的名称）
+SECTOR_NAME = {sec: ETF_SET[etf][0] for sec, etf in SECTOR_ETF.items()}
+
 
 def market_dir(data_dir: Path) -> Path:
     return data_dir / MARKET_DIR

@@ -40,6 +40,7 @@ from quant.api.schemas import (
 from quant.core.calendar import TradingCalendar
 from quant.data.store import is_valid_symbol
 from quant.db.models import Fill as FillRow
+from quant.market.periods import period_returns
 from quant.strategies.combo import V2_SWING, ComboParams, annual_vol
 from quant.strategies.events import EventCalendar
 from quant.strategies.swing_pullback import SwingParams
@@ -119,8 +120,8 @@ def profile(
     as_of = pd.Timestamp(df.index[-1]).date() if len(df) else None
     qqq = _prices(stores.main.read_bars("QQQ"))
     spy = _prices(stores.main.read_bars("SPY"))
-    periods = an.period_returns(px, as_of) if as_of else {}
-    periods_qqq = an.period_returns(qqq, as_of) if as_of and len(qqq) else {}
+    periods = period_returns(px, as_of) if as_of else {}
+    periods_qqq = period_returns(qqq, as_of) if as_of and len(qqq) else {}
 
     # 与我的系统的关系（按账户）
     snaps = snapshots_of(s, mode)

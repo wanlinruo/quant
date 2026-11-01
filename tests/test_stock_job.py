@@ -11,7 +11,8 @@ import pytest
 from quant.data import market_store as ms
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.finnhub import FinnhubAuthError, NewsRaw
-from quant.market.stock_job import METRIC_KEYS, run_stock_data
+from quant.market.stock_job import run_stock_data
+from quant.market.stock_metrics import METRIC_KEYS
 
 TODAY = date(2026, 10, 30)
 NOW = datetime(2026, 10, 31, 1, 15, tzinfo=UTC)
@@ -161,3 +162,21 @@ def test_stock_metrics_before_news_and_stage_in_summary(tmp_path: Path) -> None:
     summary = run(tmp_path, fh)
     assert fh.metric_calls == ["S0", "S1", "S2"] and fh.news_calls == ["S0"]
     assert "停在新闻阶段" in summary and doc(tmp_path, "S2")["metrics_updated"]
+
+
+def test_stale_stock_files_removed(tmp_path: Path) -> None:
+    gics(tmp_path, ["S0", "S1"])
+    run(tmp_path, FakeFinnhub(), holdings={"OLD"})
+    gics(tmp_path, ["S0"])
+    run(tmp_path, FakeFinnhub(), today=TODAY + timedelta(days=1))
+    left = sorted(p.stem for p in (tmp_path / "market" / "stocks").glob("*.json"))
+    assert left == ["S0"]
+
+
+def test_no_cleanup_without_gics(tmp_path: Path) -> None:
+    gics(tmp_path, ["S0", "S1"])
+    run(tmp_path, FakeFinnhub())
+    ms.gics_path(tmp_path).unlink()
+    run(tmp_path, FakeFinnhub(), holdings={"S0"}, today=TODAY + timedelta(days=1))
+    left = sorted(p.stem for p in (tmp_path / "market" / "stocks").glob("*.json"))
+    assert left == ["S0", "S1"]

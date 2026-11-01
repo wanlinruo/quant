@@ -15,31 +15,15 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
-from quant.data.market_store import ETF_SET, STOCK_SYMBOL_RE, load_gics, stock_path
+from quant.data.market_store import ETF_SET, STOCK_SYMBOL_RE, load_gics, market_dir, stock_path
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.finnhub import FinnhubAuthError, NewsRaw
 from quant.data.quota import atomic_write_text
 from quant.market.news import EARNINGS_RE, NewsItem, _mentions
+from quant.market.stock_metrics import METRIC_KEYS
 
 log = logging.getLogger("quant.stock_data")
 
-# 个股页“估值与财务”展示的指标：（Finnhub 键, 标签, 类型）；pct 类 Finnhub 给的是百分数
-METRICS: tuple[tuple[str, str, str], ...] = (
-    ("peTTM", "市盈率（TTM）", "ratio"),
-    ("forwardPE", "远期市盈率", "ratio"),
-    ("pbQuarterly", "市净率", "ratio"),
-    ("psTTM", "市销率（TTM）", "ratio"),
-    ("evEbitdaTTM", "EV / EBITDA", "ratio"),
-    ("currentDividendYieldTTM", "股息率", "pct"),
-    ("roeTTM", "ROE（TTM）", "pct"),
-    ("grossMarginTTM", "毛利率", "pct"),
-    ("operatingMarginTTM", "营业利润率", "pct"),
-    ("netProfitMarginTTM", "净利率", "pct"),
-    ("revenueGrowthTTMYoy", "营收增长（TTM 同比）", "pct"),
-    ("epsGrowthTTMYoy", "EPS 增长（TTM 同比）", "pct"),
-    ("totalDebt/totalEquityQuarterly", "负债 / 股东权益", "ratio"),
-)
-METRIC_KEYS = tuple(k for k, _, _ in METRICS)
 NEWS_DAYS = 7
 NEWS_KEEP = 15
 METRICS_MAX_AGE = 6  # 天；超过才重取
@@ -127,5 +111,14 @@ def run_stock_data(
         raise
     except DataUnavailableError as e:
         notes.append(f"限流或故障，停在{stage}阶段（{e}）")
+    removed = 0
+    if gics is not None:  # 读不到成分表时一个都不删（避免误删全部）
+        keep = set(universe)
+        for p in (market_dir(data_dir) / "stocks").glob("*.json"):
+            if p.stem not in keep:
+                p.unlink(missing_ok=True)  # 移出标普 500 或已卖出：可再生成，直接删
+                removed += 1
+    if removed:
+        notes.append(f"清理停用代码 {removed} 只")
     summary = f"新闻 {news_n} 只；指标 {metrics_n} 只；覆盖 {len(universe)} 只"
     return "；".join([summary, *notes])

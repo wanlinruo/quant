@@ -13,8 +13,8 @@ from typing import Any
 
 import pandas as pd
 
-from quant.api.analytics import period_returns
-from quant.data.market_store import ETF_SET, SECTOR_ETF, GicsTable, MarketStore
+from quant.data.market_store import ETF_SET, SECTOR_ETF, SECTOR_NAME, GicsTable, MarketStore
+from quant.market.periods import period_returns
 
 YEAR = 252  # 52 周
 HISTORY = 260  # 读取的交易日数
@@ -33,7 +33,6 @@ STYLE_PAIRS = (
     ("momentum", "动量", "MTUM", "SPY"),
     ("beta_lowvol", "高贝塔 − 低波", "SPHB", "SPLV"),
 )
-SECTOR_NAME = {sec: ETF_SET[etf][0] for sec, etf in SECTOR_ETF.items()}
 
 
 def _f(x: object) -> float | None:
