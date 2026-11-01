@@ -15,6 +15,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -91,6 +92,13 @@ def stock_path(data_dir: Path, symbol: str) -> Path | None:
 
 def gics_path(data_dir: Path) -> Path:
     return market_dir(data_dir) / "sp500_gics.csv"
+
+
+def _read_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
 
 @dataclass(frozen=True)
@@ -241,6 +249,21 @@ class MarketStore:
             tmp.replace(path)
             n += 1
         return n
+
+    def coverage(self, day: date, members: Sequence[str]) -> float:
+        """day 的日线中成分股所占比例。"""
+        if not members or not self.has_day(day):
+            return 0.0
+        have = set(pd.read_parquet(self._day_path(day), columns=["symbol"])["symbol"])
+        return len(have & set(members)) / len(members)
+
+    def empty_days(self) -> set[date]:
+        doc = _read_json(self.root / "empty_days.json")
+        return {date.fromisoformat(d) for d in doc} if isinstance(doc, list) else set()
+
+    def mark_empty(self, day: date) -> None:
+        days = sorted(self.empty_days() | {day})
+        atomic_write_text(self.root / "empty_days.json", json.dumps([d.isoformat() for d in days]))
 
     def splits_checked(self) -> date | None:
         """拆股已核对到的日期（含）。"""

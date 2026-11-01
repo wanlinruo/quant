@@ -23,6 +23,7 @@ INDEX_CANDLES = ("SPY", "QQQ", "DIA", "IWM")
 PERIODS = {"1D": 1, "1W": 5, "1M": 21}
 MOVER_MIN_CHANGE = 0.02
 MOVER_LIMIT = 150
+SIGNAL_EXTRA = 100
 GAP_PCT = 0.03
 VOLUME_SURGE = 2.0
 STYLE_PAIRS = (
@@ -128,8 +129,13 @@ def _breadth_at(
     prior_h = high.iloc[max(0, end - YEAR) : end - 1]
     prior_l = low.iloc[max(0, end - YEAR) : end - 1]
     enough = prior_h.count() >= YEAR - 1
-    out["new_highs"] = float(((high.iloc[i] > prior_h.max()) & enough).sum())
-    out["new_lows"] = float(((low.iloc[i] < prior_l.min()) & enough).sum())
+    # 没有任何成分股满足一年历史时不给（历史补齐前显示“—”，而不是 0）
+    out["new_highs"] = (
+        float(((high.iloc[i] > prior_h.max()) & enough).sum()) if enough.any() else None
+    )
+    out["new_lows"] = (
+        float(((low.iloc[i] < prior_l.min()) & enough).sum()) if enough.any() else None
+    )
     for n in (50, 200):
         ma = close.iloc[max(0, end - n) : end]
         has = ma.count() >= n
@@ -285,7 +291,9 @@ def movers(
             float(c.iloc[-1]), chg, vr, sig, _spark(c, 20), s in hold,
         ))  # fmt: skip
     out.sort(key=lambda m: -abs(m.change_pct))
-    return sorted([*out[:MOVER_LIMIT], *mine], key=lambda m: -abs(m.change_pct))
+    # 涨跌幅前 MOVER_LIMIT 只之外，有信号的再并入（最多 SIGNAL_EXTRA 只），避免信号股被截掉
+    extra = [m for m in out[MOVER_LIMIT:] if m.signals][:SIGNAL_EXTRA]
+    return sorted([*out[:MOVER_LIMIT], *extra, *mine], key=lambda m: -abs(m.change_pct))
 
 
 # ---- 热力图与指数日线 ----
@@ -311,9 +319,10 @@ def heatmap(
             continue
         sector = gics.sector(s)
         name = SECTOR_NAME.get(sector or "", sector)
+        fresh = c.index[-1] == close.index[-1]  # 当日没有数据的不显示几天前的涨跌
         for k, n in PERIODS.items():
-            out[k].append(HeatCell(s, gics.name(s), name, cap, _ret(c, n)))
-        out["YTD"].append(HeatCell(s, gics.name(s), name, cap, _ytd(c)))
+            out[k].append(HeatCell(s, gics.name(s), name, cap, _ret(c, n) if fresh else None))
+        out["YTD"].append(HeatCell(s, gics.name(s), name, cap, _ytd(c) if fresh else None))
     return out
 
 
@@ -366,9 +375,10 @@ def highlights(
     spy = next((x for x in strip if x.symbol == "SPY"), None)
     c = _col(close, "SPY")
     if spy and spy.change_pct is not None and spy.close is not None and len(c):
-        top = c.iloc[-YEAR:].max()
-        parts.append(f"标普 500（SPY）{spy.change_pct:+.2%} 收于 {spy.close:,.2f}，"
-                     f"距 52 周高点 {spy.close / top - 1:+.1%}")  # fmt: skip
+        head = f"标普 500（SPY）{spy.change_pct:+.2%} 收于 {spy.close:,.2f}"
+        if len(c) >= YEAR:  # 历史不足一年时不写“52 周”
+            head += f"，距 52 周高点 {spy.close / c.iloc[-YEAR:].max() - 1:+.1%}"
+        parts.append(head)
     ranked = [s for s in secs if s.d1 is not None]
     if len(ranked) >= 2:
         parts.append(f"{ranked[0].name}领涨、{ranked[-1].name}领跌")

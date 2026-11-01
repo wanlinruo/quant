@@ -182,3 +182,44 @@ def test_snapshot_json_serializable_no_nan(tmp_path: object) -> None:
     assert xlk["1D"] == pytest.approx(d1) and xlk["6M"] is not None
     assert xlk["1Y"] is None  # 合成数据 260 个工作日只跨 361 天，不足 1 年时不给
     assert set(doc["sector_periods"]) == set(SECTOR_ETF.values())
+
+
+# ---- 后续修复（#79）----
+
+
+def _short(n: int = 61) -> dict[str, pd.DataFrame]:
+    return {k: v.iloc[-n:] for k, v in frames().items()}
+
+
+def test_highlights_without_year_history() -> None:
+    f = _short()
+    br = b.breadth(f["close"], f["high"], f["low"], f["volume"], GICS.members)
+    assert br.new_highs.value is None and br.new_lows.value is None
+    text = b.highlights(b.ticker_strip(f["close"]), b.sectors(f["close"]), br, f["close"])
+    assert "52 周" not in text and "标普 500" in text
+
+
+def test_heatmap_1d_none_when_stale() -> None:
+    f = frames()
+    close = f["close"].copy()
+    close.loc[IDX[-1], "GAP"] = np.nan
+    cells = {c.symbol: c for c in b.heatmap(close, GICS, {s: 1e9 for s in GICS.members})["1D"]}
+    assert cells["GAP"].ret is None and cells["UP"].ret is not None
+
+
+def test_movers_keep_signal_rows_beyond_cap() -> None:
+    idx = IDX[-30:]
+    syms = [f"M{i}" for i in range(200)] + [f"G{i}" for i in range(30)]
+    close = pd.DataFrame(100.0, index=idx, columns=syms)
+    close.loc[idx[-1], [f"M{i}" for i in range(200)]] = 103.0
+    close.loc[idx[-1], [f"G{i}" for i in range(30)]] = 101.0
+    open_ = close.copy()
+    open_.loc[idx[-1], [f"G{i}" for i in range(30)]] = 104.0  # 跳空 +4%，收盘只 +1%
+    open_.loc[idx[-1], [f"M{i}" for i in range(200)]] = 100.0  # 平开，无信号
+    vol = close * 0 + 1000.0
+    gics = GicsTable({s: (s, "Energy") for s in syms})
+    got = b.movers(close, open_, close + 0.5, close - 0.5, vol, gics, {})
+    g = [m for m in got if m.symbol.startswith("G")]
+    m = [m for m in got if m.symbol.startswith("M")]
+    assert len(g) == 30 and all("跳空" in x.signals for x in g)
+    assert len(m) == b.MOVER_LIMIT

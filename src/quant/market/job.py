@@ -27,6 +27,7 @@ from quant.data.quota import atomic_write_text
 from quant.market.board import build_snapshot
 
 log = logging.getLogger("quant.market_data")
+MIN_COVERAGE = 0.95  # 当日成分覆盖率低于此值时重取一次
 SPLIT_DAYS_PER_RUN = 10  # 停跑多日后分几次追上，避免一次占满额度
 
 
@@ -64,6 +65,8 @@ def run_market_data(
             notes.append(f"限流或故障，停止本轮（{type(e).__name__}）")
             return False
         if df.empty:
+            if day != today:
+                store.mark_empty(day)  # 该日没有数据（如临时停市），以后补历史跳过
             return False
         store.write_day(day, df, keep)
         return True
@@ -87,9 +90,11 @@ def run_market_data(
                     ratio = f"{sp.split_from:g}:{sp.split_to:g}"
                     notes.append(f"{sp.symbol} {sp.execution_date} 拆股 {ratio} 已换算")
             store.set_splits_checked(d)
-        return store.splits_checked() == today
+        return (store.splits_checked() or date.min) >= today  # 补跑过去日期时进度可能更新
 
-    if not store.has_day(today):
+    members = gics.members
+    low = store.has_day(today) and store.coverage(today, members) < MIN_COVERAGE
+    if not store.has_day(today) or low:
         fetch_day(today)
         stale = not store.has_day(today)
         if stale:
@@ -100,7 +105,9 @@ def run_market_data(
     # 补历史：最近 history_days 个交易日中缺的，由近及远
     start = today - timedelta(days=int(settings.history_days * 1.6) + 10)
     window = cal.trading_days(start, today)[-settings.history_days :]
-    missing = [d for d in reversed(window) if d != today and not store.has_day(d)]
+    empty = store.empty_days()
+    missing = [d for d in reversed(window)
+               if d != today and not store.has_day(d) and d not in empty]  # fmt: skip
     fetched = 0
     for d in missing[: settings.history_per_run]:
         if stopped or not splits_done:
