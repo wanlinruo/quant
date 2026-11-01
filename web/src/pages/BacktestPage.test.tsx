@@ -287,4 +287,10 @@ describe("BacktestPage", () => {
     await user.click(screen.getByRole("button", { name: "交易明细" }));
     expect(await screen.findByText(/重新运行/)).toBeInTheDocument();
   });
+
+  it("tab from url", async () => {
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS], "/api/backtests/128/trades": [200, TRADES] });
+    renderPage(<BacktestPage />, "/backtest?tab=trades");
+    expect(await screen.findByTestId("trade-table")).toBeInTheDocument();
+  });
 });

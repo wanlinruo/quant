@@ -52,7 +52,12 @@ export function BacktestPage() {
   const [checked, setChecked] = useState<number[] | null>(null);
   const [drawer, setDrawer] = useState<DrawerInitial | "new" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [tab, setTab] = useState<TabKey>("overview");
+  const { search: initialSearch } = useLocation();
+  // 网址可指定打开的标签（?tab=trades），便于分享与截图
+  const [tab, setTab] = useState<TabKey>(() => {
+    const t = new URLSearchParams(initialSearch).get("tab");
+    return TABS.some((x) => x.key === t) ? (t as TabKey) : "overview";
+  });
   const [trade, setTrade] = useState<BtTradeOut | null>(null);
 
   const { id: routeId } = useParams();
