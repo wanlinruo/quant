@@ -20,11 +20,18 @@ from quant.core.settings import ScheduleSettings, Settings
 from quant.data.pipeline import DataValidationError
 from quant.data.providers.base import DataProvider, normalize_bars
 from quant.data.store import ParquetStore
-from quant.db.models import AccountSnapshotRow, JobRun, PositionSnapshot, Signal, SystemFlag
+from quant.db.models import (
+    AccountSnapshotRow,
+    JobAttempt,
+    JobRun,
+    PositionSnapshot,
+    Signal,
+    SystemFlag,
+)
 from quant.engine.executor import ET
 from quant.jobs import daily
 from quant.jobs.daily import JobContext, daily_data, daily_report, daily_signal
-from quant.jobs.runner import JobStopped, job_lock, run_job
+from quant.jobs.runner import JobStopped, job_lock, job_status, run_job
 from quant.jobs.scheduler import Scheduler, day_plan
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -154,8 +161,8 @@ class TestRunJob:
             return "ok"
 
         n = Notes()
-        assert run_job(engine, "daily_data", DAY, job, n) == "success"
-        assert run_job(engine, "daily_data", DAY, job, n) == "skipped"
+        assert run_job(engine, "daily_data", DAY, job, n, mode="paper") == "success"
+        assert run_job(engine, "daily_data", DAY, job, n, mode="paper") == "skipped"
         assert calls == [1] and status(engine, "daily_data", DAY) == "success"
 
     def test_failure_notifies_and_needs_manual_rerun(self, engine: Engine) -> None:
@@ -164,13 +171,16 @@ class TestRunJob:
         def boom() -> str:
             raise RuntimeError("数据源超时")
 
-        assert run_job(engine, "daily_data", DAY, boom, n) == "failed"
+        assert run_job(engine, "daily_data", DAY, boom, n, mode="paper") == "failed"
         assert "数据源超时" in n.sent[-1][1]
         with Session(engine) as s:
             row = s.scalars(select(JobRun)).one()
             assert row.status == "failed" and "RuntimeError" in (row.error or "")
-        assert run_job(engine, "daily_data", DAY, lambda: "ok", n) == "skipped"
-        assert run_job(engine, "daily_data", DAY, lambda: "ok", n, rerun_failed=True) == "success"
+        assert run_job(engine, "daily_data", DAY, lambda: "ok", n, mode="paper") == "skipped"
+        assert (
+            run_job(engine, "daily_data", DAY, lambda: "ok", n, mode="paper", rerun_failed=True)
+            == "success"
+        )
 
     def test_quiet_errors_not_notified_twice(self, engine: Engine) -> None:
         n = Notes()
@@ -178,19 +188,24 @@ class TestRunJob:
         def stopped() -> str:
             raise JobStopped("熔断")
 
-        assert run_job(engine, "daily_execute", DAY, stopped, n) == "failed"
+        assert run_job(engine, "daily_execute", DAY, stopped, n, mode="paper") == "failed"
         assert n.sent == []
 
     def test_stale_running_is_rerun(self, engine: Engine) -> None:
         with Session(engine) as s, s.begin():
-            s.add(JobRun(job_name="daily_execute", trade_date=DAY, status="running",
+            s.add(JobRun(mode="paper", job_name="daily_execute", trade_date=DAY, status="running",
                          started_at=datetime.now(UTC)))  # fmt: skip
-        assert run_job(engine, "daily_execute", DAY, lambda: "ok", Notes()) == "success"
+        assert (
+            run_job(engine, "daily_execute", DAY, lambda: "ok", Notes(), mode="paper") == "success"
+        )
 
     def test_locked(self, engine: Engine) -> None:
-        with job_lock(engine, "daily_execute", DAY) as got:
+        with job_lock(engine, "daily_execute", DAY, "paper") as got:
             assert got
-            assert run_job(engine, "daily_execute", DAY, lambda: "ok", Notes()) == "locked"
+            assert (
+                run_job(engine, "daily_execute", DAY, lambda: "ok", Notes(), mode="paper")
+                == "locked"
+            )
         assert status(engine, "daily_execute", DAY) is None
 
 
@@ -199,7 +214,7 @@ class TestRunJob:
 class TestDailyJobs:
     def test_data_then_signal(self, engine: Engine, tmp_path: Path) -> None:
         ctx = make_ctx(engine, tmp_path)
-        run_job(engine, "daily_data", DAY, lambda: daily_data(ctx, DAY), ctx.notifier)
+        run_job(engine, "daily_data", DAY, lambda: daily_data(ctx, DAY), ctx.notifier, mode="paper")
         assert status(engine, "daily_data", DAY) == "success"
         assert ParquetStore(tmp_path).read_bars("QQQ").index[-1].date() == DAY
         text = daily_signal(ctx, DAY)
@@ -298,8 +313,8 @@ def test_missed_execution_window(engine: Engine, tmp_path: Path) -> None:
     broker = FakeBroker(clock, "100000", {})
     ctx = make_ctx(engine, tmp_path, clock=clock, broker_factory=lambda: broker)
     with Session(engine) as s, s.begin():
-        s.add(Signal(strategy="etf_momentum", signal_date=DAY, target_weights={"QQQ": 1.0},
-                     data_as_of=DAY))  # fmt: skip
+        s.add(Signal(mode="paper", strategy="etf_momentum", signal_date=DAY,
+                     target_weights={"QQQ": 1.0}, data_as_of=DAY))  # fmt: skip
     assert Scheduler(ctx).tick() == []
     assert broker.placed == [] and status(engine, "daily_execute", NEXT) is None
     title, _, _ = ctx.notifier.sent[-1]  # type: ignore[attr-defined]
@@ -449,7 +464,7 @@ class TestComboJobs:
 
     def test_combo_signal_includes_momentum_stock(self, engine: Engine, tmp_path: Path) -> None:
         ctx = combo_ctx(engine, tmp_path)
-        run_job(engine, "daily_data", DAY, lambda: daily_data(ctx, DAY), ctx.notifier)
+        run_job(engine, "daily_data", DAY, lambda: daily_data(ctx, DAY), ctx.notifier, mode="paper")
         daily_signal(ctx, DAY)
         with Session(engine) as s:
             sig = s.scalars(select(Signal)).one()
@@ -569,3 +584,74 @@ class TestUniverseNotReady:
         text = daily_data(ctx, MONTH_END)
         assert slept == [] and "覆盖率 100.0%" in text
         assert primary.delayed_calls == [["AAA", "BBB", "CCC"]]
+
+
+@pytest.mark.db
+@needs_db
+class TestModeAndAttempts:
+    """#65：信号与任务记录按账户区分；每次执行留一条尝试记录；财报覆盖全部持仓。"""
+
+    def test_run_job_records_attempts(self, engine: Engine) -> None:
+        def boom() -> str:
+            raise RuntimeError("第一行\n第二行")
+
+        n = Notes()
+        assert run_job(engine, "daily_data", DAY, boom, n, mode="paper") == "failed"
+        assert run_job(engine, "daily_data", DAY, lambda: "ok", n, mode="paper",
+                       rerun_failed=True) == "success"  # fmt: skip
+        with Session(engine) as s:
+            rows = s.scalars(select(JobAttempt).order_by(JobAttempt.attempt)).all()
+            runs = s.scalars(select(JobRun)).all()
+        assert [(r.attempt, r.result) for r in rows] == [(1, "failed"), (2, "success")]
+        assert rows[0].error == "RuntimeError: 第一行" and rows[0].finished_at is not None
+        assert rows[1].error is None and len(runs) == 1 and runs[0].mode == "paper"
+
+    def test_run_job_isolated_by_mode(self, engine: Engine) -> None:
+        n = Notes()
+        assert run_job(engine, "daily_data", DAY, lambda: "ok", n, mode="paper") == "success"
+        assert run_job(engine, "daily_data", DAY, lambda: "ok", n, mode="live") == "success"
+        with Session(engine) as s:
+            assert job_status(s, "daily_data", DAY, "live") == "success"
+            assert job_status(s, "daily_data", DAY, "sim") is None
+
+    def test_daily_signal_writes_mode_and_detail(self, engine: Engine, tmp_path: Path) -> None:
+        ctx = combo_ctx(engine, tmp_path)
+        run_job(engine, "daily_data", DAY, lambda: daily_data(ctx, DAY), ctx.notifier,
+                mode=ctx.mode)  # fmt: skip
+        with Session(engine) as s, s.begin():
+            s.add(Signal(mode="live", strategy="combo", signal_date=DAY, data_as_of=DAY,
+                         target_weights={"ZZZ": 1.0}))  # fmt: skip
+        daily_signal(ctx, DAY)
+        with Session(engine) as s:
+            rows = {r.mode: r for r in s.scalars(select(Signal))}
+        assert rows["live"].target_weights == {"ZZZ": 1.0}  # 另一账户的信号不被覆盖
+        sig = rows[ctx.mode]
+        assert sig.detail is not None and sig.detail["timing_factor"] in (0.5, 1.0)
+        assert sig.detail["momentum_rank"][0] == "AAA"
+        assert set(sig.detail["sleeves"]) == {"momentum", "swing"}
+
+    def test_earnings_watchlist_includes_positions_and_targets(self, engine: Engine) -> None:
+        with Session(engine) as s, s.begin():
+            s.add_all([
+                PositionSnapshot(snapshot_date=DAY, mode="paper", symbol="MSFT", qty=1,
+                                 avg_cost=Decimal(1), market_value=Decimal(1)),
+                PositionSnapshot(snapshot_date=DAY, mode="live", symbol="ORCL", qty=1,
+                                 avg_cost=Decimal(1), market_value=Decimal(1)),
+                Signal(mode="paper", strategy="combo", signal_date=DAY, data_as_of=DAY,
+                       target_weights={"AMD": 0.1, "NVDA": 0.2}),
+            ])  # fmt: skip
+        with Session(engine) as s:
+            got = daily.earnings_watchlist(s, "paper", ["NVDA", "AAPL"])
+        assert got == ["AAPL", "AMD", "MSFT", "NVDA"]
+
+    def test_missing_earnings_warning_only_for_strategy_symbols(
+        self, engine: Engine, tmp_path: Path
+    ) -> None:
+        with Session(engine) as s, s.begin():
+            s.add(PositionSnapshot(snapshot_date=DAY, mode="paper", symbol="SPY", qty=1,
+                                   avg_cost=Decimal(1), market_value=Decimal(1)))  # fmt: skip
+        ctx = combo_ctx(engine, tmp_path, provider=NoEarnings())
+        daily_data(ctx, DAY)
+        bodies = [body for _, body, _ in ctx.notifier.sent]  # type: ignore[attr-defined]
+        warned = [b for b in bodies if "财报日" in b]
+        assert warned and all("SPY" not in b for b in warned)

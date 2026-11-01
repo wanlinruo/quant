@@ -73,9 +73,9 @@ class Scheduler:
     def _ready(self, name: str, d: date) -> bool:
         with Session(self.ctx.engine) as s:
             if name == "daily_signal":
-                return job_status(s, "daily_data", d) == "success"
+                return job_status(s, "daily_data", d, self.ctx.mode) == "success"
             if name == "daily_report":
-                return job_status(s, "daily_execute", d) in ("success", "failed")
+                return job_status(s, "daily_execute", d, self.ctx.mode) in ("success", "failed")
         return True
 
     def _execute_deadline(self, d: date) -> datetime:
@@ -86,11 +86,13 @@ class Scheduler:
         """启动时已过当日执行时段：不再下单；有待执行的信号时提醒一次。"""
         prev = self.ctx.calendar.previous_trading_day(d)
         with Session(self.ctx.engine) as s:
-            if job_status(s, "daily_execute", d) is not None:
+            if job_status(s, "daily_execute", d, self.ctx.mode) is not None:
                 return
             pending = s.scalar(
                 select(Signal.id).where(
-                    Signal.strategy == self.ctx.strategy_name, Signal.signal_date == prev
+                    Signal.mode == self.ctx.mode,
+                    Signal.strategy == self.ctx.strategy_name,
+                    Signal.signal_date == prev,
                 )
             )
         log.warning("job=daily_execute trade_date=%s 已过执行时段，今日不执行", d)
@@ -124,6 +126,7 @@ class Scheduler:
                 d,
                 lambda fn=fn: fn(self.ctx, d),  # type: ignore[misc]
                 self.ctx.notifier,
+                mode=self.ctx.mode,
                 quiet=QUIET,
             )
             results.append((name, result))

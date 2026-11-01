@@ -269,7 +269,11 @@ class Executor:
         prev = self._cal.previous_trading_day(d)
         with Session(self._engine) as s:
             sig = s.scalar(
-                select(Signal).where(Signal.strategy == self._strategy, Signal.signal_date == prev)
+                select(Signal).where(
+                    Signal.mode == self._mode,
+                    Signal.strategy == self._strategy,
+                    Signal.signal_date == prev,
+                )
             )
             if sig is None:
                 raise ExecutionError(f"没有 {self._strategy} 在 {prev} 的信号")
