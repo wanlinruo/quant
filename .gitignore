@@ -32,3 +32,10 @@ build/
 .DS_Store
 .idea/
 .vscode/
+
+# Brainstorm 草图（本地）
+.superpowers/
+
+# 前端
+web/node_modules/
+web/dist/
