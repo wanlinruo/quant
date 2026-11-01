@@ -172,9 +172,17 @@ class _View:
 
 
 def simulate(
-    inp: Inputs, p: SwingParams, events: EventCalendar, cal: TradingCalendar, as_of: date
+    inp: Inputs,
+    p: SwingParams,
+    events: EventCalendar,
+    cal: TradingCalendar,
+    as_of: date,
+    exits: dict[str, str] | None = None,
 ) -> dict[str, float]:
-    """重放到 as_of 收盘，返回目标权重（含当日新进场、去掉当日离场）。"""
+    """重放到 as_of 收盘，返回目标权重（含当日新进场、去掉当日离场）。
+
+    exits 不为 None 时写入 as_of 当日离场的标的与原因（不影响权重）。
+    """
     v = _View(inp, p, cal, as_of)
     holdings: dict[str, _Holding] = {}
     pending: dict[str, float] = {}  # 信号日决定、次日开盘进场
@@ -191,8 +199,11 @@ def simulate(
                 continue  # 当日缺行情：维持
             hold.days_held += 1
             hold.armed |= c >= hold.entry_price * (1 + p.arm_pct)
-            if _should_exit(v, p, events, i, t, s, hold, c):
+            reason = _exit_reason(v, p, events, i, t, s, hold, c)
+            if reason is not None:
                 del holdings[s]
+                if exits is not None and t == as_of:
+                    exits[s] = reason
 
         if events.is_fomc(v.ahead(t, 1)):
             continue
@@ -207,7 +218,7 @@ def simulate(
     return out
 
 
-def _should_exit(
+def _exit_reason(
     v: _View,
     p: SwingParams,
     events: EventCalendar,
@@ -216,22 +227,26 @@ def _should_exit(
     s: str,
     hold: _Holding,
     c: float,
-) -> bool:
-    if hold.days_held >= p.max_hold or c <= hold.entry_price * (1 - p.stop_pct):
-        return True
+) -> str | None:
+    """当日是否离场；离场时返回原因（回测记录用），否则 None。判断顺序即规则优先级。"""
+    if hold.days_held >= p.max_hold:
+        return f"持有满 {p.max_hold} 天"
+    if c <= hold.entry_price * (1 - p.stop_pct):
+        return f"止损 -{p.stop_pct:.0%}"
     if p.fomc_exit and events.is_fomc(v.ahead(t, 1)):
-        return True
+        return "FOMC 前离场"
     if s == p.inverse:
-        return v.num(v.close, i, p.index) > v.num(v.sma_exit, i, p.index)
+        back = v.num(v.close, i, p.index) > v.num(v.sma_exit, i, p.index)
+        return "反向标的转回" if back else None
     if c < v.num(v.sma_support, i, s) * (1 - p.support_break):
-        return True
+        return "跌破支撑线"
     if hold.armed and c < v.num(v.sma_exit, i, s):
-        return True
+        return f"跌破 {p.exit_ma} 日线（已获利）"
     if s in p.stocks:
         r = events.next_earnings(s, t)
         if r is not None and r <= v.ahead(t, p.earnings_exit_days):
-            return True
-    return False
+            return "财报前离场"
+    return None
 
 
 def _candidates(
@@ -312,8 +327,14 @@ class SwingPullback(Strategy):
         return p.trend_ma + p.replay_days + 30
 
     def target_weights(self, ctx: Context) -> dict[str, float]:
+        return self.target_weights_with_exits(ctx)[0]
+
+    def target_weights_with_exits(self, ctx: Context) -> tuple[dict[str, float], dict[str, str]]:
+        """唯一的计算路径：目标权重与当日离场原因（回测归因用）。"""
         p = SwingParams.from_mapping(ctx.params)
         need = p.trend_ma + p.replay_days + p.vol_window + 10
         start = ctx.as_of - timedelta(days=int(need * 1.5))
         frames = {f: ctx.field(p.symbols, f, start) for f in FRAME_FIELDS}
-        return simulate(compute_inputs(frames, p), p, ctx.events, self._cal, ctx.as_of)
+        exits: dict[str, str] = {}
+        w = simulate(compute_inputs(frames, p), p, ctx.events, self._cal, ctx.as_of, exits)
+        return w, exits
