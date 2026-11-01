@@ -32,6 +32,7 @@ from quant.data.universe import constituents_path, load_constituents
 from quant.db.backtests import complete_run
 from quant.engine.backtester import Backtester, BacktestResult
 from quant.engine.coverage import missing_ratio_by_year
+from quant.engine.ledger import build_ledger
 from quant.engine.orders import OrderPlanParams
 from quant.strategies import get_strategy
 from quant.strategies.events import EventCalendar
@@ -262,4 +263,5 @@ def save_result(session: Session, run_id: int, result: BacktestResult) -> None:
     }
     if result.data_info:
         metrics["data"] = result.data_info
-    complete_run(session, run_id, metrics, result.equity, result.drawdown)
+    ledger = build_ledger(result.holdings, result.fills, result.attribution, result.equity)
+    complete_run(session, run_id, metrics, result.equity, result.drawdown, ledger)

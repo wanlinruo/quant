@@ -245,6 +245,56 @@ class BacktestEquity(Base):
     drawdown: Mapped[float] = mapped_column(Float)
 
 
+class BacktestTrade(Base):
+    """逐笔交易（#67 B 批，设计 7.1）：同一 (代码, 子仓) 从建仓到清仓算一笔。"""
+
+    __tablename__ = "backtest_trades"
+
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("backtest_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    seq: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16))
+    sleeve: Mapped[str] = mapped_column(String(16))
+    open_date: Mapped[date] = mapped_column(Date)
+    open_price: Mapped[float] = mapped_column(Float)
+    close_date: Mapped[date | None] = mapped_column(Date)
+    close_price: Mapped[float | None] = mapped_column(Float)
+    qty: Mapped[float] = mapped_column(Float)
+    ret: Mapped[float | None] = mapped_column(Float)
+    pnl: Mapped[float] = mapped_column(Float)
+    exit_reason: Mapped[str | None] = mapped_column(String(64))
+    adjustments: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+
+
+class BacktestPosition(Base):
+    """每日收盘持仓（按子仓拆分，占净值权重）。"""
+
+    __tablename__ = "backtest_positions"
+
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("backtest_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    pos_date: Mapped[date] = mapped_column("date", Date, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    sleeve: Mapped[str] = mapped_column(String(16), primary_key=True)
+    weight: Mapped[float] = mapped_column(Float)
+
+
+class BacktestDaily(Base):
+    """每日现金权重、择时系数与各子仓当日盈亏。"""
+
+    __tablename__ = "backtest_daily"
+
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("backtest_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    day: Mapped[date] = mapped_column("date", Date, primary_key=True)
+    cash_weight: Mapped[float] = mapped_column(Float)
+    timing_factor: Mapped[float | None] = mapped_column(Float)
+    sleeve_pnl: Mapped[dict[str, float]] = mapped_column(JSONB)
+
+
 class SystemFlag(Base):
     """系统开关，如 trading_enabled（熔断开关，PROJECT_PLAN 6.4）。面板只读。"""
 
