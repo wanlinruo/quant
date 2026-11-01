@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import shlex
+from bisect import bisect_left
 from dataclasses import asdict
+from datetime import date
 from typing import Any
 
 import pandas as pd
@@ -15,16 +17,34 @@ from quant.api import backtest_analysis as ba
 from quant.api.backtests import FORM_STRATEGY
 from quant.api.schemas import (
     BacktestAnalysis,
+    BacktestPositions,
+    BacktestTrades,
+    BtDailyPosOut,
+    BtHoldingOut,
+    BtLongestOut,
     BtOverviewOut,
     BtParamOut,
+    BtReasonOut,
     BtReproOut,
     BtReturnsOut,
     BtRiskOut,
     BtSeriesOut,
+    BtSleevesOut,
     BtStatOut,
+    BtSymbolOut,
+    BtTimingOut,
+    BtTradeOut,
+    BtTradeRef,
+    BtTradesSummary,
 )
 from quant.core.settings import Settings
-from quant.db.models import BacktestEquity, BacktestRun
+from quant.db.models import (
+    BacktestDaily,
+    BacktestEquity,
+    BacktestPosition,
+    BacktestRun,
+    BacktestTrade,
+)
 from quant.engine.evaluation import OOS_START
 from quant.engine.runner import CASH_KEY, COSTS_KEY
 from quant.strategies.etf_momentum import MomentumParams
@@ -144,19 +164,182 @@ def analysis(s: Session, run_id: int, settings: Settings) -> BacktestAnalysis | 
     out["series"] = BtSeriesOut(dates=[d.date() for d in idx], strategy=list(eq / eq.iloc[0]),
                                 qqq=qn, spy=sn, drawdown=[float(p.drawdown) for p in points],
                                 qqq_drawdown=qdd)  # fmt: skip
-    out["stats"] = [BtStatOut(**asdict(x)) for x in ba.stat_bar(eq, qqq)]
+    stats = [BtStatOut(**asdict(x)) for x in ba.stat_bar(eq, qqq)]
+    tv = trades_view(s, run_id)
+    if tv is not None and tv.summary is not None:
+        fill = {"win_rate": tv.summary.win_rate, "profit_factor": tv.summary.profit_factor,
+                "trades": float(tv.summary.trades)}  # fmt: skip
+        stats = [x.model_copy(update={"value": fill[x.key]}) if x.key in fill else x for x in stats]
+    out["stats"] = stats
+    daily = s.scalars(select(BacktestDaily).where(BacktestDaily.run_id == run_id)
+                      .order_by(BacktestDaily.day)).all()  # fmt: skip
+    sleeves = _sleeve_series(list(daily), out["initial_cash"]) if daily else None
     split = ba.split_metrics(eq, qqq)
     out["overview"] = BtOverviewOut(checks=ba.checks(split), split=split, yearly=ba.yearly(eq, qqq))
     out["returns"] = BtReturnsOut(
         monthly=ba.monthly_table(eq, qqq), distribution=ba.distribution(eq),
-        best_worst=ba.best_worst(eq), rolling=ba.rolling_12m(eq),
+        best_worst=ba.best_worst(eq), rolling=ba.rolling_12m(eq), sleeves=sleeves,
     )  # fmt: skip
     out["risk"] = BtRiskOut(
         episodes=ba.drawdown_episodes(eq, qqq), capture=ba.capture(eq, qqq),
         table=ba.risk_table(eq, qqq), rolling_beta=ba.rolling_beta(eq, qqq), tail=ba.tail(eq),
+        timing=timing_periods(list(daily), eq) if daily else [],
     )  # fmt: skip
     return BacktestAnalysis(**out)
 
 
 def _same(v: Any) -> Any:
     return json.dumps(list(v) if isinstance(v, tuple) else v, sort_keys=True, default=str)
+
+
+# ---- 交易明细与持仓变化（#67 B 批）----
+
+OLD_RUN_NOTE = "此回测运行于交易记录功能上线之前，重新运行（复制参数新建）即可查看"
+
+
+def _dates(s: Session, run_id: int) -> list[date]:
+    return list(s.scalars(select(BacktestEquity.equity_date).where(BacktestEquity.run_id == run_id)
+                          .order_by(BacktestEquity.equity_date)))  # fmt: skip
+
+
+def _hold_days(dates: list[date], start: date, end: date | None) -> int:
+    i = bisect_left(dates, start)
+    j = bisect_left(dates, end) if end is not None else len(dates) - 1
+    return max(j - i, 0)
+
+
+def _rate(xs: list[float]) -> float | None:
+    return sum(1 for x in xs if x > 0) / len(xs) if xs else None
+
+
+def trades_view(s: Session, run_id: int) -> BacktestTrades | None:
+    if s.get(BacktestRun, run_id) is None:
+        return None
+    rows = s.scalars(select(BacktestTrade).where(BacktestTrade.run_id == run_id)
+                     .order_by(BacktestTrade.seq)).all()  # fmt: skip
+    if not rows:
+        return BacktestTrades(note=OLD_RUN_NOTE)
+    dates = _dates(s, run_id)
+    out = [BtTradeOut(seq=t.seq, symbol=t.symbol, sleeve=t.sleeve, open_date=t.open_date,
+                      open_price=t.open_price, close_date=t.close_date, close_price=t.close_price,
+                      qty=t.qty, ret=t.ret, pnl=t.pnl, exit_reason=t.exit_reason,
+                      days=_hold_days(dates, t.open_date, t.close_date), adjustments=t.adjustments)
+           for t in rows]  # fmt: skip
+    closed = [t for t in out if t.close_date is not None]
+    wins = sum(t.pnl for t in closed if t.pnl > 0)
+    losses = -sum(t.pnl for t in closed if t.pnl < 0)
+    rets = [t.ret for t in closed if t.ret is not None]
+    best = max(closed, key=lambda t: t.pnl, default=None)
+    worst = min(closed, key=lambda t: t.pnl, default=None)
+    summary = BtTradesSummary(
+        trades=len(out), closed=len(closed), win_rate=_rate([t.pnl for t in closed]),
+        profit_factor=wins / losses if losses else None,
+        avg_days=sum(t.days for t in closed) / len(closed) if closed else None,
+        avg_ret=sum(rets) / len(rets) if rets else None,
+        best=BtTradeRef(symbol=best.symbol, pnl=best.pnl, ret=best.ret) if best else None,
+        worst=BtTradeRef(symbol=worst.symbol, pnl=worst.pnl, ret=worst.ret) if worst else None,
+    )  # fmt: skip
+    by_reason: dict[str, list[BtTradeOut]] = {}
+    for t in closed:
+        by_reason.setdefault(t.exit_reason or "—", []).append(t)
+    reasons = [BtReasonOut(reason=k, count=len(v), win_rate=_rate([t.pnl for t in v]),
+                           avg_ret=_mean([t.ret for t in v]), pnl=sum(t.pnl for t in v))
+               for k, v in by_reason.items()]  # fmt: skip
+    by_sym: dict[str, list[BtTradeOut]] = {}
+    for t in out:
+        by_sym.setdefault(t.symbol, []).append(t)
+    symbols = [BtSymbolOut(symbol=k, trades=len(v), pnl=sum(t.pnl for t in v),
+                           win_rate=_rate([t.pnl for t in v if t.close_date is not None]),
+                           days=sum(t.days for t in v))
+               for k, v in by_sym.items()]  # fmt: skip
+    return BacktestTrades(summary=summary, trades=out,
+                          by_reason=sorted(reasons, key=lambda r: -r.count),
+                          by_symbol=sorted(symbols, key=lambda r: -r.pnl))  # fmt: skip
+
+
+def _mean(xs: list[float | None]) -> float | None:
+    v = [x for x in xs if x is not None]
+    return sum(v) / len(v) if v else None
+
+
+def timing_periods(daily: list[BacktestDaily], eq: pd.Series | None) -> list[BtTimingOut]:
+    """择时系数 < 1 的连续时段。估算的“系数为 1 时收益”= 期间收益 ÷ 平均系数（近似）。"""
+    out: list[BtTimingOut] = []
+    run: list[BacktestDaily] = []
+
+    def flush() -> None:
+        if not run:
+            return
+        start, end = run[0].day, run[-1].day
+        factor = sum(r.timing_factor or 1.0 for r in run) / len(run)
+        ret = est = None
+        if eq is not None:
+            seg = eq[(eq.index >= pd.Timestamp(start)) & (eq.index <= pd.Timestamp(end))]
+            before = eq[eq.index < pd.Timestamp(start)]
+            base = before.iloc[-1] if len(before) else (seg.iloc[0] if len(seg) else None)
+            if base is not None and len(seg):
+                ret = float(seg.iloc[-1] / base - 1)
+                est = ret / factor if factor else None
+        saved = ret - est if ret is not None and est is not None else None
+        out.append(BtTimingOut(start=start, end=end, days=len(run), factor=factor, ret=ret,
+                               est_full=est, saved=saved))  # fmt: skip
+        run.clear()
+
+    for r in daily:
+        if r.timing_factor is not None and r.timing_factor < 1:
+            run.append(r)
+        else:
+            flush()
+    flush()
+    return out
+
+
+def positions_view(s: Session, run_id: int, day: date | None) -> BacktestPositions | None:
+    if s.get(BacktestRun, run_id) is None:
+        return None
+    daily = s.scalars(select(BacktestDaily).where(BacktestDaily.run_id == run_id)
+                      .order_by(BacktestDaily.day)).all()  # fmt: skip
+    if not daily:
+        return BacktestPositions(note=OLD_RUN_NOTE)
+    sleeves: dict[date, dict[str, float]] = {}
+    for p in s.scalars(select(BacktestPosition).where(BacktestPosition.run_id == run_id)):
+        d = sleeves.setdefault(p.pos_date, {})
+        d[p.sleeve] = d.get(p.sleeve, 0.0) + p.weight
+    rows = [BtDailyPosOut(date=r.day, cash=r.cash_weight, sleeves=sleeves.get(r.day, {}),
+                          timing_factor=r.timing_factor) for r in daily]  # fmt: skip
+    eq = _equity(s, run_id)
+    pick = day or daily[-1].day
+    held = s.scalars(select(BacktestPosition).where(BacktestPosition.run_id == run_id,
+                                                    BacktestPosition.pos_date == pick)
+                     .order_by(BacktestPosition.weight.desc())).all()  # fmt: skip
+    trades = trades_view(s, run_id)
+    longest = sorted(trades.trades if trades else [], key=lambda t: -t.days)[:10]
+    return BacktestPositions(
+        daily=rows, timing=timing_periods(list(daily), eq), day=pick,
+        holdings=[BtHoldingOut(symbol=p.symbol, sleeve=p.sleeve, weight=p.weight) for p in held],
+        longest=[BtLongestOut(symbol=t.symbol, sleeve=t.sleeve, days=t.days,
+                              open_date=t.open_date, close_date=t.close_date) for t in longest],
+    )  # fmt: skip
+
+
+def _equity(s: Session, run_id: int) -> pd.Series | None:
+    pts = s.scalars(select(BacktestEquity).where(BacktestEquity.run_id == run_id)
+                    .order_by(BacktestEquity.equity_date)).all()  # fmt: skip
+    if len(pts) < 2:
+        return None
+    idx = pd.DatetimeIndex([pd.Timestamp(p.equity_date) for p in pts])
+    return pd.Series([float(p.equity) for p in pts], index=idx)
+
+
+def _sleeve_series(daily: list[BacktestDaily], cash: float | None) -> BtSleevesOut | None:
+    """各子仓累计盈亏 ÷ 初始资金。"""
+    if not cash:
+        return None
+    names = sorted({k for r in daily for k in r.sleeve_pnl})
+    acc = dict.fromkeys(names, 0.0)
+    series: dict[str, list[float]] = {k: [] for k in names}
+    for r in daily:
+        for k in names:
+            acc[k] += float(r.sleeve_pnl.get(k, 0.0))
+            series[k].append(acc[k] / cash)
+    return BtSleevesOut(dates=[r.day for r in daily], series=series)

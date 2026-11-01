@@ -63,6 +63,15 @@ export interface BacktestDefaults {
   min_start?: string | null;
 }
 
+export interface BacktestPositions {
+  note?: string | null;
+  daily?: BtDailyPosOut[];
+  timing?: BtTimingOut[];
+  day?: string | null;
+  holdings?: BtHoldingOut[];
+  longest?: BtLongestOut[];
+}
+
 export interface BacktestRunOut {
   id: number;
   strategy: string;
@@ -88,6 +97,14 @@ export interface BacktestSubmit {
   sma_window: number;
   cash: number | string;
   costs: CostsIn;
+}
+
+export interface BacktestTrades {
+  note?: string | null;
+  summary?: BtTradesSummary | null;
+  trades?: BtTradeOut[];
+  by_reason?: BtReasonOut[];
+  by_symbol?: BtSymbolOut[];
 }
 
 export interface Bar {
@@ -140,6 +157,13 @@ export interface BtCheckOut {
   passed: boolean | null;
 }
 
+export interface BtDailyPosOut {
+  date: string;
+  cash: number;
+  sleeves: Record<string, number>;
+  timing_factor: number | null;
+}
+
 export interface BtEpisodeOut {
   start: string;
   trough: string;
@@ -148,6 +172,20 @@ export interface BtEpisodeOut {
   down_days: number;
   recovery_days: number | null;
   qqq: number | null;
+}
+
+export interface BtHoldingOut {
+  symbol: string;
+  sleeve: string;
+  weight: number;
+}
+
+export interface BtLongestOut {
+  symbol: string;
+  sleeve: string;
+  days: number;
+  open_date: string;
+  close_date: string | null;
 }
 
 export interface BtMonthRowOut {
@@ -170,6 +208,14 @@ export interface BtParamOut {
   changed: boolean;
 }
 
+export interface BtReasonOut {
+  reason: string;
+  count: number;
+  win_rate: number | null;
+  avg_ret: number | null;
+  pnl: number;
+}
+
 export interface BtReproOut {
   source: string | null;
   data_end: string | null;
@@ -182,6 +228,7 @@ export interface BtReturnsOut {
   distribution: BtBinOut[];
   best_worst: BtBestWorstOut[];
   rolling: BtRollingOut[];
+  sleeves?: BtSleevesOut | null;
 }
 
 export interface BtRiskOut {
@@ -190,6 +237,7 @@ export interface BtRiskOut {
   table: BtRowOut[];
   rolling_beta: BtBetaOut[];
   tail: BtRowOut[];
+  timing?: BtTimingOut[];
 }
 
 export interface BtRollingOut {
@@ -213,12 +261,68 @@ export interface BtSeriesOut {
   qqq_drawdown: (number | null)[] | null;
 }
 
+export interface BtSleevesOut {
+  dates: string[];
+  series: Record<string, number[]>;
+}
+
 export interface BtStatOut {
   key: string;
   label: string;
   value: number | null;
   qqq: number | null;
   kind: "pct" | "ratio" | "int";
+}
+
+export interface BtSymbolOut {
+  symbol: string;
+  trades: number;
+  pnl: number;
+  win_rate: number | null;
+  days: number;
+}
+
+export interface BtTimingOut {
+  start: string;
+  end: string;
+  days: number;
+  factor: number;
+  ret: number | null;
+  est_full: number | null;
+  saved: number | null;
+}
+
+export interface BtTradeOut {
+  seq: number;
+  symbol: string;
+  sleeve: string;
+  open_date: string;
+  open_price: number;
+  close_date: string | null;
+  close_price: number | null;
+  qty: number;
+  ret: number | null;
+  pnl: number;
+  exit_reason: string | null;
+  days: number;
+  adjustments: Record<string, unknown>[];
+}
+
+export interface BtTradeRef {
+  symbol: string;
+  pnl: number;
+  ret: number | null;
+}
+
+export interface BtTradesSummary {
+  trades: number;
+  closed: number;
+  win_rate: number | null;
+  profit_factor: number | null;
+  avg_days: number | null;
+  avg_ret: number | null;
+  best: BtTradeRef | null;
+  worst: BtTradeRef | null;
 }
 
 export interface BtYearOut {

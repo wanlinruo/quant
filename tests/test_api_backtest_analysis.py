@@ -18,6 +18,7 @@ from quant.api.app import create_app
 from quant.api.deps import get_engine, get_settings
 from quant.data.store import ParquetStore
 from quant.db.backtests import complete_run, create_run
+from quant.engine.ledger import Ledger
 
 pytestmark = needs_db
 IDX = pd.bdate_range("2016-01-04", periods=2700)
@@ -44,6 +45,27 @@ def write_bench(data_dir: Path, symbols: tuple[str, ...] = ("QQQ", "SPY")) -> No
         store.write_bars(s, df, "test")
 
 
+def sample_ledger() -> "Ledger":
+    from quant.engine.ledger import Ledger, TradeRow
+
+    d = [x.date() for x in IDX]
+    trades = [
+        TradeRow(
+            1, "AAA", "momentum", d[10], 10.0, 100, d[40], 12.0, 0.2, 200.0, "动量排名跌出前 10"
+        ),
+        TradeRow(2, "BBB", "swing", d[20], 50.0, 10, d[25], 45.0, -0.1, -50.0, "跌破支撑线"),
+        TradeRow(3, "AAA", "swing", d[30], 11.0, 10, d[33], 11.5, 0.045, 5.0, "跌破支撑线"),
+        TradeRow(4, "CCC", "momentum", d[2600], 20.0, 5, None, None, 0.05, 5.0, None),
+    ]
+    positions = [(x, "AAA", "momentum", 0.3) for x in d[10:40]]
+    positions += [(x, "BBB", "swing", 0.1) for x in d[20:25]]
+    daily: list[tuple[date, float, float | None, dict[str, float]]] = [
+        (x, 0.6, 0.5 if 100 <= i < 120 else 1.0, {"momentum": 1.0, "swing": 0.5})
+        for i, x in enumerate(d)
+    ]
+    return Ledger(trades, positions, daily)
+
+
 @pytest.fixture
 def setup(
     db_url: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -63,7 +85,7 @@ def setup(
                                               "_costs": costs},
                           IDX[0].date(), IDX[-1].date(), status="running")  # fmt: skip
         meta = {"cagr": 0.1, "data": {"source": "yfinance", "data_end": "2026-05-01"}}
-        complete_run(s, done, meta, eq, dd)
+        complete_run(s, done, meta, eq, dd, sample_ledger())
         running = create_run(s, "combo", {}, date(2020, 1, 2), date(2021, 1, 4), status="running")
     eng.dispose()
     _clear()
@@ -139,3 +161,68 @@ def test_benchmark_not_covering_run(
     d = client.get(f"/api/backtests/{ids['done']}/analysis").json()
     assert d["stats"][1]["qqq"] is None and d["bench_note"] and "QQQ" in d["bench_note"]
     assert d["series"]["qqq"][0] is None and d["series"]["qqq"][-1] is not None
+
+
+def test_trades_endpoint(setup: tuple[TestClient, dict[str, int]]) -> None:
+    client, ids = setup
+    d = client.get(f"/api/backtests/{ids['done']}/trades").json()
+    assert d["note"] is None and len(d["trades"]) == 4
+    sm = d["summary"]
+    assert sm["trades"] == 4 and sm["closed"] == 3
+    assert sm["win_rate"] == pytest.approx(2 / 3) and sm["profit_factor"] == pytest.approx(205 / 50)
+    assert sm["best"]["symbol"] == "AAA" and sm["worst"]["symbol"] == "BBB"
+    t1 = d["trades"][0]
+    assert t1["days"] == 30 and t1["exit_reason"] == "动量排名跌出前 10"
+    reasons = {r["reason"]: r for r in d["by_reason"]}
+    assert reasons["跌破支撑线"]["count"] == 2 and reasons["跌破支撑线"]["pnl"] == pytest.approx(
+        -45
+    )
+    by_sym = {r["symbol"]: r for r in d["by_symbol"]}
+    assert by_sym["AAA"]["trades"] == 2 and by_sym["AAA"]["pnl"] == pytest.approx(205)
+
+
+def test_positions_endpoint(setup: tuple[TestClient, dict[str, int]]) -> None:
+    client, ids = setup
+    d = client.get(f"/api/backtests/{ids['done']}/positions").json()
+    assert len(d["daily"]) == 2700 and d["daily"][0]["cash"] == pytest.approx(0.6)
+    assert d["daily"][15]["sleeves"] == {"momentum": pytest.approx(0.3)}
+    assert d["timing"][0]["days"] == 20
+    day = IDX[22].date().isoformat()
+    h = client.get(f"/api/backtests/{ids['done']}/positions", params={"date": day}).json()
+    assert h["day"] == day and {(x["symbol"], x["sleeve"]) for x in h["holdings"]} == {
+        ("AAA", "momentum"),
+        ("BBB", "swing"),
+    }
+    assert (
+        d["longest"][0]["symbol"] == "CCC" and d["longest"][0]["days"] == 99
+    )  # 仍持有，算到最后一天
+
+
+def test_analysis_uses_trades(setup: tuple[TestClient, dict[str, int]]) -> None:
+    client, ids = setup
+    a = client.get(f"/api/backtests/{ids['done']}/analysis").json()
+    st = {s["key"]: s for s in a["stats"]}
+    assert st["trades"]["value"] == 4 and st["win_rate"]["value"] == pytest.approx(2 / 3)
+    sl = a["returns"]["sleeves"]
+    assert set(sl["series"]) == {"momentum", "swing"} and sl["series"]["momentum"][
+        -1
+    ] == pytest.approx(2700 / 100000)
+    tm = a["risk"]["timing"]
+    assert len(tm) == 1 and tm[0]["days"] == 20 and tm[0]["factor"] == pytest.approx(0.5)
+
+
+def test_old_run_without_ledger(setup: tuple[TestClient, dict[str, int]], db_url: str) -> None:
+    client, _ = setup
+    eng = create_engine(db_url)
+    eq = prices(3, 0.0005) * 1000
+    with Session(eng) as s, s.begin():
+        rid = create_run(s, "etf_momentum", {}, IDX[0].date(), IDX[-1].date(), status="running")
+        complete_run(s, rid, {"cagr": 0.1}, eq, eq / eq.cummax() - 1)
+    eng.dispose()
+    t = client.get(f"/api/backtests/{rid}/trades").json()
+    assert t["trades"] == [] and "重新运行" in t["note"]
+    p = client.get(f"/api/backtests/{rid}/positions").json()
+    assert p["daily"] == [] and "重新运行" in p["note"]
+    a = client.get(f"/api/backtests/{rid}/analysis").json()
+    assert {s["key"]: s for s in a["stats"]}["trades"]["value"] is None
+    assert a["returns"]["sleeves"] is None and a["risk"]["timing"] == []
