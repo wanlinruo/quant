@@ -457,3 +457,98 @@ class BacktestDataStatus(BaseModel):
     unavailable: list[str] = []
     quota: QuotaOut | None = None
     earnings: Literal["complete", "partial", "none"] | None = None
+
+
+# ---- 首页市场看板（#70）----
+
+
+class TickerItemOut(BaseModel):
+    symbol: str
+    label: str
+    close: float | None
+    change: float | None
+    change_pct: float | None
+    spark: list[float]
+
+
+class StatOut(BaseModel):
+    value: float | None
+    prev: float | None
+
+
+class BreadthOut(BaseModel):
+    advancers: StatOut
+    decliners: StatOut
+    unchanged: StatOut
+    new_highs: StatOut
+    new_lows: StatOut
+    above_50: StatOut
+    above_200: StatOut
+    up_volume_ratio: StatOut
+
+
+class StylePairOut(BaseModel):
+    key: str
+    label: str
+    long: str
+    short: str
+    d1: float | None
+    m1: float | None
+
+
+class SectorRowOut(BaseModel):
+    symbol: str
+    name: str
+    d1: float | None
+    w1: float | None
+    m1: float | None
+    ytd: float | None
+    rel_spy_d1: float | None
+    spark: list[float]
+
+
+class MoverOut(BaseModel):
+    symbol: str
+    name: str | None
+    sector: str | None
+    market_cap: float | None
+    close: float
+    change_pct: float
+    volume_ratio: float | None
+    signals: list[str]
+    spark: list[float]
+    held: bool = False
+
+
+class HeatCellOut(BaseModel):
+    symbol: str
+    name: str | None
+    sector: str | None
+    market_cap: float
+    ret: float | None
+
+
+class CandleOut(BaseModel):
+    date: date
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+class MarketOverview(BaseModel):
+    status: Literal["ok", "pending"]
+    as_of: date | None = None
+    stale: bool = False
+    generated_at: datetime | None = None
+    members: int = 0
+    coverage: float | None = None
+    strip: list[TickerItemOut] = []
+    highlights: str = ""
+    breadth: BreadthOut | None = None
+    styles: list[StylePairOut] = []
+    sectors: list[SectorRowOut] = []
+    movers: list[MoverOut] = []
+    heatmap: dict[str, list[HeatCellOut]] = {}
+    index_candles: dict[str, list[CandleOut]] = {}

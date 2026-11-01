@@ -59,6 +59,7 @@ def day_plan(
         ("daily_report", execute),
         ("daily_data", _at(d, schedule.daily_data) - early),
         ("daily_signal", _at(d, schedule.daily_signal) - early),
+        ("market_data", _at(d, schedule.market_data) - early),
     ]
     return sorted(plan, key=lambda x: x[1])
 

@@ -50,8 +50,9 @@ class ScheduleSettings(_Section):
     daily_data: str = "16:30"
     daily_signal: str = "17:00"
     daily_execute: str = "09:50"
+    market_data: str = "20:30"  # 首页市场看板（#69）：Massive 收盘后数据
 
-    @field_validator("daily_data", "daily_signal", "daily_execute")
+    @field_validator("daily_data", "daily_signal", "daily_execute", "market_data")
     @classmethod
     def _hhmm(cls, v: str) -> str:
         hh, sep, mm = v.partition(":")
@@ -114,6 +115,15 @@ class TiingoSettings(_Section):
     monthly_symbols: int = Field(500, ge=1)
 
 
+class BoardSettings(_Section):
+    """首页市场看板的数据任务（#69）：Massive 免费档每分钟 5 次，每次任务的请求数有上限。"""
+
+    history_days: int = Field(260, ge=2)  # 保留的交易日数（52 周、200 日线、YTD）
+    history_per_run: int = Field(60, ge=0)  # 每次任务最多补几天历史
+    caps_per_run: int = Field(60, ge=0)  # 每次任务最多刷新几只市值
+    caps_max_age_days: int = Field(7, ge=1)
+
+
 class StrategySettings(_Section):
     """每日任务运行的策略（模拟盘 / 实盘）；参数为空时用策略默认值。"""
 
@@ -155,6 +165,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data/parquet")
     notify_webhook_url: SecretStr | None = None
     tiingo_api_key: SecretStr | None = None
+    massive_api_key: SecretStr | None = None  # 首页市场看板（#69），scheduler 使用
     # SEC 要求请求声明联系方式（名称与邮箱）；只发给 SEC，不写日志
     edgar_user_agent: SecretStr | None = None
 
@@ -166,6 +177,7 @@ class Settings(BaseSettings):
     strategy: StrategySettings = StrategySettings()
     data: DataSettings = DataSettings()
     tiingo: TiingoSettings = TiingoSettings()
+    board: BoardSettings = BoardSettings()
 
     @field_validator("tiger_props_path")
     @classmethod

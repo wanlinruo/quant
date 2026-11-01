@@ -72,6 +72,7 @@ services:
       TRADING_MODE: ${TRADING_MODE:-paper}
       QUANT_DATABASE_URL: postgresql+psycopg://quant:${POSTGRES_PASSWORD}@postgres:5432/quant
       QUANT_NOTIFY_WEBHOOK_URL: ${QUANT_NOTIFY_WEBHOOK_URL:-}
+      QUANT_MASSIVE_API_KEY: ${MASSIVE_API_KEY:-}  # 首页市场看板 market_data 任务（#69）
       TIGER_PROPS_PATH: /run/tiger/
     volumes:
       - parquet:/data/parquet

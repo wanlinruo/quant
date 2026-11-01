@@ -9,10 +9,7 @@
 
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.request
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from datetime import date
 from typing import Any, ClassVar
 from urllib.parse import quote, urlencode
@@ -22,6 +19,7 @@ import pandas as pd
 from pydantic import SecretStr
 
 from quant.data.providers.base import DataProvider, DataUnavailableError, normalize_bars
+from quant.data.providers.http import Fetch, http_fetch
 from quant.data.quota import QuotaExceeded, QuotaLedger
 
 BASE_URL = "https://api.tiingo.com/tiingo/daily"
@@ -33,22 +31,6 @@ class SymbolNotFound(DataUnavailableError):
 
 class TiingoAuthError(DataUnavailableError):
     """key 无效或无权限（401 / 403）：停止补数，属于配置问题。"""
-
-
-Fetch = Callable[[str, Mapping[str, str]], tuple[int, Any]]
-
-
-def http_fetch(url: str, headers: Mapping[str, str]) -> tuple[int, Any]:
-    req = urllib.request.Request(url, headers=dict(headers))
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:  # 固定的 https 地址
-            return resp.status, json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", "replace")
-        try:
-            return e.code, json.loads(body)
-        except ValueError:
-            return e.code, body
 
 
 class TiingoProvider(DataProvider):
