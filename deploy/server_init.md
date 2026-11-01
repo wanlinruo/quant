@@ -86,6 +86,12 @@ cd /opt/quant && docker compose exec -T scheduler quant job market_extras --date
 cd /opt/quant && docker compose exec -T scheduler quant job stock_data --date <最近交易日>
 ```
 
+注意（#79）：
+- 美东 21:00–21:30（`market_extras`、`stock_data` 运行时段）不要手动运行这两个任务：两边各自按每分钟约 55 次请求
+  Finnhub，叠加后超过免费档每分钟 60 次，都会因限流提前停止。
+- scheduler 设置了 `stop_grace_period: 20m`：部署时如果有任务在跑，会等它结束（最多 20 分钟）再重建容器，
+  所以 20:30–21:30 ET 之间的部署会明显变慢。
+
 回测数据补齐进度（只读）：
 
 ```
