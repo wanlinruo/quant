@@ -66,7 +66,7 @@ describe("BacktestPage", () => {
     expect(boxes[5]).toBeChecked();
     for (const [input] of fetch.mock.calls) {
       const u = new URL(String(input), "http://x");
-      if (u.pathname === "/api/backtests/equity") expect(u.searchParams.getAll("ids").length).toBeLessThanOrEqual(5);
+      if (u.pathname === "/api/backtests/compare") expect(u.searchParams.getAll("ids").length).toBeLessThanOrEqual(5);
     }
   });
 
@@ -306,5 +306,41 @@ describe("BacktestPage", () => {
     await user.click(screen.getByText("#127"));
     const t2 = await screen.findByTestId("trade-table");
     expect(within(t2).getAllByRole("row").some((r) => r.getAttribute("aria-selected") === "true")).toBe(false);
+  });
+
+  const COMPARE = {
+    note: null, start: "2019-01-02", end: "2024-12-31", skipped: [126],
+    runs: [{ id: 128, strategy: "combo", start: "2016-10-28", end: "2026-10-29" }, { id: 127, strategy: "combo", start: "2019-01-02", end: "2024-12-31" }],
+    dates: ["2019-01-02", "2019-01-03"], series: { "128": [1, 1.01], "127": [1, 0.99] }, drawdown: { "128": [0, 0], "127": [0, -0.01] },
+    metrics: [
+      { key: "cagr", label: "年化", kind: "pct", scope: "common", values: { "128": 0.12, "127": 0.08 }, best: 128 },
+      { key: "max_drawdown", label: "最大回撤", kind: "pct", scope: "common", values: { "128": -0.3, "127": -0.2 }, best: 127 },
+      { key: "trades", label: "交易笔数", kind: "int", scope: "full", values: { "128": 37, "127": null }, best: null },
+    ],
+    params: [{ key: "top_n", values: { "128": 10, "127": 12 }, differs: true }, { key: "sma", values: { "128": 120, "127": 120 }, differs: false }],
+    corr: [[1, 0.62], [0.62, 1]],
+  };
+
+  it("compare view", async () => {
+    mockApi({ "/api/backtests": [200, [run(128), run(127)]], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/compare": [200, COMPARE] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    const boxes = await screen.findAllByRole("checkbox");
+    await user.click(boxes[1]);
+    const view = await screen.findByTestId("compare");
+    expect(await within(view).findByText(/共同区间 2019-01-02 → 2024-12-31/)).toBeInTheDocument();
+    expect(within(view).getByText(/已跳过未完成的回测：#126/)).toBeInTheDocument();
+    expect(within(view).getByText("12.00%").closest("td")).toHaveClass("best");
+    expect(within(view).getByText("-20.00%").closest("td")).toHaveClass("best");
+    expect(within(view).getByText("top_n").closest("tr")).toHaveClass("changed");
+    expect(within(view).getByText("sma").closest("tr")).not.toHaveClass("changed");
+    expect(within(view).getAllByText("0.62")).toHaveLength(2);
+    expect(within(view).getByText("（全区间）")).toBeInTheDocument();
+  });
+
+  it("compare view shows note when no overlap", async () => {
+    mockApi({ "/api/backtests": [200, [run(128), run(127)]], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/compare": [200, { note: "所选回测没有共同区间（至少需要 20 个交易日重叠）", skipped: [], runs: [], dates: [], series: {}, drawdown: {}, metrics: [], params: [], corr: [] }] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click((await screen.findAllByRole("checkbox"))[1]);
+    expect(await screen.findByText(/没有共同区间/)).toBeInTheDocument();
   });
 });

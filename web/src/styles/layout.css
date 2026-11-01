@@ -188,3 +188,4 @@ tr.sel td { background: rgba(41, 98, 255, 0.15); }
 i.dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
 .vstack { display: flex; flex-direction: column; min-width: 0; }
 tr.adj td { background: #131722; font-size: 12px; max-width: 0; } .adj-list { display: flex; gap: 14px; white-space: nowrap; overflow-x: auto; }
+td.best { color: #22c55e !important; font-weight: 700; }

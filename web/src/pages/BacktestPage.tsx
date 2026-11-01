@@ -1,16 +1,13 @@
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import type { BacktestAnalysis, BacktestDataStatus, BacktestDefaults, BacktestRunOut, BtTradeOut, EquityPoint } from "../api/types";
-import { ApiState } from "../components/ApiState";
-import { DataTable } from "../components/DataTable";
+import type { BacktestAnalysis, BacktestDataStatus, BacktestDefaults, BacktestRunOut, BtTradeOut } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
 import { Cell, Grid } from "../components/Grid";
 import { Panel } from "../components/Panel";
 import { Tabs } from "../components/Tabs";
-import { LineChart } from "../charts/LineChart";
 import { useApi } from "../hooks/useApi";
-import { fmtMetric, METRICS } from "../lib/metrics";
 import { OverviewTab, ParamsTab, ReturnsTab, RiskTab } from "./backtest/AnalysisTabs";
+import { CompareView } from "./backtest/CompareView";
 import { MainChart } from "./backtest/MainChart";
 import { PositionsTab } from "./backtest/PositionsTab";
 import { TradesTab } from "./backtest/TradesTab";
@@ -19,7 +16,6 @@ import { RunList } from "./backtest/RunList";
 import { BacktestSubmitDrawer, type DrawerInitial } from "./BacktestSubmitDrawer";
 
 const MAX_COMPARE = 5;
-const COLORS = ["#2962ff", "#a855f7", "#22c55e", "#f5a623", "#22d3ee"];
 
 
 const TABS = [
@@ -71,26 +67,9 @@ export function BacktestPage() {
   const selected = useMemo(() => checked ?? (defaultId !== undefined ? [defaultId] : []), [checked, defaultId]);
   const current = list.find((r) => r.id === selected[0]);
   const compare = selected.length >= 2;
-  const equity = useApi<EquityPoint[]>(compare ? "/api/backtests/equity" : null, { ids: selected });
   const analysis = useApi<BacktestAnalysis>(current && !compare ? `/api/backtests/${current.id}/analysis` : null);
   const a = analysis.data && analysis.data.id === current?.id ? analysis.data : null;
   const trade = picked && picked.run === current?.id ? picked.t : null;
-
-  const series = useMemo(() => {
-    const pts = equity.data ?? [];
-    return selected.map((id, i) => {
-      const own = pts.filter((p) => p.run_id === id);
-      const base = own[0]?.equity || 1;
-      return { name: `#${id}`, color: COLORS[i % COLORS.length], points: own.map((p) => ({ time: p.date, value: p.equity / base })) };
-    });
-  }, [equity.data, selected]);
-  const ddSeries = useMemo(
-    () => selected.map((id, i) => ({
-      name: `#${id}`, color: COLORS[i % COLORS.length],
-      points: (equity.data ?? []).filter((p) => p.run_id === id).map((p) => ({ time: p.date, value: p.drawdown })),
-    })),
-    [equity.data, selected],
-  );
 
   /** 点行：单个查看时切换到这一个；对比模式下排到第一位（满 5 个时挤掉最后一个）。同步网址。 */
   function open(id: number) {
@@ -121,24 +100,7 @@ export function BacktestPage() {
         </Cell>
         <Cell span={9}>
           {current && compare ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <Panel title="净值对比（起点 = 1）">
-                <ApiState result={equity}>{() => <LineChart height={300} series={series} />}</ApiState>
-              </Panel>
-              <Panel title="回撤">
-                <ApiState result={equity}>{() => <LineChart height={160} series={ddSeries} percent />}</ApiState>
-              </Panel>
-              <Panel title="指标对比">
-                <DataTable<BacktestRunOut>
-                  rowKey={(r) => r.id}
-                  rows={list.filter((r) => selected.includes(r.id))}
-                  columns={[
-                    { key: "id", label: "回测", render: (r) => `#${r.id} ${r.strategy} ${r.start}~${r.end}` },
-                    ...METRICS.map((m) => ({ key: m.key, label: m.label, align: "right" as const, render: (r: BacktestRunOut) => fmtMetric(r.metrics[m.key], m.kind) })),
-                  ]}
-                />
-              </Panel>
-            </div>
+            <CompareView ids={selected} />
           ) : current ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <RunHeader
