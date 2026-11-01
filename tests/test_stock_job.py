@@ -142,8 +142,9 @@ class NoisyFinnhub(FakeFinnhub):
         self._tick()
         self.news_calls.append(symbol)
         noise = "5 Best High Growth Stocks Outside Big Tech"
+        good = "Co S0 beats estimates"
         return [NewsRaw("x", T, noise, "Yahoo", "https://n/x", (symbol,)),
-                NewsRaw("y", T, "Co S0 beats estimates", "CNBC", "https://n/y", (symbol,))]  # fmt: skip
+                NewsRaw("y", T, good, "CNBC", "https://n/y", (symbol,))]  # fmt: skip
 
 
 def test_stock_news_only_relevant(tmp_path: Path) -> None:
