@@ -44,10 +44,10 @@ export function CalendarPanel({ height }: { height: number }) {
               <div key={c.kind + c.title + c.time} className="cal-row cal-up" data-upcoming>
                 <span className="muted">{when(c, today)}</span>
                 <b title={c.title}>{c.title}</b>
-                <span className="num muted">{outlook(c)}</span>
                 <span className="dots" title={`重要性 ${c.impact}/3`}>
                   {[1, 2, 3].map((i) => (i <= c.impact ? <i key={i} data-on /> : <i key={i} />))}
                 </span>
+                <span className="num muted">{outlook(c)}</span>
               </div>
             ))}
             <div className="muted sm" style={{ marginTop: 6 }}>经济数据每周一更新</div>

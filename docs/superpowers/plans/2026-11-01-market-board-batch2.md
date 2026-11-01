@@ -532,7 +532,7 @@ it("news and calendar pending", ...)                                 // 两个�
 **Files:**
 - Modify: `docs/superpowers/plans/2026-11-01-market-board-batch2.md`（勾选）
 
-- [ ] **Step 1**：`make check` 全部通过（后端带 `QUANT_TEST_DATABASE_URL` 跑数据库测试）。
-- [ ] **Step 2**：用合成的四个 JSON 文件启动面板（不连外部数据源、不写开发库），在 1280px 与 1600px 截图检查：右栏三块等高对齐、新闻与日历不换行溢出、行情条 10 格宽度一致、异动表原因列省略正常。
+- [x] **Step 1**：`make check` 全部通过（后端带 `QUANT_TEST_DATABASE_URL` 跑数据库测试）。
+- [x] **Step 2**：用合成的四个 JSON 文件启动面板（不连外部数据源、不写开发库），在 1280px 与 1600px 截图检查：右栏三块等高对齐、新闻与日历不换行溢出、行情条 10 格宽度一致、异动表原因列省略正常。
 - [ ] **Step 3**：部署后在服务器 scheduler 容器内运行 `quant job market_extras --date <最近交易日>`，记录耗时、各区块条数、FRED 实际值是否正确（对照 FF 前值 / 官方公布），结果写入 #70。
 - [ ] **Step 4**：提交（如有修改）。
