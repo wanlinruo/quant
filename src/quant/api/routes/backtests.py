@@ -10,11 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from quant.api import queries
-from quant.api.backtest_view import analysis, positions_view, trades_view
+from quant.api.backtest_view import analysis, compare_view, positions_view, trades_view
 from quant.api.backtests import submit
 from quant.api.deps import get_session, get_settings
 from quant.api.schemas import (
     BacktestAnalysis,
+    BacktestCompare,
     BacktestDataStatus,
     BacktestDefaults,
     BacktestPositions,
@@ -84,6 +85,14 @@ def run_analysis(run_id: int, s: SessionDep) -> BacktestAnalysis:
     if out is None:
         raise HTTPException(status_code=404, detail="回测不存在")
     return out
+
+
+@router.get("/backtests/compare")
+def compare(
+    s: SessionDep, ids: Annotated[list[int], Query(max_length=MAX_COMPARE)]
+) -> BacktestCompare:
+    """对比 2–5 个回测：共同区间净值、指标并排、参数差异、月收益相关性（只读）。"""
+    return compare_view(s, ids)
 
 
 @router.get("/backtests/{run_id}/trades")

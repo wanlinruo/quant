@@ -432,3 +432,32 @@ def tail(equity: pd.Series) -> list[dict[str, Any]]:
         {"label": "偏度", "value": _f(r.skew())},
         {"label": "峰度", "value": _f(r.kurt())},
     ]
+
+
+# ---- 对比（C 批）----
+
+MIN_COMMON_DAYS = 20
+
+
+def common_range(series: list[pd.Series]) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    """各净值的共同区间（起点取最晚、终点取最早）；不足 MIN_COMMON_DAYS 个交易日为 None。"""
+    if not series:
+        return None
+    lo = max(pd.Timestamp(s.index[0]) for s in series)
+    hi = min(pd.Timestamp(s.index[-1]) for s in series)
+    if lo >= hi:
+        return None
+    first = series[0]
+    days = first[(first.index >= lo) & (first.index <= hi)]
+    return (lo, hi) if len(days) >= MIN_COMMON_DAYS else None
+
+
+def monthly_corr(series: list[pd.Series]) -> list[list[float | None]]:
+    """月收益的皮尔逊相关矩阵（按月份对齐）。"""
+    cols = {}
+    for i, s in enumerate(series):
+        m = period_returns_by(s, "M")
+        cols[i] = pd.Series(m.to_numpy(), index=pd.DatetimeIndex(m.index).to_period("M"))
+    df = pd.DataFrame(cols)
+    c = df.corr()
+    return [[_f(c.iloc[i, j]) for j in range(len(series))] for i in range(len(series))]

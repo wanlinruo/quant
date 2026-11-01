@@ -226,3 +226,44 @@ def test_old_run_without_ledger(setup: tuple[TestClient, dict[str, int]], db_url
     a = client.get(f"/api/backtests/{rid}/analysis").json()
     assert {s["key"]: s for s in a["stats"]}["trades"]["value"] is None
     assert a["returns"]["sleeves"] is None and a["risk"]["timing"] == []
+
+
+def test_compare_endpoint(setup: tuple[TestClient, dict[str, int]], db_url: str) -> None:
+    client, ids = setup
+    eng = create_engine(db_url)
+    eq2 = prices(5, 0.0003)[IDX[800] : IDX[2000]] * 500
+    with Session(eng) as s, s.begin():
+        rid = create_run(s, "etf_momentum", {"lookback": 126, "top_k": 2, "_cash": "50000"},
+                         eq2.index[0].date(), eq2.index[-1].date(), status="running")  # fmt: skip
+        complete_run(s, rid, {"cagr": 0.05}, eq2, eq2 / eq2.cummax() - 1)
+    eng.dispose()
+    d = client.get(
+        "/api/backtests/compare", params={"ids": [ids["done"], rid, ids["running"]]}
+    ).json()
+    assert (
+        d["start"] == eq2.index[0].date().isoformat()
+        and d["end"] == eq2.index[-1].date().isoformat()
+    )
+    assert d["skipped"] == [ids["running"]]
+    assert [r["id"] for r in d["runs"]] == [ids["done"], rid]
+    assert all(s[0] == pytest.approx(1.0) for s in d["series"].values())
+    rows = {r["key"]: r for r in d["metrics"]}
+    assert set(rows["cagr"]["values"]) == {str(ids["done"]), str(rid)}
+    assert rows["max_drawdown"]["best"] in (ids["done"], rid)
+    diff = {p["key"]: p for p in d["params"]}
+    assert diff["lookback"]["differs"] is True and diff["top_k"]["differs"] is False
+    assert d["corr"][0][0] == pytest.approx(1.0) and len(d["corr"]) == 2
+
+
+def test_compare_no_overlap(setup: tuple[TestClient, dict[str, int]], db_url: str) -> None:
+    client, ids = setup
+    eng = create_engine(db_url)
+    late = pd.Series(np.linspace(100, 120, 30), index=pd.bdate_range("2040-01-02", periods=30))
+    with Session(eng) as s, s.begin():
+        rid = create_run(
+            s, "etf_momentum", {}, late.index[0].date(), late.index[-1].date(), status="running"
+        )
+        complete_run(s, rid, {}, late, late / late.cummax() - 1)
+    eng.dispose()
+    d = client.get("/api/backtests/compare", params={"ids": [ids["done"], rid]}).json()
+    assert d["note"] and "共同区间" in d["note"] and d["series"] == {}

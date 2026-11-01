@@ -34,6 +34,20 @@ export interface BacktestAnalysis {
   repro?: BtReproOut | null;
 }
 
+export interface BacktestCompare {
+  note?: string | null;
+  start?: string | null;
+  end?: string | null;
+  skipped?: number[];
+  runs?: BtCompareRun[];
+  dates?: string[];
+  series?: Record<string, (number | null)[]>;
+  drawdown?: Record<string, (number | null)[]>;
+  metrics?: BtCompareMetric[];
+  params?: BtCompareParam[];
+  corr?: ((number | null)[])[];
+}
+
 export interface BacktestDataStatus {
   source: "yfinance" | "tiingo";
   data_end?: string | null;
@@ -155,6 +169,28 @@ export interface BtBinOut {
 export interface BtCheckOut {
   label: string;
   passed: boolean | null;
+}
+
+export interface BtCompareMetric {
+  key: string;
+  label: string;
+  kind: "pct" | "ratio" | "int";
+  scope: "common" | "full";
+  values: Record<string, number | null>;
+  best: number | null;
+}
+
+export interface BtCompareParam {
+  key: string;
+  values: Record<string, unknown>;
+  differs: boolean;
+}
+
+export interface BtCompareRun {
+  id: number;
+  strategy: string;
+  start: string;
+  end: string;
 }
 
 export interface BtDailyPosOut {

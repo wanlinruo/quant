@@ -17,8 +17,12 @@ from quant.api import backtest_analysis as ba
 from quant.api.backtests import FORM_STRATEGY
 from quant.api.schemas import (
     BacktestAnalysis,
+    BacktestCompare,
     BacktestPositions,
     BacktestTrades,
+    BtCompareMetric,
+    BtCompareParam,
+    BtCompareRun,
     BtDailyPosOut,
     BtHoldingOut,
     BtLongestOut,
@@ -343,3 +347,78 @@ def _sleeve_series(daily: list[BacktestDaily], cash: float | None) -> BtSleevesO
             acc[k] += float(r.sleeve_pnl.get(k, 0.0))
             series[k].append(acc[k] / cash)
     return BtSleevesOut(dates=[r.day for r in daily], series=series)
+
+
+# ---- 对比（#67 C 批）----
+
+COMPARE_KEYS = ("total_return", "cagr", "sharpe", "sortino", "max_drawdown", "calmar", "volatility")
+LOWER_BETTER = {"volatility"}  # 回撤为负数，取最大值（最浅）即最优，与其它指标同向
+
+
+def compare_view(s: Session, ids: list[int]) -> BacktestCompare:
+    runs, skipped, eqs = [], [], []
+    for rid in ids:
+        run = s.get(BacktestRun, rid)
+        eq = _equity(s, rid) if run is not None and run.status == "done" else None
+        if run is None or eq is None:
+            skipped.append(rid)
+            continue
+        runs.append(run)
+        eqs.append(eq)
+    if len(runs) < 2:
+        return BacktestCompare(note="至少需要两个已完成的回测才能对比", skipped=skipped)
+    rng = ba.common_range(eqs)
+    meta = [BtCompareRun(id=r.id, strategy=r.strategy, start=r.start, end=r.end) for r in runs]
+    if rng is None:
+        note = "所选回测没有共同区间（至少需要 20 个交易日重叠）"
+        return BacktestCompare(note=note, skipped=skipped, runs=meta)
+    lo, hi = rng
+    cut = [e[(e.index >= lo) & (e.index <= hi)] for e in eqs]
+    dates = pd.DatetimeIndex(cut[0].index)
+    series, dd = {}, {}
+    for r, c in zip(runs, cut, strict=True):
+        x = c.reindex(c.index.union(dates)).ffill().reindex(dates)
+        nv = x / float(c.iloc[0])
+        series[str(r.id)] = [None if pd.isna(v) else float(v) for v in nv.to_numpy()]
+        dd[str(r.id)] = [
+            None if pd.isna(v) else float(v) for v in (nv / nv.cummax() - 1).to_numpy()
+        ]
+    stats = {r.id: {x.key: x for x in ba.stat_bar(c, None)} for r, c in zip(runs, cut, strict=True)}
+    metrics = []
+    for key in COMPARE_KEYS:
+        first = stats[runs[0].id][key]
+        vals = {str(r.id): stats[r.id][key].value for r in runs}
+        best = _best(vals, key in LOWER_BETTER)
+        metrics.append(BtCompareMetric(key=key, label=first.label, kind=first.kind, scope="common",
+                                       values=vals, best=best))  # fmt: skip
+    trades = {r.id: trades_view(s, r.id) for r in runs}
+    for key, label, kind in (("win_rate", "胜率", "pct"), ("trades", "交易笔数", "int")):
+        full: dict[str, float | None] = {}
+        for r in runs:
+            tv = trades[r.id]
+            sm = tv.summary if tv is not None else None
+            full[str(r.id)] = (
+                None if sm is None else (sm.win_rate if key == "win_rate" else float(sm.trades))
+            )
+        best = _best(full, False) if key == "win_rate" else None
+        metrics.append(
+            BtCompareMetric(key=key, label=label, kind=kind, scope="full", values=full, best=best)
+        )
+    keys = sorted({k for r in runs for k in r.params if not k.startswith("_")})
+    params = []
+    for k in keys:
+        vals = {str(r.id): r.params.get(k) for r in runs}
+        params.append(
+            BtCompareParam(key=k, values=vals, differs=len({_same(v) for v in vals.values()}) > 1)
+        )
+    return BacktestCompare(start=lo.date(), end=hi.date(), skipped=skipped, runs=meta,
+                           dates=[d.date() for d in dates], series=series, drawdown=dd,
+                           metrics=metrics, params=params, corr=ba.monthly_corr(cut))  # fmt: skip
+
+
+def _best(vals: dict[str, float | None], lower: bool) -> int | None:
+    have = {k: v for k, v in vals.items() if v is not None}
+    if not have:
+        return None
+    k = (min if lower else max)(have, key=lambda x: have[x])
+    return int(k)

@@ -879,3 +879,42 @@ class BacktestPositions(BaseModel):
 class BtSleevesOut(BaseModel):
     dates: list[date]
     series: dict[str, list[float]]  # 子仓累计盈亏 ÷ 初始资金
+
+
+# ---- 回测对比（#67 C 批）----
+
+
+class BtCompareRun(BaseModel):
+    id: int
+    strategy: str
+    start: date
+    end: date
+
+
+class BtCompareMetric(BaseModel):
+    key: str
+    label: str
+    kind: Literal["pct", "ratio", "int"]
+    scope: Literal["common", "full"]  # 共同区间重算 / 各自全区间（交易口径）
+    values: dict[str, float | None]  # 回测编号 → 值
+    best: int | None
+
+
+class BtCompareParam(BaseModel):
+    key: str
+    values: dict[str, Any]
+    differs: bool
+
+
+class BacktestCompare(BaseModel):
+    note: str | None = None
+    start: date | None = None
+    end: date | None = None
+    skipped: list[int] = []
+    runs: list[BtCompareRun] = []
+    dates: list[date] = []
+    series: dict[str, list[float | None]] = {}
+    drawdown: dict[str, list[float | None]] = {}
+    metrics: list[BtCompareMetric] = []
+    params: list[BtCompareParam] = []
+    corr: list[list[float | None]] = []
