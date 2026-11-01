@@ -1,11 +1,12 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import type { BarsOut, StockProfile } from "../api/types";
+import type { BarsOut, StockExtras, StockProfile } from "../api/types";
 import { ApiState } from "../components/ApiState";
 import { EmptyState } from "../components/EmptyState";
 import { Cell, Grid } from "../components/Grid";
 import { Panel } from "../components/Panel";
 import { RangeBar } from "../components/RangeBar";
+import { StockNews } from "../components/StockNews";
 import { Tabs } from "../components/Tabs";
 import { CandleChart, type TradeMark } from "../charts/CandleChart";
 import { useApi } from "../hooks/useApi";
@@ -34,6 +35,15 @@ function sp(v: number | null | undefined, digits = 2): string {
   return v == null ? "—" : signedPct(v, digits);
 }
 
+const UNCOVERED = "仅覆盖标普 500 成分股与持仓";
+
+/** 估值、新闻、同板块：未覆盖与尚未取到时的说明；有数据时为 null。 */
+function extrasNote(x: StockExtras | null, has: boolean, pending: string): ReactNode {
+  if (x && !x.covered) return <EmptyState note={UNCOVERED} />;
+  if (!has) return <EmptyState kind="pending" note={x ? pending : undefined} />;
+  return null;
+}
+
 function yesNo(v: boolean | null | undefined, yes: string, no: string): ReactNode {
   if (v == null) return <span className="muted">—</span>;
   return <span className={`pill ${v ? "ok" : "err"}`}>{v ? yes : no}</span>;
@@ -51,7 +61,12 @@ export function StockPage() {
   const start = useMemo(() => startOf(years), [years]);
   const res = useApi<BarsOut>(`/api/market/bars/${encodeURIComponent(symbol)}`, { start });
   const prof = useApi<StockProfile>(`/api/stock/${encodeURIComponent(symbol)}/profile`, { mode: account });
+  const ext = useApi<StockExtras>(`/api/stock/${encodeURIComponent(symbol)}/extras`);
   const p = prof.data;
+  const x = ext.data;
+  const news = x?.news ?? [];
+  const metrics = x?.metrics ?? [];
+  const peers = x?.peers ?? [];
   const list = res.data?.bars;
 
   const candles = useMemo(() => toCandles(list ?? [], adjust), [list, adjust]);
@@ -123,7 +138,17 @@ export function StockPage() {
                   <tbody>
                     <tr><td>{symbol}</td>{PERIOD_KEYS.map((k) => <td key={k} className={`r num ${tone(p.periods[k])}`}>{sp(p.periods[k])}</td>)}</tr>
                     <tr><td className="muted">QQQ</td>{PERIOD_KEYS.map((k) => <td key={k} className={`r num ${tone(p.periods_qqq[k])}`}>{sp(p.periods_qqq[k])}</td>)}</tr>
-                    <tr><td className="muted">行业 ETF</td><td colSpan={PERIOD_KEYS.length} className="r muted">数据接入中</td></tr>
+                    {x?.sector_etf ? (
+                      <tr>
+                        <td className="muted">{`板块 ETF · ${x.sector_etf} ${x.sector ?? ""}`}</td>
+                        {PERIOD_KEYS.map((k) => {
+                          const v = x.sector_periods?.[k];
+                          return <td key={k} className={`r num ${tone(v)}`}>{sp(v)}</td>;
+                        })}
+                      </tr>
+                    ) : (
+                      <tr><td className="muted">板块 ETF</td><td colSpan={PERIOD_KEYS.length} className="r muted">{x ? "—" : "数据接入中"}</td></tr>
+                    )}
                   </tbody>
                 </table>
               ) : (
@@ -153,7 +178,7 @@ export function StockPage() {
               right={<Tabs tabs={[{ key: "strategy", label: "我的策略" }, { key: "news", label: "新闻" }, { key: "earnings", label: "财报" }, { key: "backtest", label: "回测中的表现" }]} value={tab} onChange={setTab} />}
             >
               {tab === "strategy" && <StrategyTab p={p} account={account} focus={focus} onFocus={setFocus} />}
-              {tab === "news" && <EmptyState kind="pending" />}
+              {tab === "news" && (extrasNote(x, news.length > 0, "每天收盘后更新") ?? <StockNews items={news} testId="stock-news-tab" />)}
               {tab === "earnings" && <EarningsHistory p={p} />}
               {tab === "backtest" && <EmptyState kind="pending" note="随回测页上线（#67）" />}
             </Panel>
@@ -173,7 +198,8 @@ export function StockPage() {
                       <tr><td className="muted">距 52 周高点</td><td className="r num">{sp(p.key_stats.from_high)}</td></tr>
                       <tr><td className="muted">距 120 日线</td><td className="r num">{sp(p.key_stats.to_ma120)}</td></tr>
                       <tr><td className="muted">下次财报</td><td className="r num">{p.key_stats.next_earnings ?? "—"}</td></tr>
-                      <tr><td className="muted">市值 / 板块</td><td className="r muted">数据接入中</td></tr>
+                      <tr><td className="muted">市值</td><td className="r num">{x?.market_cap != null ? `$${compact(x.market_cap)}` : "—"}</td></tr>
+                      <tr><td className="muted">板块</td><td className="r">{x?.sector ? <span title={x.sub_industry ?? undefined}>{x.sector}</span> : "—"}</td></tr>
                     </tbody>
                   </table>
                 </>
@@ -181,7 +207,20 @@ export function StockPage() {
                 <EmptyState />
               )}
             </Panel>
-            <Panel title="估值与财务"><EmptyState kind="pending" /></Panel>
+            <Panel title="估值与财务" right={x?.metrics_updated ? <span className="muted sm">更新于 {x.metrics_updated.slice(5)}</span> : undefined}>
+              {extrasNote(x, metrics.length > 0, "每天补 120 只，约一周覆盖全部") ?? (
+                <table className="dt compact kv" data-testid="metrics">
+                  <tbody>
+                    {metrics.map((m) => (
+                      <tr key={m.key}>
+                        <td className="muted">{m.label}</td>
+                        <td className="r num">{m.value == null ? "—" : m.kind === "pct" ? pct(m.value, 1) : `${num(m.value)}×`}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Panel>
             <Panel title={p?.key_stats.days_to_earnings != null ? `财报 · 还有 ${p.key_stats.days_to_earnings} 个交易日` : "财报"}>
               {p?.earnings.next || p?.earnings.history.length ? (
                 <div className="sm">
@@ -195,8 +234,28 @@ export function StockPage() {
                 <EmptyState />
               )}
             </Panel>
-            <Panel title="相关新闻"><EmptyState kind="pending" /></Panel>
-            <Panel title="同板块" grow><EmptyState kind="pending" /></Panel>
+            <Panel title="相关新闻">
+              {extrasNote(x, news.length > 0, "每天收盘后更新") ?? <StockNews items={news} limit={5} testId="stock-news-side" />}
+            </Panel>
+            <Panel title="同板块" right={x?.sub_industry ? <span className="muted sm">同子行业优先</span> : undefined} grow>
+              {extrasNote(x, peers.length > 0, "随首页市场数据更新") ?? (
+                <table className="dt compact" data-testid="peers">
+                  <thead>
+                    <tr><th>代码</th><th className="r">市值</th><th className="r">1日</th><th className="r">今年</th></tr>
+                  </thead>
+                  <tbody>
+                    {peers.map((r) => (
+                      <tr key={r.symbol}>
+                        <td title={r.name ?? undefined}><Link to={link(r.symbol)}>{r.symbol}</Link></td>
+                        <td className="r num">{r.market_cap != null ? `$${compact(r.market_cap)}` : "—"}</td>
+                        <td className={`r num ${tone(r.d1)}`}>{sp(r.d1)}</td>
+                        <td className={`r num ${tone(r.ytd)}`}>{sp(r.ytd)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Panel>
           </div>
         </Cell>
       </Grid>
