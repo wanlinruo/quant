@@ -194,4 +194,46 @@ describe("BacktestPage", () => {
     expect(within(dlg).getByDisplayValue("2018-01-02")).toBeInTheDocument();
     expect(within(dlg).getByDisplayValue("99")).toBeInTheDocument();
   });
+
+  async function openTab(name: string) {
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS] });
+    const r = renderPage(<BacktestPage />, "/backtest");
+    await screen.findByTestId("statbar");
+    await r.user.click(screen.getByRole("button", { name }));
+    return screen.getByTestId(`tab-${name}`);
+  }
+
+  it("overview tab", async () => {
+    const tab = await openTab("概览");
+    expect(within(tab).getByText("待稳健性检验（#68）")).toBeInTheDocument();
+    expect(within(tab).getAllByText("通过").length).toBe(3);
+    expect(within(tab).getByText("未通过")).toBeInTheDocument();
+    expect(within(tab).getByText("样本外（2023 起）")).toBeInTheDocument();
+    expect(within(tab).getByText("15.00%")).toBeInTheDocument();
+    expect(within(tab).getByText("2023")).toBeInTheDocument();
+  });
+
+  it("returns tab", async () => {
+    const tab = await openTab("收益分析");
+    const cell = within(tab).getByText("+5.0%");
+    expect(cell.closest("td")).toHaveClass("up");
+    expect(within(tab).getByText("2023-01-31")).toBeInTheDocument();
+    expect(within(tab).getByText(/子仓贡献.*B 批接入/)).toBeInTheDocument();
+  });
+
+  it("risk tab", async () => {
+    const tab = await openTab("回撤与风险");
+    expect(within(tab).getByText("-21.30%")).toBeInTheDocument();
+    expect(within(tab).getByText("82%")).toBeInTheDocument();
+    expect(within(tab).getByText("VaR 95%（日）")).toBeInTheDocument();
+    expect(within(tab).getByText(/择时效果.*B 批接入/)).toBeInTheDocument();
+  });
+
+  it("params tab", async () => {
+    const tab = await openTab("参数与日志");
+    expect(within(tab).getByText("top_n").closest("tr")).toHaveClass("changed");
+    expect(within(tab).getByText("sma").closest("tr")).not.toHaveClass("changed");
+    expect(within(tab).getByText(/--param top_n=12/)).toBeInTheDocument();
+    expect(within(tab).getByText(/运行日志未记录/)).toBeInTheDocument();
+  });
 });

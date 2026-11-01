@@ -10,6 +10,7 @@ import { Tabs } from "../components/Tabs";
 import { LineChart } from "../charts/LineChart";
 import { useApi } from "../hooks/useApi";
 import { fmtMetric, METRICS } from "../lib/metrics";
+import { OverviewTab, ParamsTab, ReturnsTab, RiskTab } from "./backtest/AnalysisTabs";
 import { MainChart } from "./backtest/MainChart";
 import { RunHeader } from "./backtest/RunHeader";
 import { RunList } from "./backtest/RunList";
@@ -171,8 +172,11 @@ function TabBody({ tab, a, loading }: { tab: TabKey; a: BacktestAnalysis | null;
     return <EmptyState kind="pending" note="B 批接入（新存储：逐笔交易与每日持仓）" />;
   if (tab === "robust") return <EmptyState kind="pending" note="待稳健性检验（#68）：参数敏感性、walk-forward、成本与起点敏感性" />;
   if (!a) return loading ? <div className="muted sm">加载中…</div> : <EmptyState />;
+  if (tab === "params") return <ParamsTab a={a} />;
   if (a.status !== "done") return <EmptyState note={a.status === "failed" ? `回测失败：${a.error ?? ""}` : "回测尚未完成"} />;
-  return <EmptyState kind="pending" />;
+  if (tab === "overview") return <OverviewTab a={a} />;
+  if (tab === "returns") return <ReturnsTab a={a} />;
+  return <RiskTab a={a} />;
 }
 
 /** 服务器回测数据（Tiingo）的补齐进度；Mac 上的 yfinance 模式不显示。 */
