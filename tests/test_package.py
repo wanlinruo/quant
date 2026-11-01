@@ -15,7 +15,7 @@ SUBPACKAGES = [
     "jobs",
     "db",
     "notify",
-    "dashboard",
+    "api",
 ]
 
 

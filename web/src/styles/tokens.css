@@ -1,0 +1,23 @@
+/* 设计规范（docs/superpowers/specs/2026-10-31-dashboard-redesign-design.md 第 6 节） */
+:root {
+  --bg: #0c0e15;
+  --panel: #11141c;
+  --panel-2: #161a24;
+  --border: #232733;
+  --line: #1b1f29;
+  --text: #d1d4dc;
+  --text-strong: #ffffff;
+  --muted: #7d828f;
+  --primary: #2962ff;
+  --up: #22c55e;
+  --down: #ef4444;
+  --warn: #facc15;
+  --live: #f97316;
+  --gap: 12px;
+  --radius: 8px;
+  --header-h: 22px;
+  --row-h: 32px;
+  font: 12px/1.45 -apple-system, "SF Pro Text", "PingFang SC", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
