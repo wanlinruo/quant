@@ -261,3 +261,155 @@ def rolling_12m(equity: pd.Series) -> list[dict[str, Any]]:
         out.append({"date": str(pd.Timestamp(t).date()), "ret": _f(eq[t] / base.iloc[-1] - 1),
                     "sharpe": _f(sharpe)})  # fmt: skip
     return out
+
+
+# ---- 回撤与风险 ----
+
+
+def drawdown_episodes(
+    equity: pd.Series, qqq: pd.Series | None, top: int = 5
+) -> list[dict[str, Any]]:
+    """按“高点 → 谷底 → 收复”分段，取深度最大的 top 段（按深度排序）。
+
+    天数按交易日；未收复的 end / recovery_days 为 None；qqq 为同期（高点到谷底）QQQ 收益。
+    """
+    eq = _clean(equity)
+    if eq is None:
+        return []
+    q = align(eq, qqq) if qqq is not None else None
+    vals = eq.to_numpy()
+    idx = pd.DatetimeIndex(eq.index)
+    eps: list[dict[str, Any]] = []
+    peak_i = 0
+    trough_i: int | None = None
+    for i in range(1, len(vals) + 1):
+        at_end = i == len(vals)
+        if not at_end and vals[i] >= vals[peak_i]:
+            if trough_i is not None:
+                eps.append({"p": peak_i, "t": trough_i, "e": i})
+            peak_i, trough_i = i, None
+            continue
+        if at_end:
+            if trough_i is not None:
+                eps.append({"p": peak_i, "t": trough_i, "e": None})
+            break
+        if trough_i is None or vals[i] < vals[trough_i]:
+            trough_i = i
+    out = []
+    for e in sorted(eps, key=lambda e: vals[e["t"]] / vals[e["p"]])[:top]:
+        p, t, end = e["p"], e["t"], e["e"]
+        qret = _f(q.iloc[t] / q.iloc[p] - 1) if q is not None and len(q) == len(eq) else None
+        out.append({
+            "start": str(idx[p].date()), "trough": str(idx[t].date()),
+            "end": str(idx[end].date()) if end is not None else None,
+            "depth": _f(vals[t] / vals[p] - 1), "down_days": t - p,
+            "recovery_days": end - t if end is not None else None, "qqq": qret,
+        })  # fmt: skip
+    return out
+
+
+def _monthly_pair(eq: pd.Series, qqq: pd.Series | None) -> tuple[pd.Series, pd.Series] | None:
+    q = align(eq, qqq) if qqq is not None else None
+    if q is None:
+        return None
+    a, b = period_returns_by(eq, "M"), period_returns_by(q, "M")
+    return a, b.reindex(a.index)
+
+
+def capture(equity: pd.Series, qqq: pd.Series | None) -> dict[str, float | None]:
+    """上 / 下行捕获率（按月）：QQQ 上涨（下跌）月份里，策略月收益均值 ÷ QQQ 月收益均值。"""
+    eq = _clean(equity)
+    pair = _monthly_pair(eq, qqq) if eq is not None else None
+    if pair is None:
+        return {"up": None, "down": None}
+    s, q = pair
+    up, dn = q > 0, q < 0
+    return {
+        "up": _f(s[up].mean() / q[up].mean()) if up.any() else None,
+        "down": _f(s[dn].mean() / q[dn].mean()) if dn.any() else None,
+    }
+
+
+def _daily_pair(eq: pd.Series, qqq: pd.Series | None) -> tuple[pd.Series, pd.Series] | None:
+    q = align(eq, qqq) if qqq is not None else None
+    if q is None:
+        return None
+    df = pd.concat([eq.pct_change(), q.pct_change()], axis=1).dropna()
+    return (df.iloc[:, 0], df.iloc[:, 1]) if len(df) > 2 else None
+
+
+def risk_table(equity: pd.Series, qqq: pd.Series | None) -> list[dict[str, Any]]:
+    eq = _clean(equity)
+    rows: list[dict[str, Any]] = []
+    m = _metrics(eq)
+    mq = _metrics(align(eq, qqq)) if eq is not None and qqq is not None else None
+    r = eq.pct_change().dropna() if eq is not None else pd.Series(dtype=float)
+    neg = r[r < 0]
+    down_vol = _f(neg.std(ddof=1) * math.sqrt(TRADING_DAYS)) if len(neg) > 1 else None
+
+    def g(mm: Metrics | None, k: str) -> float | None:
+        return _f(getattr(mm, k)) if mm else None
+
+    rows += [
+        {"label": "年波动", "value": g(m, "volatility"), "qqq": g(mq, "volatility")},
+        {"label": "下行波动", "value": down_vol, "qqq": None},
+        {"label": "最大回撤", "value": g(m, "max_drawdown"), "qqq": g(mq, "max_drawdown")},
+        {"label": "卡玛", "value": g(m, "calmar"), "qqq": g(mq, "calmar")},
+    ]
+    pair = _daily_pair(eq, qqq) if eq is not None else None
+    beta = corr = alpha = te = ir = None
+    if pair is not None:
+        s, q = pair
+        var = q.var(ddof=1)
+        beta = _f(s.cov(q) / var) if var else None
+        corr = _f(s.corr(q))
+        diff = s - q
+        te = _f(diff.std(ddof=1) * math.sqrt(TRADING_DAYS))
+        ir = _f(diff.mean() * TRADING_DAYS / te) if te else None
+        if beta is not None:
+            alpha = _f((s.mean() - beta * q.mean()) * TRADING_DAYS)
+    rows += [
+        {"label": "Beta", "value": beta, "qqq": None},
+        {"label": "相关系数", "value": corr, "qqq": None},
+        {"label": "年化 Alpha", "value": alpha, "qqq": None},
+        {"label": "跟踪误差", "value": te, "qqq": None},
+        {"label": "信息比率", "value": ir, "qqq": None},
+    ]
+    return rows
+
+
+def rolling_beta(
+    equity: pd.Series, qqq: pd.Series | None, window: int = 126
+) -> list[dict[str, Any]]:
+    """滚动 Beta（对 QQQ），按周取样（每周最后一个交易日）。"""
+    eq = _clean(equity)
+    pair = _daily_pair(eq, qqq) if eq is not None else None
+    if pair is None or len(pair[0]) < window:
+        return []
+    s, q = pair
+    beta = (s.rolling(window).cov(q) / q.rolling(window).var()).dropna()
+    weekly = beta.groupby(pd.DatetimeIndex(beta.index).to_period("W-FRI")).last()
+    when = beta.groupby(pd.DatetimeIndex(beta.index).to_period("W-FRI")).apply(
+        lambda x: x.index[-1]
+    )
+    return [{"date": str(pd.Timestamp(d).date()), "beta": _f(v)}
+            for d, v in zip(when.to_numpy(), weekly.to_numpy(), strict=True)]  # fmt: skip
+
+
+def tail(equity: pd.Series) -> list[dict[str, Any]]:
+    eq = _clean(equity)
+    if eq is None:
+        return []
+    r = eq.pct_change().dropna()
+    if len(r) < 2:
+        return []
+    var95 = r.quantile(0.05)
+    weekly = period_returns_by(eq, "W-FRI")
+    return [
+        {"label": "VaR 95%（日）", "value": _f(var95)},
+        {"label": "CVaR 95%（日）", "value": _f(r[r <= var95].mean())},
+        {"label": "单日最大亏损", "value": _f(r.min())},
+        {"label": "单周最大亏损", "value": _f(weekly.min())},
+        {"label": "偏度", "value": _f(r.skew())},
+        {"label": "峰度", "value": _f(r.kurt())},
+    ]

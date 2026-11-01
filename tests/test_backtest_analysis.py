@@ -136,3 +136,58 @@ def test_rolling_12m() -> None:
     base = EQ[: first - pd.DateOffset(months=12)].iloc[-1]
     assert roll[0]["ret"] == pytest.approx(EQ[:first].iloc[-1] / base - 1)
     assert ba.rolling_12m(EQ.iloc[:30]) == []
+
+
+# ---- Task 3：回撤与风险 ----
+
+
+def two_drawdowns() -> pd.Series:
+    """100 → 120（新高）→ 96（-20%）→ 125（收复并创新高）→ 112.5（-10%，未收复）。"""
+    pts = [100, 110, 120, 108, 96, 110, 121, 125, 118, 112.5, 115]
+    return pd.Series(pts, index=pd.bdate_range("2024-01-01", periods=len(pts)), dtype=float)
+
+
+def test_drawdown_episodes() -> None:
+    eq = two_drawdowns()
+    eps = ba.drawdown_episodes(eq, None)
+    assert len(eps) == 2
+    a, b = eps
+    assert (
+        a["depth"] == pytest.approx(-0.2)
+        and a["start"] == "2024-01-03"
+        and a["trough"] == "2024-01-05"
+    )
+    assert a["end"] == "2024-01-09" and a["down_days"] == 2 and a["recovery_days"] == 2
+    assert b["depth"] == pytest.approx(-0.1) and b["end"] is None and b["recovery_days"] is None
+    assert a["qqq"] is None
+    with_q = ba.drawdown_episodes(eq, eq)
+    assert with_q[0]["qqq"] == pytest.approx(-0.2)  # 同期 = 策略从高点到谷底的这段时间
+
+
+def test_capture_and_risk_vs_self() -> None:
+    cap = ba.capture(EQ, EQ)
+    assert cap["up"] == pytest.approx(1.0) and cap["down"] == pytest.approx(1.0)
+    rows = {r["label"]: r for r in ba.risk_table(EQ, EQ)}
+    assert rows["Beta"]["value"] == pytest.approx(1.0) and rows["相关系数"][
+        "value"
+    ] == pytest.approx(1.0)
+    assert ba.capture(EQ, None) == {"up": None, "down": None}
+    assert {r["label"]: r for r in ba.risk_table(EQ, None)}["Beta"]["value"] is None
+
+
+def test_rolling_beta_and_tail() -> None:
+    rb = ba.rolling_beta(EQ, EQ)
+    assert rb and all(x["beta"] == pytest.approx(1.0) for x in rb[:5])
+    assert ba.rolling_beta(EQ.iloc[:50], EQ.iloc[:50]) == []
+    tail = {r["label"]: r["value"] for r in ba.tail(EQ)}
+    r = EQ.pct_change().dropna()
+    assert tail["VaR 95%（日）"] == pytest.approx(r.quantile(0.05))
+    assert tail["单日最大亏损"] == pytest.approx(r.min())
+    assert tail["CVaR 95%（日）"] <= tail["VaR 95%（日）"]
+    dumps(
+        [
+            ba.drawdown_episodes(EQ.iloc[:3], None),
+            ba.tail(EQ.iloc[:3]),
+            ba.risk_table(EQ.iloc[:3], None),
+        ]
+    )
