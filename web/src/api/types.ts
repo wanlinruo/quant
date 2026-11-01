@@ -85,10 +85,30 @@ export interface BarsOut {
   bars: Bar[];
 }
 
+export interface BreadthOut {
+  advancers: StatOut;
+  decliners: StatOut;
+  unchanged: StatOut;
+  new_highs: StatOut;
+  new_lows: StatOut;
+  above_50: StatOut;
+  above_200: StatOut;
+  up_volume_ratio: StatOut;
+}
+
 export interface CalendarDayOut {
   date: string;
   pnl: number | null;
   ret: number | null;
+}
+
+export interface CandleOut {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
 }
 
 export interface ClosedTradeOut {
@@ -167,6 +187,14 @@ export interface HTTPValidationError {
   detail?: ValidationError[];
 }
 
+export interface HeatCellOut {
+  symbol: string;
+  name: string | null;
+  sector: string | null;
+  market_cap: number;
+  ret: number | null;
+}
+
 export interface HoldingRow {
   symbol: string;
   sleeve: "momentum" | "swing" | "both" | "exit" | null;
@@ -205,6 +233,23 @@ export interface KeyStatsOut {
   days_to_earnings: number | null;
 }
 
+export interface MarketOverview {
+  status: "ok" | "pending";
+  as_of?: string | null;
+  stale?: boolean;
+  generated_at?: string | null;
+  members?: number;
+  coverage?: number | null;
+  strip?: TickerItemOut[];
+  highlights?: string;
+  breadth?: BreadthOut | null;
+  styles?: StylePairOut[];
+  sectors?: SectorRowOut[];
+  movers?: MoverOut[];
+  heatmap?: Record<string, HeatCellOut[]>;
+  index_candles?: Record<string, CandleOut[]>;
+}
+
 export interface Meta {
   trading_mode: "sim" | "paper" | "live";
   broker: string;
@@ -212,6 +257,18 @@ export interface Meta {
   accounts: AccountInfo[];
   default_account: "sim" | "paper" | "live";
   data_as_of: string | null;
+}
+
+export interface MoverOut {
+  symbol: string;
+  name: string | null;
+  sector: string | null;
+  market_cap: number | null;
+  close: number;
+  change_pct: number;
+  volume_ratio: number | null;
+  signals: string[];
+  spark: number[];
 }
 
 export interface OrderOut {
@@ -366,6 +423,17 @@ export interface RiskOut {
   var95_1d: number | null;
 }
 
+export interface SectorRowOut {
+  symbol: string;
+  name: string;
+  d1: number | null;
+  w1: number | null;
+  m1: number | null;
+  ytd: number | null;
+  rel_spy_d1: number | null;
+  spark: number[];
+}
+
 export interface SignalOut {
   mode: "sim" | "paper" | "live";
   strategy: string;
@@ -379,6 +447,11 @@ export interface SleeveAlloc {
   sleeve: "momentum" | "swing" | "cash" | "other";
   actual: number;
   target: number | null;
+}
+
+export interface StatOut {
+  value: number | null;
+  prev: number | null;
 }
 
 export interface StockProfile {
@@ -396,6 +469,15 @@ export interface StockProfile {
   earnings: EarningsOut;
   holding_periods: PeriodOut[];
   trades: FillOut[];
+}
+
+export interface StylePairOut {
+  key: string;
+  label: string;
+  long: string;
+  short: string;
+  d1: number | null;
+  m1: number | null;
 }
 
 export interface SubmitResult {
@@ -419,6 +501,15 @@ export interface TechnicalsOut {
   dist_ma10: number | null;
   dist_ma20: number | null;
   dist_ma120: number | null;
+}
+
+export interface TickerItemOut {
+  symbol: string;
+  label: string;
+  close: number | null;
+  change: number | null;
+  change_pct: number | null;
+  spark: number[];
 }
 
 export interface TimingOut {

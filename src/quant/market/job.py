@@ -19,7 +19,7 @@ import pandas as pd
 
 from quant.core.calendar import TradingCalendar
 from quant.core.settings import BoardSettings
-from quant.data.market_store import ETF_SET, CapInfo, MarketStore, market_dir, sync_gics
+from quant.data.market_store import ETF_SET, CapInfo, MarketStore, snapshot_path, sync_gics
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.http import http_get_text
 from quant.data.providers.massive import MassiveAuthError, TickerDetails
@@ -32,10 +32,6 @@ log = logging.getLogger("quant.market_data")
 class Client(Protocol):
     def grouped_daily(self, day: date) -> pd.DataFrame: ...
     def ticker_details(self, symbol: str) -> TickerDetails | None: ...
-
-
-def snapshot_path(data_dir: Path) -> Path:
-    return market_dir(data_dir) / "snapshot.json"
 
 
 def run_market_data(

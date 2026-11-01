@@ -10,9 +10,10 @@ import pytest
 from quant.core.calendar import get_calendar
 from quant.core.settings import BoardSettings
 from quant.data import market_store as ms
+from quant.data.market_store import snapshot_path
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.massive import MassiveAuthError, MassiveRateLimited, TickerDetails
-from quant.market.job import run_market_data, snapshot_path
+from quant.market.job import run_market_data
 
 CAL = get_calendar()
 TODAY = date(2026, 10, 30)

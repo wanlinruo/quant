@@ -56,6 +56,11 @@ def market_dir(data_dir: Path) -> Path:
     return data_dir / MARKET_DIR
 
 
+def snapshot_path(data_dir: Path) -> Path:
+    """market_data 任务生成、面板只读的首页快照。"""
+    return market_dir(data_dir) / "snapshot.json"
+
+
 def gics_path(data_dir: Path) -> Path:
     return market_dir(data_dir) / "sp500_gics.csv"
 
