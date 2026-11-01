@@ -2,25 +2,39 @@ import { useState } from "react";
 import { api, ApiError } from "../api/client";
 import type { BacktestDefaults, BacktestSubmit, SubmitResult } from "../api/types";
 
-type Props = { defaults: BacktestDefaults; onClose: () => void; onSubmitted: (id: number) => void };
+/** “复制参数新建”：用某次回测的策略、区间、资金、参数与成本预填 */
+export type DrawerInitial = {
+  strategy: string;
+  start: string;
+  end: string;
+  params: Record<string, unknown>;
+  costs?: Record<string, unknown> | null;
+  cash?: string | null;
+};
+
+type Props = { defaults: BacktestDefaults; initial?: DrawerInitial; onClose: () => void; onSubmitted: (id: number) => void };
+
+const str = (v: unknown, fallback: string) => (v === undefined || v === null ? fallback : String(v));
 
 const STATUS_STYLE = { position: "fixed", top: 0, right: 0, bottom: 0, width: 440 } as const;
 
 /** 新建回测：面板唯一的写操作，只插入一条排队任务，由 backtest-worker 执行。 */
-export function BacktestSubmitDrawer({ defaults, onClose, onSubmitted }: Props) {
+export function BacktestSubmitDrawer({ defaults, initial, onClose, onSubmitted }: Props) {
+  const p = initial?.params ?? {};
+  const c = initial?.costs ?? {};
   const [form, setForm] = useState({
-    strategy: defaults.strategies.includes("etf_momentum") ? "etf_momentum" : defaults.strategies[0],
-    start: defaults.start,
-    end: defaults.end,
-    universe: defaults.universe,
-    safe_asset: defaults.safe_asset,
-    lookback: String(defaults.lookback),
-    top_k: String(defaults.top_k),
-    sma_window: String(defaults.sma_window),
-    cash: String(defaults.cash),
-    commission_per_share: defaults.commission_per_share ?? "",
-    min_commission: defaults.min_commission ?? "",
-    slippage: defaults.slippage,
+    strategy: initial && defaults.strategies.includes(initial.strategy) ? initial.strategy : defaults.strategies.includes("etf_momentum") ? "etf_momentum" : defaults.strategies[0],
+    start: initial?.start ?? defaults.start,
+    end: initial?.end ?? defaults.end,
+    universe: Array.isArray(p.universe) ? (p.universe as string[]) : defaults.universe,
+    safe_asset: str(p.safe_asset, defaults.safe_asset),
+    lookback: str(p.lookback, String(defaults.lookback)),
+    top_k: str(p.top_k, String(defaults.top_k)),
+    sma_window: str(p.sma_window, String(defaults.sma_window)),
+    cash: str(initial?.cash, String(defaults.cash)),
+    commission_per_share: str(c.commission_per_share, defaults.commission_per_share ?? ""),
+    min_commission: str(c.min_commission, defaults.min_commission ?? ""),
+    slippage: str(c.slippage, defaults.slippage),
   });
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
