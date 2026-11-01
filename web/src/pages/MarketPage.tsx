@@ -203,7 +203,7 @@ export function MarketPage() {
                 <IndexChart m={m} />
               </Cell>
               <Cell span={6}>
-                <Panel title="板块表现" right={<span className="muted sm">SPDR 板块 ETF · 按 1日 排序</span>} height={ROW_H}>
+                <Panel title="板块表现" right={<span className="muted sm">SPDR 板块 ETF · 价格涨跌，不含分红 · 按 1日 排序</span>} height={ROW_H}>
                   {m && m.sectors.length ? (
                     <div className="table-wrap" style={{ maxHeight: ROW_H - 60 }}>
                       <table className="dt">
@@ -271,7 +271,7 @@ function Heatmap({ m, link }: { m: Full | null; link: (s: string) => { pathname:
       grow
     >
       <div data-testid="heatmap">
-        {groups.length ? <Treemap groups={groups} width={800} height={HEAT_H - 20} /> : <EmptyState kind="pending" note="按板块分组，面积为市值；市值首次补齐约需一周" />}
+        {groups.length ? <Treemap groups={groups} width={800} height={HEAT_H - 20} /> : <EmptyState kind="pending" note="市值每天补 60 只，约 9 个交易日补齐" />}
       </div>
     </Panel>
   );
