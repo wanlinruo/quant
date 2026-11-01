@@ -33,7 +33,8 @@ export function LineChart({ series, height, percent, markers, logScale, shadeFro
       layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#787b86", fontSize: 11, attributionLogo: false },
       grid: { vertLines: { color: "#1a1e29" }, horzLines: { color: "#1d212b" } },
       rightPriceScale: { borderColor: "#232733", mode: logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal },
-      timeScale: { borderColor: "#232733" },
+      // minBarSpacing 调小：十年日线（约 2500 点）也能完整放进图宽，不截掉前几年
+      timeScale: { borderColor: "#232733", minBarSpacing: 0.01 },
       localization: percent ? { priceFormatter: (v: number) => `${(v * 100).toFixed(1)}%` } : undefined,
     });
     series.forEach((s, i) => {
@@ -55,7 +56,7 @@ export function LineChart({ series, height, percent, markers, logScale, shadeFro
     });
     if (shadeFrom && series[0]) {
       const band = chart.addSeries(HistogramSeries, {
-        priceScaleId: "shade", color: "rgba(41,98,255,0.10)", lastValueVisible: false, priceLineVisible: false,
+        priceScaleId: "shade", color: "rgba(41,98,255,0.06)", lastValueVisible: false, priceLineVisible: false,
       });
       chart.priceScale("shade").applyOptions({ scaleMargins: { top: 0, bottom: 0 }, visible: false });
       band.setData(series[0].points.filter((p) => p.time >= shadeFrom).map((p) => ({ time: p.time, value: 1 })));

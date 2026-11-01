@@ -180,3 +180,5 @@ td.reason a:hover { text-decoration: underline; }
 tr.changed td { background: rgba(250, 204, 21, 0.12); }
 pre.cmd { white-space: pre-wrap; word-break: break-all; font-size: 12px; background: #131722; padding: 6px 8px; border-radius: 4px; margin: 8px 0 0; user-select: all; }
 pre.cmd.err { color: #ef4444; user-select: text; }
+.statbar.statbar-10 { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 8px; }
+.statbar-10 .stat { padding: 6px 8px; white-space: nowrap; overflow: hidden; }

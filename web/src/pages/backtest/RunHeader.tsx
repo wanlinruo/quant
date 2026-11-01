@@ -47,7 +47,7 @@ export function RunHeader({ run, a, inCompare, warnings, onParams, onCopy, onCom
         {a && ` · 用时 ${duration(a.duration_s)}`}
         {run.error ? ` · ${run.error}` : ""}
       </div>
-      <div className="statbar" data-testid="statbar">
+      <div className="statbar statbar-10" data-testid="statbar">
         {a?.stats?.length
           ? a.stats.map((s) => (
               <div key={s.key} className="stat" title={s.value == null && s.qqq == null ? "按交易口径计算，B 批接入" : undefined}>
