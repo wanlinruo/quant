@@ -17,7 +17,6 @@ from quant.api.schemas import (
     MODES,
     AccountPoint,
     BacktestRunOut,
-    Bar,
     DataStatusRow,
     EquityPoint,
     FailureOut,
@@ -30,7 +29,7 @@ from quant.api.schemas import (
     SignalOut,
 )
 from quant.core.calendar import TradingCalendar
-from quant.data.store import ParquetStore, is_valid_symbol
+from quant.data.store import ParquetStore
 from quant.data.validate import validate_bars
 from quant.db.models import (
     AccountSnapshotRow,
@@ -266,18 +265,3 @@ def data_status(store: ParquetStore, cal: TradingCalendar, expected: date) -> li
             )
         )  # fmt: skip
     return out
-
-
-def bars(store: ParquetStore, symbol: str, start: date | None) -> list[Bar]:
-    """不合法或没有数据的代码返回空列表（个股页显示“暂无数据”）。"""
-    if not is_valid_symbol(symbol):
-        return []
-    df = store.read_bars(symbol, start)
-    return [
-        Bar(date=d.date(), open=float(o), high=float(h), low=float(lo), close=float(c),
-            adj_close=float(a), volume=float(v))
-        for d, o, h, lo, c, a, v in zip(
-            pd.DatetimeIndex(df.index), df["open"], df["high"], df["low"], df["close"],
-            df["adj_close"], df["volume"], strict=True,
-        )
-    ]  # fmt: skip

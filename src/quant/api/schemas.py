@@ -321,3 +321,105 @@ class TradeStatsOut(BaseModel):
 class ClosedTradesOut(BaseModel):
     trades: list[ClosedTradeOut]
     stats: TradeStatsOut
+
+
+# ---- 个股页（#65）----
+
+
+class BarsOut(BaseModel):
+    adjusted: bool  # False：来自候选池目录（新浪，未复权）
+    bars: list[Bar]
+
+
+class QuoteOut(BaseModel):
+    close: float
+    change: float | None
+    change_pct: float | None
+    open: float
+    high: float
+    low: float
+    volume: float
+    turnover: float
+    high_52w: float
+    low_52w: float
+    ret_1m: float | None
+    ytd: float | None
+
+
+class RelationOut(BaseModel):
+    held: bool
+    weight: float | None
+    sleeve: Sleeve | None
+    momentum_rank: int | None
+    universe_size: int | None
+    in_sp500: bool
+    swing_universe: bool
+    prev_holding: str | None
+    next_holding: str | None
+
+
+class KeyStatsOut(BaseModel):
+    volume_ratio: float | None
+    beta_1y: float | None
+    vol_20d: float | None
+    from_high: float | None
+    to_ma120: float | None
+    next_earnings: date | None
+    days_to_earnings: int | None
+
+
+class TechnicalsOut(BaseModel):
+    rsi14: float | None
+    atr14_pct: float | None
+    rs_20d: float | None
+    rs_60d: float | None
+    ma10: float | None
+    ma20: float | None
+    ma120: float | None
+    dist_ma10: float | None
+    dist_ma20: float | None
+    dist_ma120: float | None
+
+
+class SwingCheckOut(BaseModel):
+    trend_up: bool | None
+    above_support: bool | None
+    dist_exit: float | None
+
+
+class RankPoint(BaseModel):
+    date: date
+    rank: int | None
+
+
+class EarningsMove(BaseModel):
+    date: date
+    move: float | None
+
+
+class EarningsOut(BaseModel):
+    next: date | None
+    held_through: bool
+    history: list[EarningsMove]
+
+
+class PeriodOut(BaseModel):
+    start: date
+    end: date
+
+
+class StockProfile(BaseModel):
+    symbol: str
+    as_of: date | None
+    adjusted: bool
+    quote: QuoteOut | None
+    relation: RelationOut
+    periods: dict[str, float | None]
+    periods_qqq: dict[str, float | None]
+    key_stats: KeyStatsOut
+    technicals: TechnicalsOut
+    swing: SwingCheckOut
+    rank_history: list[RankPoint]
+    earnings: EarningsOut
+    holding_periods: list[PeriodOut]
+    trades: list[FillOut]

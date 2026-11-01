@@ -77,7 +77,7 @@ def nav_series(s: Session, mode: Mode) -> pd.Series:
     )
 
 
-def _last_account(s: Session, mode: Mode) -> AccountSnapshotRow | None:
+def last_account(s: Session, mode: Mode) -> AccountSnapshotRow | None:
     return s.scalars(
         select(AccountSnapshotRow)
         .where(AccountSnapshotRow.mode == mode)
@@ -86,7 +86,7 @@ def _last_account(s: Session, mode: Mode) -> AccountSnapshotRow | None:
     ).first()
 
 
-def _snapshots(s: Session, mode: Mode) -> list[PositionSnapshot]:
+def snapshots_of(s: Session, mode: Mode) -> list[PositionSnapshot]:
     return list(
         s.scalars(
             select(PositionSnapshot)
@@ -96,7 +96,7 @@ def _snapshots(s: Session, mode: Mode) -> list[PositionSnapshot]:
     )
 
 
-def _latest_positions(snaps: Sequence[PositionSnapshot]) -> list[PositionSnapshot]:
+def latest_positions(snaps: Sequence[PositionSnapshot]) -> list[PositionSnapshot]:
     if not snaps:
         return []
     last = snaps[-1].snapshot_date
@@ -105,7 +105,7 @@ def _latest_positions(snaps: Sequence[PositionSnapshot]) -> list[PositionSnapsho
     )
 
 
-def _held_by_day(snaps: Sequence[PositionSnapshot]) -> dict[date, set[str]]:
+def held_by_day(snaps: Sequence[PositionSnapshot]) -> dict[date, set[str]]:
     out: dict[date, set[str]] = {}
     for r in snaps:
         out.setdefault(r.snapshot_date, set())
@@ -114,7 +114,7 @@ def _held_by_day(snaps: Sequence[PositionSnapshot]) -> dict[date, set[str]]:
     return out
 
 
-def _signals(s: Session, mode: Mode, limit: int | None = None) -> list[Signal]:
+def signals_of(s: Session, mode: Mode, limit: int | None = None) -> list[Signal]:
     q = select(Signal).where(Signal.mode == mode).order_by(Signal.signal_date.desc())
     return list(s.scalars(q.limit(limit) if limit else q).all())
 
@@ -183,7 +183,7 @@ class Detail:
         return {k: v / total for k, v in parts.items() if v} if total else {}
 
 
-def _detail(sig: Signal | None) -> Detail:
+def detail_of(sig: Signal | None) -> Detail:
     return Detail(sig.detail if sig is not None else None)
 
 
@@ -199,12 +199,12 @@ def _bench_on(stores: Stores, symbol: str, idx: pd.Index) -> pd.Series:
 
 def overview(s: Session, mode: Mode, stores: Stores, events: EventCalendar) -> PortfolioOverview:
     nav = nav_series(s, mode)
-    acct = _last_account(s, mode)
-    snaps = _snapshots(s, mode)
-    held = _latest_positions(snaps)
-    sigs = _signals(s, mode, 1)
+    acct = last_account(s, mode)
+    snaps = snapshots_of(s, mode)
+    held = latest_positions(snaps)
+    sigs = signals_of(s, mode, 1)
     sig = sigs[0] if sigs else None
-    det = _detail(sig)
+    det = detail_of(sig)
     target = dict(sig.target_weights) if sig else {}
     summ = an.summary(nav, _bench_on(stores, "QQQ", nav.index), _bench_on(stores, "SPY", nav.index))
     risk = an.risk(nav, _bench_on(stores, "SPY", nav.index), _bench_on(stores, "QQQ", nav.index))
@@ -303,7 +303,7 @@ def performance(s: Session, mode: Mode, stores: Stores) -> PerformanceOut:
         )
         for i, t in enumerate(nav.index)
     ]
-    sigs = list(reversed(_signals(s, mode)))
+    sigs = list(reversed(signals_of(s, mode)))
     rebal = [
         x.signal_date
         for i, x in enumerate(sigs)
@@ -333,17 +333,17 @@ def _state(
 
 
 def holdings(s: Session, mode: Mode, stores: Stores, events: EventCalendar) -> list[HoldingRow]:
-    snaps = _snapshots(s, mode)
-    held = _latest_positions(snaps)
+    snaps = snapshots_of(s, mode)
+    held = latest_positions(snaps)
     if not held:
         return []
-    acct = _last_account(s, mode)
+    acct = last_account(s, mode)
     netliq = float(acct.net_liquidation) if acct else None
-    sigs = _signals(s, mode, 1)
+    sigs = signals_of(s, mode, 1)
     sig = sigs[0] if sigs else None
-    det = _detail(sig)
+    det = detail_of(sig)
     target = dict(sig.target_weights) if sig else {}
-    by_day = _held_by_day(snaps)
+    by_day = held_by_day(snaps)
     as_of = held[0].snapshot_date
     out = []
     for r in held:
@@ -374,7 +374,7 @@ def holdings(s: Session, mode: Mode, stores: Stores, events: EventCalendar) -> l
 
 
 def contributions(s: Session, mode: Mode, stores: Stores, period: str) -> list[ContributionRow]:
-    snaps = _snapshots(s, mode)
+    snaps = snapshots_of(s, mode)
     if not snaps:
         return []
     qty = (
@@ -391,9 +391,9 @@ def contributions(s: Session, mode: Mode, stores: Stores, period: str) -> list[C
     last = snaps[-1].snapshot_date
     start = last if period == "day" else last.replace(day=1)
     pnl = an.contributions(qty, close, start, last)
-    sigs = _signals(s, mode, 1)
+    sigs = signals_of(s, mode, 1)
     sig = sigs[0] if sigs else None
-    det, target = _detail(sig), dict(sig.target_weights) if sig else {}
+    det, target = detail_of(sig), dict(sig.target_weights) if sig else {}
     out = []
     for sym, v in sorted(pnl.items(), key=lambda kv: -abs(kv[1])):
         share = det.sleeve_share(sym)
@@ -454,15 +454,15 @@ def _reason(sym: str, side: str, held: bool, det: Detail, prev: Detail) -> str:
 def rebalance_preview(
     s: Session, mode: Mode, stores: Stores, costs: CostSettings
 ) -> RebalancePreview:
-    sigs = _signals(s, mode, 2)
-    acct = _last_account(s, mode)
+    sigs = signals_of(s, mode, 2)
+    acct = last_account(s, mode)
     if not sigs or acct is None:
         return RebalancePreview(signal_date=None, rows=[], turnover=0.0, est_commission=None)
     sig = sigs[0]
-    det, prev = _detail(sig), _detail(sigs[1] if len(sigs) > 1 else None)
+    det, prev = detail_of(sig), detail_of(sigs[1] if len(sigs) > 1 else None)
     netliq = float(acct.net_liquidation)
     current = {
-        r.symbol: float(r.market_value) / netliq for r in _latest_positions(_snapshots(s, mode))
+        r.symbol: float(r.market_value) / netliq for r in latest_positions(snapshots_of(s, mode))
     }
     target = {k: float(v) for k, v in sig.target_weights.items()}
     min_diff = _min_diff(sig.strategy)

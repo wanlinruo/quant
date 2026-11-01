@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useParams } from "react-router";
-import type { Bar } from "../api/types";
+import type { BarsOut } from "../api/types";
 import { ApiState } from "../components/ApiState";
 import { Cell, Grid } from "../components/Grid";
 import { Panel } from "../components/Panel";
@@ -23,18 +23,19 @@ export function StockPage() {
   const [years, setYears] = useState(2);
   const [adjusted, setAdjusted] = useState(false);
   const start = useMemo(() => startOf(years), [years]);
-  const bars = useApi<Bar[]>(`/api/market/bars/${encodeURIComponent(symbol)}`, { start });
+  const res = useApi<BarsOut>(`/api/market/bars/${encodeURIComponent(symbol)}`, { start });
+  const list = res.data?.bars;
 
   const candles = useMemo(
     () =>
-      (bars.data ?? []).map((b) => {
+      (list ?? []).map((b) => {
         const f = adjusted && b.close ? b.adj_close / b.close : 1;
         return { date: b.date, open: b.open * f, high: b.high * f, low: b.low * f, close: b.close * f, volume: b.volume };
       }),
-    [bars.data, adjusted],
+    [list, adjusted],
   );
-  const last = bars.data?.at(-1);
-  const prev = bars.data && bars.data.length > 1 ? bars.data.at(-2) : undefined;
+  const last = list?.at(-1);
+  const prev = list && list.length > 1 ? list.at(-2) : undefined;
 
   return (
     <div className="page">
@@ -74,7 +75,7 @@ export function StockPage() {
               </span>
             }
           >
-            <ApiState result={bars}>{() => <CandleChart height={460} bars={candles} mas={MAS} />}</ApiState>
+            <ApiState result={res} emptyWhen={(d) => d.bars.length === 0}>{() => <CandleChart height={460} bars={candles} mas={MAS} />}</ApiState>
           </Panel>
         </Cell>
       </Grid>

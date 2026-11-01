@@ -105,7 +105,7 @@ def test_defaults_without_db(client_no_db: TestClient) -> None:
 
 def test_market_endpoints_without_data(client_no_db: TestClient) -> None:
     assert client_no_db.get("/api/market/data-status").json() == []
-    assert client_no_db.get("/api/market/bars/SPY").json() == []
+    assert client_no_db.get("/api/market/bars/SPY").json() == {"adjusted": True, "bars": []}
 
 
 @pytest.mark.db
@@ -269,7 +269,7 @@ def test_submit_type_errors_are_chinese_with_field_names(client_db: TestClient) 
 def test_bars_with_invalid_symbol_is_empty(client_no_db: TestClient, symbol: str) -> None:
     r = client_no_db.get(f"/api/market/bars/{symbol}")
     assert r.status_code == 200
-    assert r.json() == []
+    assert r.json()["bars"] == []
 
 
 def test_data_status_is_cached(client_no_db: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

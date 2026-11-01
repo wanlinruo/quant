@@ -67,6 +67,11 @@ export interface Bar {
   volume: number;
 }
 
+export interface BarsOut {
+  adjusted: boolean;
+  bars: Bar[];
+}
+
 export interface CalendarDayOut {
   date: string;
   pnl: number | null;
@@ -110,6 +115,17 @@ export interface DataStatusRow {
   last_ingested: string | null;
   ok: boolean;
   issues: string;
+}
+
+export interface EarningsMove {
+  date: string;
+  move: number | null;
+}
+
+export interface EarningsOut {
+  next: string | null;
+  held_through: boolean;
+  history: EarningsMove[];
 }
 
 export interface EquityPoint {
@@ -165,6 +181,16 @@ export interface JobStatusOut {
   error: string;
 }
 
+export interface KeyStatsOut {
+  volume_ratio: number | null;
+  beta_1y: number | null;
+  vol_20d: number | null;
+  from_high: number | null;
+  to_ma120: number | null;
+  next_earnings: string | null;
+  days_to_earnings: number | null;
+}
+
 export interface Meta {
   trading_mode: "sim" | "paper" | "live";
   broker: string;
@@ -201,6 +227,11 @@ export interface PerfPoint {
 export interface PerformanceOut {
   points: PerfPoint[];
   rebalance_dates: string[];
+}
+
+export interface PeriodOut {
+  start: string;
+  end: string;
 }
 
 export interface PortfolioOverview {
@@ -254,6 +285,26 @@ export interface QueueStatus {
   failed?: number;
 }
 
+export interface QuoteOut {
+  close: number;
+  change: number | null;
+  change_pct: number | null;
+  open: number;
+  high: number;
+  low: number;
+  volume: number;
+  turnover: number;
+  high_52w: number;
+  low_52w: number;
+  ret_1m: number | null;
+  ytd: number | null;
+}
+
+export interface RankPoint {
+  date: string;
+  rank: number | null;
+}
+
 export interface RebalancePreview {
   signal_date: string | null;
   rows: PreviewRow[];
@@ -264,6 +315,18 @@ export interface RebalancePreview {
 export interface ReconcileOut {
   trading_enabled: boolean;
   last_report_status: string | null;
+}
+
+export interface RelationOut {
+  held: boolean;
+  weight: number | null;
+  sleeve: "momentum" | "swing" | "both" | "exit" | null;
+  momentum_rank: number | null;
+  universe_size: number | null;
+  in_sp500: boolean;
+  swing_universe: boolean;
+  prev_holding: string | null;
+  next_holding: string | null;
 }
 
 export interface RiskOut {
@@ -287,8 +350,44 @@ export interface SleeveAlloc {
   target: number | null;
 }
 
+export interface StockProfile {
+  symbol: string;
+  as_of: string | null;
+  adjusted: boolean;
+  quote: QuoteOut | null;
+  relation: RelationOut;
+  periods: Record<string, number | null>;
+  periods_qqq: Record<string, number | null>;
+  key_stats: KeyStatsOut;
+  technicals: TechnicalsOut;
+  swing: SwingCheckOut;
+  rank_history: RankPoint[];
+  earnings: EarningsOut;
+  holding_periods: PeriodOut[];
+  trades: FillOut[];
+}
+
 export interface SubmitResult {
   id: number;
+}
+
+export interface SwingCheckOut {
+  trend_up: boolean | null;
+  above_support: boolean | null;
+  dist_exit: number | null;
+}
+
+export interface TechnicalsOut {
+  rsi14: number | null;
+  atr14_pct: number | null;
+  rs_20d: number | null;
+  rs_60d: number | null;
+  ma10: number | null;
+  ma20: number | null;
+  ma120: number | null;
+  dist_ma10: number | null;
+  dist_ma20: number | null;
+  dist_ma120: number | null;
 }
 
 export interface TimingOut {

@@ -12,9 +12,11 @@ from sqlalchemy.orm import Session
 from quant.core.settings import Settings, load_settings
 from quant.data.events import load_events
 from quant.data.store import ParquetStore
+from quant.data.universe import constituents_path, load_constituents
 from quant.data.universe_bars import universe_store
 from quant.db.backtests import make_engine
 from quant.strategies.events import EventCalendar
+from quant.strategies.universe import Constituents
 
 NO_DB = "未配置数据库（QUANT_DATABASE_URL）"
 
@@ -50,3 +52,9 @@ def get_universe_store() -> ParquetStore:
 def get_events() -> EventCalendar:
     """财报日（实盘同步的 + 回测用的，存在时）与 FOMC。"""
     return load_events(get_settings().data_dir)
+
+
+def get_constituents() -> Constituents | None:
+    """标普 500 历史成分（判断“属于哪些指数”）；文件不存在时为 None。"""
+    path = constituents_path(get_settings().data_dir)
+    return load_constituents(path) if path.exists() else None
