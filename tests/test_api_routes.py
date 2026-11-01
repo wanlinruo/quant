@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Iterator
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -292,3 +292,73 @@ def test_data_status_is_cached(client_no_db: TestClient, monkeypatch: pytest.Mon
     now[0] += market.DATA_STATUS_TTL + 1
     client_no_db.get("/api/market/data-status")
     assert len(calls) == 2
+
+
+# ---- 服务器回测数据（#66 Task 4）----
+
+
+def test_submit_combo_uses_configured_params() -> None:
+    configured = {"momentum_weight": 0.4, "swing_weight": 0.6}
+    costs = CostSettings(commission_per_share=Decimal("0.005"), min_commission=Decimal("1"))
+    req = _req(strategy="combo", lookback=1, universe=[])
+    params, errors = build_submission(req, costs, LAST, strategy_params=configured)
+    assert errors == []
+    assert params["momentum_weight"] == 0.4
+    assert "lookback" not in params and "universe" not in params
+
+
+def test_submit_end_after_data_end_is_422() -> None:
+    _, errors = build_submission(_req(), CostSettings(), LAST, data_end=date(2026, 10, 1))
+    assert any("回测数据截止日 2026-10-01" in e for e in errors), errors
+
+
+def test_data_status_yfinance_mode(client_no_db: TestClient) -> None:
+    s = client_no_db.get("/api/backtests/data-status").json()
+    assert s["source"] == "yfinance" and s["data_end"] is None
+
+
+@pytest.fixture
+def client_tiingo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[TestClient]:
+    from quant.core.calendar import get_calendar
+    from quant.core.settings import TiingoSettings
+    from quant.data import backtest_data as bd
+    from quant.data.quota import QuotaLedger
+
+    monkeypatch.setenv("QUANT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("QUANT_DATA__BACKTEST_SOURCE", "tiingo")
+    monkeypatch.delenv("QUANT_DATABASE_URL", raising=False)
+    monkeypatch.setenv("TRADING_MODE", "sim")
+    cal = get_calendar()
+    today = cal.last_completed_trading_day(datetime.now(UTC))
+    state = bd.BackfillState.load(bd.state_path(tmp_path))
+    ledger = QuotaLedger(bd.quota_path(tmp_path), TiingoSettings())
+    for s in bd.fixed_symbols():
+        state.symbols[s] = bd.SymbolState("ok", today.isoformat(), today.strftime("%Y-%m"),
+                                          last_date="2026-10-28")  # fmt: skip
+        ledger.record(s)
+    state.save()
+    _clear()
+    yield TestClient(create_app())
+    _clear()
+
+
+def test_data_status_tiingo_progress(client_tiingo: TestClient) -> None:
+    from quant.data.backtest_data import fixed_symbols
+
+    s = client_tiingo.get("/api/backtests/data-status").json()
+    n = len(fixed_symbols())
+    assert s["source"] == "tiingo" and s["data_end"] == "2026-10-28"
+    assert s["fixed"] == {"done": n, "total": n}
+    assert s["quota"]["month_symbols"] == n and s["quota"]["month_limit"] == 500
+    assert s["earnings"] == "none"
+
+
+def test_defaults_end_clamped_to_data_end(client_tiingo: TestClient) -> None:
+    d = client_tiingo.get("/api/backtests/defaults").json()
+    assert d["data_end"] == "2026-10-28" and d["end"] == "2026-10-28"
+
+
+def test_submit_start_before_min_is_422() -> None:
+    _, errors = build_submission(_req(start=date(2010, 1, 4)), CostSettings(), LAST,
+                                 min_start=date(2014, 7, 1))  # fmt: skip
+    assert any("开始日期：不能早于 2014-07-01" in e for e in errors), errors

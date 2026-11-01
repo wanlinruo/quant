@@ -48,6 +48,24 @@ DASHBOARD_DOMAIN=<面板域名>
 DASHBOARD_USER=<面板登录用户名>
 DASHBOARD_PASSWORD_HASH=<由 set_dashboard_password.sh 写入>
 QUANT_IMAGE=<由部署脚本写入>
+# 服务器回测数据（#66）；第三方数据源 key（#60–#64，目前只有 TIINGO 与 EDGAR 被容器使用）
+TIINGO_API_KEY=<Tiingo 免费档 key>
+EDGAR_USER_AGENT=<名称 邮箱，SEC 要求的联系方式>
+MASSIVE_API_KEY=<Massive 免费档 key>
+FRED_API_KEY=<FRED key>
+FINNHUB_API_KEY=<Finnhub 免费档 key>
+```
+
+写入 key 时不要用 `echo ... >> .env`（会留在 shell 历史）：
+
+```
+cd /opt/quant && read -rsp "Tiingo key: " k && printf 'TIINGO_API_KEY=%s\n' "$k" >> .env; unset k
+```
+
+回测数据补齐进度（只读）：
+
+```
+cd /opt/quant && docker compose exec -T backtest-worker quant backtest-data status
 ```
 
 ## 4. 部署（CI）

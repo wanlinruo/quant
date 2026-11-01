@@ -14,6 +14,17 @@ export interface AccountPoint {
   net_liquidation: number;
 }
 
+export interface BacktestDataStatus {
+  source: "yfinance" | "tiingo";
+  data_end?: string | null;
+  fixed?: Progress | null;
+  current?: Progress | null;
+  delisted?: Progress | null;
+  unavailable?: string[];
+  quota?: QuotaOut | null;
+  earnings?: "complete" | "partial" | "none" | null;
+}
+
 export interface BacktestDefaults {
   strategies: string[];
   universe_options: string[];
@@ -28,6 +39,8 @@ export interface BacktestDefaults {
   slippage: string;
   start: string;
   end: string;
+  data_end?: string | null;
+  min_start?: string | null;
 }
 
 export interface BacktestRunOut {
@@ -280,11 +293,26 @@ export interface PreviewRow {
   reason: string;
 }
 
+export interface Progress {
+  done: number;
+  total: number;
+}
+
 export interface QueueStatus {
   queued?: number;
   running?: number;
   done?: number;
   failed?: number;
+}
+
+export interface QuotaOut {
+  hour_used: number;
+  hour_limit: number;
+  day_used: number;
+  day_limit: number;
+  month: string;
+  month_symbols: number;
+  month_limit: number;
 }
 
 export interface QuoteOut {

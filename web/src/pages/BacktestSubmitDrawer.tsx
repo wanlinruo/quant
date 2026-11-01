@@ -55,12 +55,15 @@ export function BacktestSubmitDrawer({ defaults, onClose, onSubmitted }: Props) 
     }
   }
 
-  const field = (label: string, k: keyof typeof form, type = "text") => (
+  const field = (label: string, k: keyof typeof form, type = "text", max?: string, min?: string) => (
     <label className="field">
       <span>{label}</span>
-      <input type={type} value={form[k] as string} onChange={set(k)} />
+      <input type={type} value={form[k] as string} onChange={set(k)} max={max} min={min} />
     </label>
   );
+  // 标的池与动量参数只属于 etf_momentum；其它策略沿用服务器配置（与模拟盘一致）
+  const formStrategy = form.strategy === "etf_momentum";
+  const maxEnd = defaults.data_end ?? defaults.end;
 
   return (
     <aside className="drawer" style={STATUS_STYLE} role="dialog" aria-label="新建回测">
@@ -74,7 +77,10 @@ export function BacktestSubmitDrawer({ defaults, onClose, onSubmitted }: Props) 
           {defaults.strategies.map((s) => <option key={s}>{s}</option>)}
         </select>
       </label>
-      <div className="two">{field("开始", "start", "date")}{field("结束", "end", "date")}</div>
+      <div className="two">{field("开始", "start", "date", maxEnd, defaults.min_start ?? undefined)}{field("结束", "end", "date", maxEnd, defaults.min_start ?? undefined)}</div>
+      {defaults.data_end && <div className="muted sm">回测数据截止 {defaults.data_end}</div>}
+      {formStrategy ? (
+        <>
       <div className="field">
         <span>标的池</span>
         <div className="chips">
@@ -92,6 +98,10 @@ export function BacktestSubmitDrawer({ defaults, onClose, onSubmitted }: Props) 
       </div>
       <div className="two">{field("避险资产", "safe_asset")}{field("动量回看（交易日）", "lookback", "number")}</div>
       <div className="two">{field("持有数量 top_k", "top_k", "number")}{field("均线窗口", "sma_window", "number")}</div>
+        </>
+      ) : (
+        <div className="muted sm" style={{ margin: "6px 0" }}>{form.strategy} 的参数沿用服务器配置（与模拟盘一致），此处不可修改。</div>
+      )}
       {field("初始资金（美元）", "cash", "number")}
       <div className="three">{field("每股佣金", "commission_per_share")}{field("单笔最低佣金", "min_commission")}{field("滑点", "slippage")}</div>
       {errors.length > 0 && (

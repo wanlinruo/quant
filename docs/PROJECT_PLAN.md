@@ -342,6 +342,7 @@ class Strategy(ABC):
 - 成本模型可配置：每股佣金、单笔最低佣金、滑点（默认按成交价 0.05%）。老虎实际费率【待确认】，确认后写入配置。
 - 输出指标：年化收益、年化波动、最大回撤、Sharpe、Calmar、换手率、交易次数，以及与基准（默认买入持有 SPY）的对比。
 - 结果写入 `backtest_runs` 和 `backtest_equity`，面板读取展示。
+- **回测数据来源**（#66）：Mac 用 yfinance（缺数据自动拉取）；服务器 IP 被 Yahoo 限流，改用 Tiingo 免费档（含分红复权，每小时 50 次、每天 1000 次、每月 500 个不同标的）。`backtest-worker` 空闲时按额度逐只补齐到 `/data/parquet/backtest_bars`（固定标的 → 当前标普 500 成分 → 已退市成分，在市标的 30 天刷新），并在日线补齐后用 SEC EDGAR 同步候选池历史财报日；回测只读本地数据、不联网，结果 `metrics.data` 记录数据截止日、候选池覆盖率与财报日完整度。进度用 `quant backtest-data status` 查看。
 
 **任务化执行**
 

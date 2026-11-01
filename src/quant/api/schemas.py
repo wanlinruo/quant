@@ -181,6 +181,8 @@ class BacktestDefaults(BaseModel):
     slippage: str
     start: date
     end: date
+    data_end: date | None = None  # 服务器回测数据截止日（tiingo 模式）
+    min_start: date | None = None  # 服务器回测最早开始日（tiingo 模式）
 
 
 # ---- 组合页（#65）----
@@ -426,3 +428,32 @@ class StockProfile(BaseModel):
     earnings: EarningsOut
     holding_periods: list[PeriodOut]
     trades: list[FillOut]
+
+
+# ---- 服务器回测数据（#66）----
+
+
+class Progress(BaseModel):
+    done: int
+    total: int
+
+
+class QuotaOut(BaseModel):
+    hour_used: int
+    hour_limit: int
+    day_used: int
+    day_limit: int
+    month: str
+    month_symbols: int
+    month_limit: int
+
+
+class BacktestDataStatus(BaseModel):
+    source: Literal["yfinance", "tiingo"]
+    data_end: date | None = None
+    fixed: Progress | None = None
+    current: Progress | None = None
+    delisted: Progress | None = None
+    unavailable: list[str] = []
+    quota: QuotaOut | None = None
+    earnings: Literal["complete", "partial", "none"] | None = None

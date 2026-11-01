@@ -18,12 +18,16 @@ import time
 import traceback
 from collections.abc import Callable
 from types import FrameType
+from typing import Protocol
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
+from quant.core.calendar import get_calendar
 from quant.core.settings import ConfigError, Settings, load_settings
+from quant.data.backtest_data import make_runner
 from quant.db.backtests import claim_next, fail_run, make_engine
+from quant.db.models import BacktestRun
 from quant.engine.backtester import BacktestResult
 from quant.engine.runner import BacktestSpec, run_spec, save_result
 
@@ -56,6 +60,34 @@ def process_one(engine: Engine, settings: Settings, runner: Runner = run_spec) -
     return run_id
 
 
+STALE_RUNNING_ERROR = (
+    "worker 重启时发现该任务仍在运行（进程可能因内存超限等被强制结束），已标记失败"
+)
+
+
+def fail_stale_running(engine: Engine) -> list[int]:
+    """启动时把遗留的 running 任务标为失败（只有一个 worker，启动时不可能有正在跑的任务）。"""
+    with Session(engine) as session, session.begin():
+        ids = list(session.scalars(select(BacktestRun.id).where(BacktestRun.status == "running")))
+        for run_id in ids:
+            fail_run(session, run_id, STALE_RUNNING_ERROR)
+    for run_id in ids:
+        log.warning("回测 #%s 遗留为 running，已标记失败", run_id)
+    return ids
+
+
+class Backfill(Protocol):
+    def maybe_step(self) -> None: ...
+
+
+def worker_tick(process: Callable[[], int | None], backfill: Backfill | None) -> int | None:
+    """处理一个回测任务；队列为空时让补数器补一步（服务器回测数据，#66）。"""
+    run_id = process()
+    if run_id is None and backfill is not None:
+        backfill.maybe_step()
+    return run_id
+
+
 class _Stop:
     requested = False
 
@@ -82,9 +114,11 @@ def main(argv: list[str] | None = None) -> int:
     stop = _Stop()
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    log.info("backtest-worker 启动")
+    fail_stale_running(engine)
+    backfill = make_runner(settings, get_calendar())
+    log.info("backtest-worker 启动%s", "（空闲时补齐 Tiingo 回测数据）" if backfill else "")
     while not stop.requested:
-        if process_one(engine, settings) is None:
+        if worker_tick(lambda: process_one(engine, settings), backfill) is None:
             if args.once:
                 break
             time.sleep(args.poll_seconds)
