@@ -66,7 +66,7 @@ describe("BacktestPage", () => {
     expect(boxes[5]).toBeChecked();
     for (const [input] of fetch.mock.calls) {
       const u = new URL(String(input), "http://x");
-      if (u.pathname === "/api/backtests/equity") expect(u.searchParams.getAll("ids").length).toBeLessThanOrEqual(5);
+      if (u.pathname === "/api/backtests/compare") expect(u.searchParams.getAll("ids").length).toBeLessThanOrEqual(5);
     }
   });
 
@@ -126,7 +126,6 @@ describe("BacktestPage", () => {
     expect(screen.getByText("动量回看（交易日）")).toBeInTheDocument();
     await user.selectOptions(screen.getByRole("combobox"), "combo");
     expect(screen.queryByText("动量回看（交易日）")).not.toBeInTheDocument();
-    expect(screen.getByText(/参数沿用服务器配置/)).toBeInTheDocument();
   });
 
   it("end date input is limited to data_end", async () => {
@@ -232,7 +231,11 @@ describe("BacktestPage", () => {
     expect(within(tab).getByText("top_n").closest("tr")).toHaveClass("changed");
     expect(within(tab).getByText("sma").closest("tr")).not.toHaveClass("changed");
     expect(within(tab).getByText(/--param top_n=12/)).toBeInTheDocument();
-    expect(within(tab).getByText(/运行日志未记录/)).toBeInTheDocument();
+    expect(within(tab).getByText("abc1234")).toBeInTheDocument();
+    expect(within(tab).getByText(/开始回测/)).toBeInTheDocument();
+    await userEvent.click(within(tab).getByRole("checkbox", { name: "只看警告" }));
+    expect(within(tab).queryByText(/开始回测/)).not.toBeInTheDocument();
+    expect(within(tab).getByText(/NVDA 数据中断/)).toBeInTheDocument();
   });
 
   it("compare button disabled in single view and bench note shown", async () => {
@@ -306,5 +309,82 @@ describe("BacktestPage", () => {
     await user.click(screen.getByText("#127"));
     const t2 = await screen.findByTestId("trade-table");
     expect(within(t2).getAllByRole("row").some((r) => r.getAttribute("aria-selected") === "true")).toBe(false);
+  });
+
+  const COMPARE = {
+    note: null, start: "2019-01-02", end: "2024-12-31", skipped: [126],
+    runs: [{ id: 128, strategy: "combo", start: "2016-10-28", end: "2026-10-29" }, { id: 127, strategy: "combo", start: "2019-01-02", end: "2024-12-31" }],
+    dates: ["2019-01-02", "2019-01-03"], series: { "128": [1, 1.01], "127": [1, 0.99] }, drawdown: { "128": [0, 0], "127": [0, -0.01] },
+    metrics: [
+      { key: "cagr", label: "年化", kind: "pct", scope: "common", values: { "128": 0.12, "127": 0.08 }, best: 128 },
+      { key: "max_drawdown", label: "最大回撤", kind: "pct", scope: "common", values: { "128": -0.3, "127": -0.2 }, best: 127 },
+      { key: "trades", label: "交易笔数", kind: "int", scope: "full", values: { "128": 37, "127": null }, best: null },
+    ],
+    params: [{ key: "top_n", values: { "128": 10, "127": 12 }, differs: true }, { key: "sma", values: { "128": 120, "127": 120 }, differs: false }],
+    corr: [[1, 0.62], [0.62, 1]],
+  };
+
+  it("compare view", async () => {
+    mockApi({ "/api/backtests": [200, [run(128), run(127)]], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/compare": [200, COMPARE] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    const boxes = await screen.findAllByRole("checkbox");
+    await user.click(boxes[1]);
+    const view = await screen.findByTestId("compare");
+    expect(await within(view).findByText(/共同区间 2019-01-02 → 2024-12-31/)).toBeInTheDocument();
+    expect(within(view).getByText(/已跳过未完成的回测：#126/)).toBeInTheDocument();
+    expect(within(view).getByText("12.00%").closest("td")).toHaveClass("best");
+    expect(within(view).getByText("-20.00%").closest("td")).toHaveClass("best");
+    expect(within(view).getByText("top_n").closest("tr")).toHaveClass("changed");
+    expect(within(view).getByText("sma").closest("tr")).not.toHaveClass("changed");
+    expect(within(view).getAllByText("0.62")).toHaveLength(2);
+    expect(within(view).getByText("（全区间）")).toBeInTheDocument();
+  });
+
+  it("compare view shows note when no overlap", async () => {
+    mockApi({ "/api/backtests": [200, [run(128), run(127)]], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/compare": [200, { note: "所选回测没有共同区间（至少需要 20 个交易日重叠）", skipped: [], runs: [], dates: [], series: {}, drawdown: {}, metrics: [], params: [], corr: [] }] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click((await screen.findAllByRole("checkbox"))[1]);
+    expect(await screen.findByText(/没有共同区间/)).toBeInTheDocument();
+  });
+
+  const SCHEMA = {
+    combo: [
+      { key: "momentum_weight", group: null, type: "float", default: 0.4 },
+      { key: "top_n", group: "momentum", type: "int", default: 4 },
+      { key: "stop_pct", group: "swing", type: "float", default: 0.07 },
+      { key: "stocks", group: "swing", type: "list", default: ["AAPL", "NVDA"] },
+      { key: "use_inverse", group: "swing", type: "bool", default: false },
+    ],
+    etf_momentum: [],
+  };
+
+  it("drawer generates combo params and submits only changes", async () => {
+    const fetch = mockApi({ "/api/backtests": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/param-schema": [200, SCHEMA], "POST /api/backtests": [201, { id: 9 }] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click(await screen.findByRole("button", { name: "+ 新建回测" }));
+    await user.selectOptions(screen.getByRole("combobox"), "combo");
+    const dlg = screen.getByRole("dialog");
+    expect(await within(dlg).findByText("波段仓（swing）")).toBeInTheDocument();
+    expect(within(dlg).getByText(/默认值与服务器配置一致/)).toBeInTheDocument();
+    const stop = within(dlg).getByLabelText("swing.stop_pct");
+    await user.clear(stop);
+    await user.type(stop, "0.05");
+    await user.click(within(dlg).getByRole("button", { name: "提交到队列" }));
+    const post = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST");
+    const body = JSON.parse(String((post![1] as RequestInit).body));
+    expect(body.strategy).toBe("combo");
+    expect(body.params).toEqual({ swing: { stop_pct: 0.05 } });
+  });
+
+  it("drawer blocks empty number fields", async () => {
+    const fetch = mockApi({ "/api/backtests": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/param-schema": [200, SCHEMA], "POST /api/backtests": [201, { id: 9 }] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click(await screen.findByRole("button", { name: "+ 新建回测" }));
+    await user.selectOptions(screen.getByRole("combobox"), "combo");
+    const dlg = screen.getByRole("dialog");
+    await user.clear(await within(dlg).findByLabelText("momentum.top_n"));
+    await user.click(within(dlg).getByRole("button", { name: "提交到队列" }));
+    expect(await within(dlg).findByText(/momentum.top_n 须为数字/)).toBeInTheDocument();
+    expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(false);
   });
 });

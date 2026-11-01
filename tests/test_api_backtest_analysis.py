@@ -84,7 +84,12 @@ def setup(
                                               "universe": ["SPY", "QQQ"], "safe_asset": "SHY",
                                               "_costs": costs},
                           IDX[0].date(), IDX[-1].date(), status="running")  # fmt: skip
-        meta = {"cagr": 0.1, "data": {"source": "yfinance", "data_end": "2026-05-01"}}
+        meta = {
+            "cagr": 0.1,
+            "data": {"source": "yfinance", "data_end": "2026-05-01"},
+            "code_version": "abc1234",
+            "log": ["10:00:00 INFO 开始", "10:00:01 WARNING 数据中断"],
+        }
         complete_run(s, done, meta, eq, dd, sample_ledger())
         running = create_run(s, "combo", {}, date(2020, 1, 2), date(2021, 1, 4), status="running")
     eng.dispose()
@@ -112,6 +117,7 @@ def test_analysis_done(setup: tuple[TestClient, dict[str, int]]) -> None:
     assert params["lookback"]["changed"] is True and params["lookback"]["value"] == 99
     assert "_cash" not in params and d["initial_cash"] == 100000
     assert d["repro"]["source"] == "yfinance" and d["repro"]["data_end"] == "2026-05-01"
+    assert d["repro"]["code_version"] == "abc1234" and len(d["repro"]["log"]) == 2
     cmd = d["repro"]["command"]
     assert cmd.startswith("uv run quant backtest --strategy etf_momentum --start 2016-01-04")
     assert "--param lookback=99" in cmd and "--cash 100000" in cmd and "--slippage 0.0005" in cmd
@@ -226,3 +232,50 @@ def test_old_run_without_ledger(setup: tuple[TestClient, dict[str, int]], db_url
     a = client.get(f"/api/backtests/{rid}/analysis").json()
     assert {s["key"]: s for s in a["stats"]}["trades"]["value"] is None
     assert a["returns"]["sleeves"] is None and a["risk"]["timing"] == []
+
+
+def test_compare_endpoint(setup: tuple[TestClient, dict[str, int]], db_url: str) -> None:
+    client, ids = setup
+    eng = create_engine(db_url)
+    eq2 = prices(5, 0.0003)[IDX[800] : IDX[2000]] * 500
+    with Session(eng) as s, s.begin():
+        rid = create_run(s, "etf_momentum", {"lookback": 126, "top_k": 2, "_cash": "50000"},
+                         eq2.index[0].date(), eq2.index[-1].date(), status="running")  # fmt: skip
+        complete_run(s, rid, {"cagr": 0.05}, eq2, eq2 / eq2.cummax() - 1)
+    eng.dispose()
+    d = client.get(
+        "/api/backtests/compare", params={"ids": [ids["done"], rid, ids["running"]]}
+    ).json()
+    assert (
+        d["start"] == eq2.index[0].date().isoformat()
+        and d["end"] == eq2.index[-1].date().isoformat()
+    )
+    assert d["skipped"] == [ids["running"]]
+    assert [r["id"] for r in d["runs"]] == [ids["done"], rid]
+    assert all(s[0] == pytest.approx(1.0) for s in d["series"].values())
+    rows = {r["key"]: r for r in d["metrics"]}
+    assert set(rows["cagr"]["values"]) == {str(ids["done"]), str(rid)}
+    assert rows["max_drawdown"]["best"] in (ids["done"], rid)
+    diff = {p["key"]: p for p in d["params"]}
+    assert diff["lookback"]["differs"] is True and diff["top_k"]["differs"] is False
+    assert d["corr"][0][0] == pytest.approx(1.0) and len(d["corr"]) == 2
+
+
+def test_compare_no_overlap(setup: tuple[TestClient, dict[str, int]], db_url: str) -> None:
+    client, ids = setup
+    eng = create_engine(db_url)
+    late = pd.Series(np.linspace(100, 120, 30), index=pd.bdate_range("2040-01-02", periods=30))
+    with Session(eng) as s, s.begin():
+        rid = create_run(
+            s, "etf_momentum", {}, late.index[0].date(), late.index[-1].date(), status="running"
+        )
+        complete_run(s, rid, {}, late, late / late.cummax() - 1)
+    eng.dispose()
+    d = client.get("/api/backtests/compare", params={"ids": [ids["done"], rid]}).json()
+    assert d["note"] and "共同区间" in d["note"] and d["series"] == {}
+
+
+def test_compare_note_lists_skipped(setup: tuple[TestClient, dict[str, int]]) -> None:
+    client, ids = setup
+    d = client.get("/api/backtests/compare", params={"ids": [ids["done"], ids["running"]]}).json()
+    assert d["note"] and f"#{ids['running']}" in d["note"]

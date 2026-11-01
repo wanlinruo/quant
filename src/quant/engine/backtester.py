@@ -100,6 +100,9 @@ class BacktestResult:
     # #67 B 批：每个信号日的归因（子仓、择时系数、平仓原因）与每日收盘持仓（股数、市值）
     attribution: dict[date, Attribution] = field(default_factory=dict)
     holdings: dict[date, dict[str, tuple[float, float]]] = field(default_factory=dict)
+    # #67 C 批：代码版本与运行日志（run_spec 填写）
+    code_version: str | None = None
+    log: list[str] = field(default_factory=list)
     # 数据来源与覆盖（服务器回测，#66）：source、data_end，候选池策略另有 coverage 等
     data_info: dict[str, Any] = field(default_factory=dict)
 

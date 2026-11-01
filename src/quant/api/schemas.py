@@ -159,6 +159,8 @@ class BacktestSubmit(BaseModel):
     sma_window: int
     cash: Decimal
     costs: CostsIn
+    # 非表单策略（如 combo）的参数覆盖：只含用户改过的键；嵌套组（momentum / swing）只含改过的子键
+    params: dict[str, Any] | None = None
 
 
 class SubmitResult(BaseModel):
@@ -754,6 +756,8 @@ class BtReproOut(BaseModel):
     data_end: str | None
     coverage: Any
     command: str
+    code_version: str | None = None  # 回测时的代码提交号（C 批起记录）
+    log: list[str] = []  # 运行日志（quant.* INFO 及以上，最多约 200 行）
 
 
 class BacktestAnalysis(BaseModel):
@@ -879,3 +883,51 @@ class BacktestPositions(BaseModel):
 class BtSleevesOut(BaseModel):
     dates: list[date]
     series: dict[str, list[float]]  # 子仓累计盈亏 ÷ 初始资金
+
+
+# ---- 回测对比（#67 C 批）----
+
+
+class BtCompareRun(BaseModel):
+    id: int
+    strategy: str
+    start: date
+    end: date
+
+
+class BtCompareMetric(BaseModel):
+    key: str
+    label: str
+    kind: Literal["pct", "ratio", "int"]
+    scope: Literal["common", "full"]  # 共同区间重算 / 各自全区间（交易口径）
+    values: dict[str, float | None]  # 回测编号 → 值
+    best: int | None
+
+
+class BtCompareParam(BaseModel):
+    key: str
+    values: dict[str, Any]
+    differs: bool
+
+
+class BacktestCompare(BaseModel):
+    note: str | None = None
+    start: date | None = None
+    end: date | None = None
+    skipped: list[int] = []
+    runs: list[BtCompareRun] = []
+    dates: list[date] = []
+    series: dict[str, list[float | None]] = {}
+    drawdown: dict[str, list[float | None]] = {}
+    metrics: list[BtCompareMetric] = []
+    params: list[BtCompareParam] = []
+    corr: list[list[float | None]] = []
+
+
+class ParamField(BaseModel):
+    """新建回测表单的一个参数（由策略参数数据类自省；默认值已含服务器配置的覆盖）。"""
+
+    key: str
+    group: str | None  # combo 的子仓参数组：momentum / swing
+    type: Literal["int", "float", "str", "bool", "list"]
+    default: Any
