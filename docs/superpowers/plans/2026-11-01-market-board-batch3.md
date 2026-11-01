@@ -184,6 +184,6 @@ def test_scheduler_includes_stock_data(): ...   # 21:15 ET；JOBS / JOB_FUNCS �
 
 ### Task 6: 联调与验收
 
-- [ ] **Step 1**：`make check` 全部通过（后端带 `QUANT_TEST_DATABASE_URL`）。
-- [ ] **Step 2**：合成数据（沿用第 2 批的 `mkt2`，加 `stocks/*.json` 与子行业）启动面板，在 1280px / 1600px 截个股页：右栏等高、表格不换行、长标题省略。
+- [x] **Step 1**：`make check` 全部通过（后端带 `QUANT_TEST_DATABASE_URL`）。
+- [x] **Step 2**：合成数据（沿用第 2 批的 `mkt2`，加 `stocks/*.json` 与子行业）启动面板，在 1280px / 1600px 截个股页：右栏等高、表格不换行、长标题省略。
 - [ ] **Step 3**：部署后服务器手动运行 `market_data`（生成带 `sector_periods` 的快照）与 `stock_data`，记录耗时、覆盖只数、AAPL / JPM / BRK.B 页面核对，写入 #70。

@@ -128,7 +128,7 @@ export function StockPage() {
       </Grid>
       <Grid>
         <Cell span={9}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%" }}>
             <Panel title="区间表现" right={<span className="muted sm">对比纳指 100（QQQ）</span>}>
               {p && Object.keys(p.periods).length ? (
                 <table className="dt compact">
@@ -185,7 +185,7 @@ export function StockPage() {
           </div>
         </Cell>
         <Cell span={3}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%" }}>
             <Panel title="关键数据">
               {p && q ? (
                 <>

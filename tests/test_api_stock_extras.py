@@ -141,3 +141,15 @@ def test_extras_peers_fill_from_sector_when_few(client: TestClient, tmp_path: Pa
     assert [p["symbol"] for p in d["peers"]][:3] == ["ORCL", "CRM", "ADBE"]
     d = client.get("/api/stock/NVDA/extras").json()  # Semis 只有自己 → 全部用同板块补
     assert [p["symbol"] for p in d["peers"]][:2] == ["AAPL", "MSFT"]
+
+
+def test_extras_bad_news_item_does_not_drop_rest(client: TestClient, tmp_path: Path) -> None:
+    setup(tmp_path)
+    sp = ms.stock_path(tmp_path, "AAPL")
+    assert sp is not None
+    d = json.loads(sp.read_text(encoding="utf-8"))
+    d["news"].append({"time": "2026-10-30T14:60:00+00:00", "headline": "bad"})
+    sp.write_text(json.dumps(d), encoding="utf-8")
+    out = client.get("/api/stock/AAPL/extras").json()
+    assert [n["headline"] for n in out["news"]] == ["Apple Q4 earnings beat"]
+    assert len(out["metrics"]) == len(METRIC_KEYS)

@@ -103,11 +103,16 @@ def stock_extras(data_dir: Path, symbol: str) -> StockExtras:
             metrics.append(MetricOut(key=key, label=label, kind=kind, value=v))
         out["metrics"] = metrics
         out["metrics_updated"] = doc.get("metrics_updated")
+    news = []
+    for n in doc.get("news") or []:
+        try:
+            news.append(NewsItemOut(**n))
+        except (TypeError, ValidationError):
+            continue  # 单条格式不符只跳过这一条
+    out["news"] = news
+    out["news_updated"] = doc.get("news_updated")
     try:
-        out["news"] = [NewsItemOut(**n) for n in doc.get("news") or []]
-        out["news_updated"] = doc.get("news_updated")
         return StockExtras(**out)
-    except (TypeError, ValidationError) as e:
+    except ValidationError as e:
         log.warning("%s 个股文件格式不符：%s", sym, type(e).__name__)
-        return StockExtras(**{**out, "news": [], "news_updated": None, "metrics": [],
-                              "metrics_updated": None})  # fmt: skip
+        return StockExtras(**{**out, "news_updated": None, "metrics_updated": None})
