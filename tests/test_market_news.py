@@ -73,3 +73,34 @@ def test_holdings_feed_only_relevant() -> None:
         [], company, {"AAPL"}, since=T0 - timedelta(days=2), names={"AAPL": "Apple Inc."}
     )
     assert [f.headline for f in feed] == ["AAPL slips", "Apple beats on iPhone sales"]
+
+
+# ---- 终审修复（#79）：相关性匹配 ----
+
+from quant.market.news import mentions  # noqa: E402
+
+
+def test_mentions_punctuated_names() -> None:
+    assert mentions("McDonald's beats estimates", "MCD", "McDonald's")
+    assert mentions("Coca-Cola raises outlook", "KO", "Coca-Cola Company (The)")
+    assert mentions("Lowe's shares slip", "LOW", "Lowe's")
+
+
+def test_mentions_ticker_case_and_short_tickers() -> None:
+    assert not mentions("5 Best Stocks to Buy for a Rally", "A", "Agilent Technologies")
+    assert not mentions("Why It Pays to Wait", "IT", "Gartner")
+    assert not mentions("Markets Turn On Fed Comments", "ON", "ON Semiconductor")
+    assert mentions("Agilent (A) tops estimates", "A", "Agilent Technologies")
+    assert mentions("Ford (F) recalls trucks", "F", "Ford Motor Company")
+    assert mentions("NVDA rallies", "NVDA", "Nvidia")
+    assert not mentions("nvda lower", "NVDA", None)
+    assert mentions("GE Aerospace jumps", "GE", "GE Aerospace") and mentions("KO beats", "KO", None)
+
+
+def test_mentions_generic_first_word_and_aliases() -> None:
+    assert not mentions("American Airlines cuts routes", "AXP", "American Express")
+    assert mentions("American Express card spending rises", "AXP", "American Express")
+    assert not mentions("Home prices climb", "HD", "Home Depot (The)")
+    assert mentions("Disney parks revenue jumps", "DIS", "Walt Disney Company (The)")
+    assert mentions("Google unveils new chip", "GOOGL", "Alphabet Inc. (Class A)")
+    assert mentions("3M settles lawsuit", "MMM", "3M")

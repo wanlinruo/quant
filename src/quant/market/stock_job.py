@@ -19,7 +19,7 @@ from quant.data.market_store import ETF_SET, STOCK_SYMBOL_RE, load_gics, market_
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.finnhub import FinnhubAuthError, NewsRaw
 from quant.data.quota import atomic_write_text
-from quant.market.news import EARNINGS_RE, NewsItem, _mentions
+from quant.market.news import EARNINGS_RE, NewsItem, mentions
 from quant.market.stock_metrics import METRIC_KEYS
 
 log = logging.getLogger("quant.stock_data")
@@ -48,7 +48,7 @@ def _items(symbol: str, name: str | None, raw: list[NewsRaw]) -> list[dict[str, 
     seen: set[str] = set()
     for x in sorted(raw, key=lambda x: x.time, reverse=True):
         key = x.headline.strip().lower()
-        if key in seen or not _mentions(x.headline, symbol, name):
+        if key in seen or not mentions(x.headline, symbol, name):
             continue
         seen.add(key)
         cat = "earnings" if EARNINGS_RE.search(x.headline) else "company"

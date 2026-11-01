@@ -4,6 +4,9 @@
 # 拉取镜像 → 启动 postgres → Alembic 迁移 → 启动全部服务 → 安装每日备份 cron。
 # scheduler 被重启时，执行中的任务会在重启后先恢复券商订单状态再继续。
 set -euo pipefail
+# 部署可能要等 scheduler 跑完当前任务（stop_grace_period 20 分钟）；SSH 断开也要把部署做完，
+# 否则 scheduler 可能停下后不被重建（#79）
+trap '' HUP
 IMAGE=${1:?用法：remote_deploy.sh <镜像>}
 cd /opt/quant
 [[ -f .env ]] || { echo "缺少 /opt/quant/.env（见 deploy/server_init.md）" >&2; exit 1; }
@@ -18,6 +21,11 @@ C=(docker compose -f compose.yml -f compose.server.yml)
 "${C[@]}" pull --quiet
 "${C[@]}" up -d --wait postgres
 "${C[@]}" run --rm --no-deps dashboard alembic upgrade head
+if [[ -n "$("${C[@]}" ps -q scheduler 2>/dev/null)" ]]; then
+  echo "停止 scheduler：如有任务在跑会等它结束（最多 20 分钟）……"
+  "${C[@]}" stop scheduler
+  echo "scheduler 已停止"
+fi
 "${C[@]}" up -d --remove-orphans --wait
 docker image prune -f >/dev/null
 

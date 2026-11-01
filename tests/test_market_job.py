@@ -281,3 +281,26 @@ def test_empty_day_not_requested_again(tmp_path: Path) -> None:
     assert d not in c.days
     run(tmp_path, FakeClient(empty={TODAY}), today=TODAY)
     assert TODAY not in ms.MarketStore(tmp_path).empty_days()
+
+
+def test_past_date_rerun_checks_splits_up_to_real_day_first(tmp_path: Path) -> None:
+    """补跑过去日期前，先把拆股核对到真实的最近交易日，避免补回来的（已调整的）数据再被换算。"""
+    run(tmp_path, SplitClient())
+    nxt = CAL.next_trading_day(TODAY)
+    order: list[str] = []
+
+    class C(SplitClient):
+        def splits(self, day: date) -> list[Split]:
+            order.append(f"split {day}")
+            return super().splits(day)
+
+        def grouped_daily(self, day: date) -> pd.DataFrame:
+            order.append(f"day {day}")
+            return super().grouped_daily(day)
+
+    run_market_data(C(), tmp_path, CAL.previous_trading_day(TODAY), CAL, SETTINGS, holdings=set(),
+                    fetch_text=lambda url: GICS_CSV, now_day=nxt)  # fmt: skip
+    assert f"split {nxt}" in order
+    first_day = next(i for i, x in enumerate(order) if x.startswith("day "))
+    assert order.index(f"split {nxt}") < first_day
+    assert ms.MarketStore(tmp_path).splits_checked() == nxt

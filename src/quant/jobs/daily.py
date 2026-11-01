@@ -505,8 +505,9 @@ def market_data(ctx: JobContext, d: date) -> str:
     from quant.market.job import run_market_data
 
     holdings = _all_holdings(ctx)
+    now_day = ctx.calendar.last_completed_trading_day(ctx.now())
     return run_market_data(MassiveClient(key), ctx.settings.data_dir, d, ctx.calendar,
-                           ctx.settings.board, holdings)  # fmt: skip
+                           ctx.settings.board, holdings, now_day=now_day)  # fmt: skip
 
 
 def market_extras(ctx: JobContext, d: date) -> str:
