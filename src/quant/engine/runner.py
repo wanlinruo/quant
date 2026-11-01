@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -139,7 +141,63 @@ def _backtest_events(data_dir: Path, tiingo: bool) -> tuple[EventCalendar, str]:
     return cal, flag
 
 
+MAX_LOG_LINES = 200
+
+
+def trim_log(lines: list[str], limit: int = MAX_LOG_LINES) -> list[str]:
+    """日志超过 limit 行时保留前后各一半，中间注明省略。"""
+    if len(lines) <= limit:
+        return lines
+    half = limit // 2
+    return [*lines[:half], f"… 省略 {len(lines) - 2 * half} 行 …", *lines[-half:]]
+
+
+def code_version() -> str | None:
+    """镜像构建时注入的提交号（QUANT_GIT_SHA）；本地开发取 git；都没有为 None。"""
+    sha = os.environ.get("QUANT_GIT_SHA")
+    if sha and sha != "unknown":
+        return sha[:12]
+    try:
+        here = Path(__file__).resolve().parent
+        cmd = ["git", "rev-parse", "--short", "HEAD"]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=5, cwd=here, check=True)
+        return out.stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+class _Collect(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.INFO)
+        self.lines: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        t = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
+        self.lines.append(f"{t} {record.levelname} {record.getMessage()}")
+
+
 def run_spec(
+    spec: BacktestSpec,
+    settings: Settings,
+    provider: DataProvider | None = None,
+    refresh_data: bool = False,
+) -> BacktestResult:
+    """准备数据并回测；同时记录代码版本与运行期间 quant.* 的 INFO 及以上日志（最多 200 行）。"""
+    handler = _Collect()
+    root = logging.getLogger("quant")
+    old_level = root.level
+    root.addHandler(handler)
+    if root.getEffectiveLevel() > logging.INFO:
+        root.setLevel(logging.INFO)
+    try:
+        result = _run_spec(spec, settings, provider, refresh_data)
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(old_level)
+    return replace(result, code_version=code_version(), log=trim_log(handler.lines))
+
+
+def _run_spec(
     spec: BacktestSpec,
     settings: Settings,
     provider: DataProvider | None = None,
@@ -259,12 +317,14 @@ def _stale_holdings(
 
 
 def save_result(session: Session, run_id: int, result: BacktestResult) -> None:
-    metrics = {
+    metrics: dict[str, Any] = {
         **result.metrics.to_dict(),
         "benchmark": result.benchmark.to_dict() if result.benchmark else None,
     }
     if result.data_info:
         metrics["data"] = result.data_info
+    metrics["code_version"] = result.code_version
+    metrics["log"] = result.log
     try:
         ledger = build_ledger(result.holdings, result.fills, result.attribution, result.equity)
     except Exception as e:  # 交易切分出错只降级：净值与指标照常保存

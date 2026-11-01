@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { BacktestAnalysis } from "../../api/types";
 import { EmptyState } from "../../components/EmptyState";
 import { Cell, Grid } from "../../components/Grid";
@@ -318,7 +319,7 @@ export function ParamsTab({ a }: A) {
                 <tr><td className="muted">数据来源</td><td className="r">{rp?.source ?? "—"}</td></tr>
                 <tr><td className="muted">数据截止</td><td className="r">{rp?.data_end ?? "—"}</td></tr>
                 <tr><td className="muted">候选池覆盖率</td><td className="r">{typeof rp?.coverage === "number" ? pct(rp.coverage, 1) : "—"}</td></tr>
-                <tr><td className="muted">代码版本</td><td className="r muted">未记录（C 批）</td></tr>
+                <tr><td className="muted">代码版本</td><td className="r num">{rp?.code_version ?? <span className="muted">未记录（此功能上线前的回测）</span>}</td></tr>
               </tbody>
             </table>
             {rp && <pre className="cmd" title="可复制的命令行">{rp.command}</pre>}
@@ -326,10 +327,23 @@ export function ParamsTab({ a }: A) {
           </Sub>
         </Cell>
       </Grid>
-      <Sub title="运行日志">
-        {a.error ? <pre className="cmd err">{a.error}</pre> : null}
-        <div className="muted sm">运行日志未记录（C 批）</div>
-      </Sub>
+      <RunLog error={a.error} lines={rp?.log ?? []} />
     </div>
+  );
+}
+
+function RunLog({ error, lines }: { error: string | null | undefined; lines: string[] }) {
+  const [warnOnly, setWarnOnly] = useState(false);
+  const shown = warnOnly ? lines.filter((x) => /\b(WARNING|ERROR|CRITICAL)\b/.test(x)) : lines;
+  return (
+    <Sub title="运行日志" note={lines.length ? `${lines.length} 行` : undefined}>
+      {error ? <pre className="cmd err">{error}</pre> : null}
+      {lines.length ? (
+        <>
+          <label className="sm"><input type="checkbox" checked={warnOnly} onChange={(e) => setWarnOnly(e.target.checked)} /> 只看警告</label>
+          <pre className="cmd log">{shown.join("\n") || "（没有警告）"}</pre>
+        </>
+      ) : <div className="muted sm">没有运行日志（此功能上线前的回测）</div>}
+    </Sub>
   );
 }

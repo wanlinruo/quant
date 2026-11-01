@@ -47,6 +47,9 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
+          # 回测记录代码版本（#67）
+          build-args: |
+            GIT_SHA=${{ env.SHA }}
           tags: |
             ghcr.io/${{ github.repository }}:${{ env.SHA }}
             ghcr.io/${{ github.repository }}:main

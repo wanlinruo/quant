@@ -362,3 +362,101 @@ def test_submit_start_before_min_is_422() -> None:
     _, errors = build_submission(_req(start=date(2010, 1, 4)), CostSettings(), LAST,
                                  min_start=date(2014, 7, 1))  # fmt: skip
     assert any("开始日期：不能早于 2014-07-01" in e for e in errors), errors
+
+
+# ---- #67 C 批：按策略生成的参数表单 ----
+
+
+def test_param_schema(client_no_db: TestClient) -> None:
+    d = client_no_db.get("/api/backtests/param-schema").json()
+    combo = {(f["group"], f["key"]): f for f in d["combo"]}
+    assert (
+        combo[(None, "momentum_weight")]["default"] == 0.4
+        and combo[(None, "momentum_weight")]["type"] == "float"
+    )
+    assert combo[("swing", "exit_ma")]["default"] == 10  # V2 默认，不是 SwingParams 的 5
+    assert combo[("swing", "use_inverse")]["type"] == "bool"
+    assert (
+        combo[("swing", "stocks")]["type"] == "list"
+        and "NVDA" in combo[("swing", "stocks")]["default"]
+    )
+    assert combo[("momentum", "top_n")]["default"] == 4
+    swing = {f["key"]: f for f in d["swing_pullback"]}
+    assert swing["exit_ma"]["default"] == 5 and all(f["group"] is None for f in d["swing_pullback"])
+    assert "momentum" not in {f["key"] for f in d["combo"]}
+
+
+def test_param_schema_uses_configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("QUANT_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("QUANT_DATABASE_URL", raising=False)
+    monkeypatch.setenv("TRADING_MODE", "sim")
+    monkeypatch.setenv("QUANT_STRATEGY__NAME", "combo")
+    monkeypatch.setenv(
+        "QUANT_STRATEGY__PARAMS", '{"momentum_weight": 0.5, "momentum": {"top_n": 10}}'
+    )
+    _clear()
+    d = TestClient(create_app()).get("/api/backtests/param-schema").json()
+    _clear()
+    combo = {(f["group"], f["key"]): f for f in d["combo"]}
+    assert (
+        combo[(None, "momentum_weight")]["default"] == 0.5
+        and combo[("momentum", "top_n")]["default"] == 10
+    )
+
+
+def test_submit_combo_with_param_overrides() -> None:
+    req = BacktestSubmit(**{**valid_submit_body(), "strategy": "combo",
+                            "params": {"swing": {"stop_pct": 0.05}}})  # fmt: skip
+    params, errors = build_submission(req, CostSettings(), date(2026, 10, 30),
+                                      strategy_params={"momentum": {"top_n": 10}})  # fmt: skip
+    assert errors == []
+    assert params["swing"] == {"stop_pct": 0.05} and params["momentum"] == {"top_n": 10}
+    bad = BacktestSubmit(**{**valid_submit_body(), "strategy": "combo", "params": {"nope": 1}})
+    _, errors = build_submission(bad, CostSettings(), date(2026, 10, 30))
+    assert errors and "nope" in errors[0]
+    neg = BacktestSubmit(
+        **{**valid_submit_body(), "strategy": "combo", "params": {"momentum_weight": -1}}
+    )
+    _, errors = build_submission(neg, CostSettings(), date(2026, 10, 30))
+    assert errors
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"momentum": {"top_n": -1}},
+        {"momentum": {"top_n": None}},
+        {"momentum": {"top_n": {"x": 1}}},
+        {"momentum": {"top_n": 2.5}},
+        {"swing": {"stop_pct": "abc"}},
+        {"swing": {"stop_pct": float("nan")}},
+        {"swing": {"stocks": "AAPL"}},
+        {"swing": {"stocks": ["AAPL", "bad sym"]}},
+        {"swing": {"confirm": "bogus"}},
+        {"swing": {"trend_ma": -500}},
+        {"swing": {"use_inverse": "yes"}},
+        {"swing": {"nested": {"deep": 1}}},
+        {"vol_symbol": "x" * 20000},
+    ],
+)
+def test_submit_rejects_bad_param_values(params: dict[str, object]) -> None:
+    base = BacktestSubmit(**{**valid_submit_body(), "strategy": "combo"})
+    req = base.model_copy(update={"params": params})  # 绕过请求模型校验，直接测提交逻辑
+    _, errors = build_submission(req, CostSettings(), date(2026, 10, 30))
+    assert errors, params
+
+
+def test_submit_accepts_good_param_values() -> None:
+    swing = {"stop_pct": 0.05, "stocks": ["aapl", "NVDA"], "confirm": "close_strength"}
+    params_in = {"momentum": {"top_n": 8}, "swing": swing}
+    req = BacktestSubmit(**{**valid_submit_body(), "strategy": "combo", "params": params_in})
+    params, errors = build_submission(req, CostSettings(), date(2026, 10, 30))
+    assert errors == [] and params["swing"]["stocks"] == ["AAPL", "NVDA"]
+
+
+def test_form_strategy_rejects_params() -> None:
+    req = BacktestSubmit(
+        **{**valid_submit_body(), "strategy": "etf_momentum", "params": {"nope": 1}}
+    )
+    _, errors = build_submission(req, CostSettings(), date(2026, 10, 30))
+    assert errors

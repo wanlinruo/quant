@@ -219,3 +219,15 @@ def test_episode_qqq_by_date_with_late_benchmark() -> None:
 def test_checks_none_when_benchmark_segment_missing() -> None:
     sp = ba.split_metrics(EQ, QQQ["2023":])  # QQQ 只有样本外
     assert ba.checks(sp)[3]["passed"] is None
+
+
+# ---- C 批：对比 ----
+
+
+def test_common_range_and_monthly_corr() -> None:
+    a, b = EQ, QQQ["2020-01-01":"2023-12-31"]
+    rng = ba.common_range([a, b])
+    assert rng is not None and rng == (b.index[0], b.index[-1])
+    assert ba.common_range([EQ[:"2019-12-31"], QQQ["2021-01-01":]]) is None
+    m = ba.monthly_corr([a, b, a])
+    assert m[0][0] == pytest.approx(1.0) and m[0][2] == pytest.approx(1.0) and m[0][1] == m[1][0]
