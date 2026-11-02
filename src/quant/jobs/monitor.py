@@ -12,18 +12,19 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import shutil
 import signal
 import sys
 import time
+import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import FrameType
 from typing import Any, Protocol
 
-import httpx
 from sqlalchemy import Engine, delete
 from sqlalchemy.orm import Session
 
@@ -44,12 +45,11 @@ class DockerApi(Protocol):
 
 class HttpDocker:
     def __init__(self, base_url: str) -> None:
-        self.client = httpx.Client(base_url=base_url, timeout=10)
+        self.base_url = base_url.rstrip("/")
 
     def get(self, path: str) -> Any:
-        r = self.client.get(path)
-        r.raise_for_status()
-        return r.json()
+        with urllib.request.urlopen(self.base_url + path, timeout=10) as r:
+            return json.loads(r.read())
 
 
 def parse_cpu(stat: str) -> tuple[int, int]:
