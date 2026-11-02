@@ -874,7 +874,7 @@ export interface SysCardOut {
 
 export interface SysCellOut {
   date: string;
-  status: "success" | "retry_success" | "failed" | "running" | "missing" | "pending" | "na";
+  status: "success" | "retry_success" | "failed" | "running" | "missing" | "pending" | "blocked" | "na";
   attempts?: number;
   duration_s?: number | null;
 }

@@ -60,6 +60,15 @@ WEEK = "一二三四五六日"
 NO_DB = "未配置数据库（QUANT_DATABASE_URL），只能显示日历与本地数据文件"
 
 
+# 与 scheduler 一致：daily_report 在 daily_execute 结束（成功或失败）后运行；
+# daily_signal 只在 daily_data 成功后运行。
+UPSTREAM = {
+    "daily_report": ("daily_execute", ("success", "failed")),
+    "daily_signal": ("daily_data", ("success",)),
+}
+GRACE = timedelta(minutes=10)  # 调度每 30 秒检查一次，计划时间后留出余量
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -99,12 +108,19 @@ def _grid(
             n = counts.get((job, d), 0)
             if run is None:
                 planned = plans[d].get(job)
+                up = UPSTREAM.get(job)
+                up_run = by.get((up[0], d)) if up else None
                 if job not in first or d < first[job]:
                     st = "na"  # 该任务上线之前
-                elif planned is not None and planned > now:
+                elif planned is not None and planned + GRACE > now:
+                    st = "pending"
+                elif up and (up_run is None or up_run.status not in (*up[1], "running")):
+                    st = "blocked"  # 上游没跑或失败，本任务不会运行（上游那一格已告警）
+                elif up_run is not None and up_run.status == "running":
                     st = "pending"
                 else:
-                    st = "missing"
+                    done = up_run.finished_at if up_run else None
+                    st = "pending" if done is not None and done + GRACE > now else "missing"
                 cells.append(SysCellOut(date=d, status=st, attempts=n))
                 continue
             have += 1

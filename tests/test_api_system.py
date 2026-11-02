@@ -101,15 +101,13 @@ def client(db_url: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iter
     _clear()
 
 
-pytestmark = needs_db
-
-
 def ov(client: TestClient, mode: str = "paper") -> dict:  # type: ignore[type-arg]
     r = client.get("/api/system/overview", params={"mode": mode})
     assert r.status_code == 200
     return r.json()  # type: ignore[no-any-return]
 
 
+@needs_db
 def test_banner_error_with_command(client: TestClient) -> None:
     b = ov(client)["banner"]
     assert b["level"] == "error"
@@ -119,6 +117,7 @@ def test_banner_error_with_command(client: TestClient) -> None:
     assert any("熔断开关关闭" in x["text"] for x in b["items"])  # paper 模式下关闭 → 注意
 
 
+@needs_db
 def test_grid_statuses_and_mode(client: TestClient) -> None:
     g = ov(client)["grid"]
     assert len(g["dates"]) == 30 and g["dates"][-1] == "2026-10-28"
@@ -134,6 +133,7 @@ def test_grid_statuses_and_mode(client: TestClient) -> None:
     assert {c["date"]: c for c in live["daily_data"]["cells"]}["2026-10-28"]["status"] == "failed"
 
 
+@needs_db
 def test_today_timeline(client: TestClient) -> None:
     t = {x["job"]: x for x in ov(client)["timeline"]}
     assert (
@@ -146,6 +146,7 @@ def test_today_timeline(client: TestClient) -> None:
     assert t["market_data"]["status"] == "na"  # 该账户从未运行过这个任务
 
 
+@needs_db
 def test_cards_risk_events_queue_upcoming(client: TestClient) -> None:
     d = ov(client)
     cards = {c["key"]: c for c in d["cards"]}
@@ -166,14 +167,16 @@ def test_cards_risk_events_queue_upcoming(client: TestClient) -> None:
         days[0]["date"] == "2026-10-28" and len([x for x in days if "休市" not in x["tags"]]) == 10
     )
     assert any("月末调仓" in x["tags"] for x in days)  # 10-30 是月末交易日
-    assert any(x["date"] == "2026-11-26" for x in days) is False or True
+    assert all(x["date"] <= "2026-11-10" for x in days)  # 10 个交易日内，不含 11-26
 
 
+@needs_db
 def test_sources_pending_without_files(client: TestClient) -> None:
     src = {s["key"]: s for s in ov(client)["sources"]}
     assert src["market"]["status"] == "pending" and src["news"]["status"] == "pending"
 
 
+@needs_db
 def test_job_run_detail(client: TestClient) -> None:
     r = client.get(
         "/api/system/job-runs", params={"mode": "paper", "job": "daily_data", "date": "2026-10-27"}
@@ -201,3 +204,89 @@ def test_overview_without_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     _clear()
     assert r.status_code == 200 and r.json()["banner"]["level"] == "warn"
     assert "数据库" in r.json()["banner"]["items"][0]["text"]
+
+
+def _at(monkeypatch: pytest.MonkeyPatch, now: datetime) -> None:
+    import quant.api.system_view as sv
+
+    monkeypatch.setattr(sv, "_now", lambda: now)
+
+
+def _cells(d: dict, job: str) -> dict:  # type: ignore[type-arg]
+    return {
+        c["date"]: c["status"] for r in d["grid"]["jobs"] if r["job"] == job for c in r["cells"]
+    }
+
+
+@needs_db
+def test_weekend_uses_last_trading_day(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _at(monkeypatch, datetime(2026, 10, 31, 10, 0, tzinfo=ET))  # 周六
+    d = ov(client)
+    assert d["today"] == "2026-10-30" and d["grid"]["dates"][-1] == "2026-10-30"
+    assert "2026-10-31" not in d["grid"]["dates"]
+    assert _cells(d, "daily_data")["2026-10-30"] == "missing"  # 周五已过计划时间
+    assert not any(c == "pending" for r in d["grid"]["jobs"] for c in [r["cells"][-1]["status"]])
+
+
+@needs_db
+def test_half_day_plan_and_pending(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _at(monkeypatch, datetime(2026, 11, 27, 12, 0, tzinfo=ET))  # 感恩节次日半日市
+    d = ov(client)
+    t = {x["job"]: x for x in d["timeline"]}
+    assert t["daily_data"]["planned_at"].startswith("2026-11-27T13:30")
+    assert t["daily_data"]["status"] == "pending"
+    assert any("半日市" in tag for x in d["upcoming"] for tag in x["tags"])
+
+
+@needs_db
+def test_grace_after_planned_time(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _at(monkeypatch, datetime(2026, 10, 29, 16, 35, tzinfo=ET))  # 计划 16:30，调度每 30 秒检查
+    d = ov(client)
+    assert _cells(d, "daily_data")["2026-10-29"] == "pending"
+    assert not any("已过计划时间" in x["text"] for x in d["banner"]["items"])
+
+
+@needs_db
+def test_downstream_waits_for_upstream(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, db_url: str
+) -> None:
+    eng = create_engine(db_url)
+    t = datetime(2026, 10, 26, 14, tzinfo=UTC)
+    rows = [
+        ("daily_execute", 26, "success"),
+        ("daily_report", 26, "success"),
+        ("daily_signal", 26, "success"),
+        ("daily_execute", 29, "running"),
+        ("daily_data", 29, "failed"),
+    ]
+    with Session(eng) as s, s.begin():
+        for job, day, st in rows:
+            end = None if st == "running" else t
+            s.add(
+                JobRun(
+                    mode="paper",
+                    job_name=job,
+                    trade_date=date(2026, 10, day),
+                    status=st,
+                    started_at=t,
+                    finished_at=end,
+                )
+            )
+    eng.dispose()
+    _at(monkeypatch, datetime(2026, 10, 29, 18, 0, tzinfo=ET))
+    d = ov(client)
+    assert _cells(d, "daily_report")["2026-10-29"] == "pending"  # 执行还在跑（轮询成交）
+    assert _cells(d, "daily_report")["2026-10-27"] == "blocked"  # 当天执行没跑
+    assert _cells(d, "daily_signal")["2026-10-29"] == "blocked"  # daily_data 失败，信号不会运行
+    texts = [x["text"] for x in d["banner"]["items"]]
+    assert not any(x.startswith(("daily_report", "daily_signal")) for x in texts if "未运行" in x)
+    assert any("daily_data" in x and x.startswith("daily_data") for x in texts)
+
+
+@needs_db
+def test_timeline_and_risk_follow_mode(client: TestClient) -> None:
+    live = ov(client, "live")
+    t = {x["job"]: x for x in live["timeline"]}
+    assert t["daily_data"]["status"] == "failed" and t["daily_signal"]["status"] == "na"
+    risk = {r["label"]: r for r in live["risk"]}
+    assert risk["近 30 天被拒订单"]["used"] == 0

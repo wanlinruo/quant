@@ -5,7 +5,7 @@ import { formatDateTimeET } from "../../lib/time";
 import { duration, STATUS_TEXT } from "./labels";
 
 type Pick = { job: string; date: string };
-const NO_DETAIL = new Set(["na", "pending", "missing"]);
+const NO_DETAIL = new Set(["na", "pending", "missing", "blocked"]);
 
 /** 近 30 个交易日 × 任务；点格子看那次运行的每次尝试。 */
 export function JobGrid({ grid, onPick }: { grid: SysGridOut; onPick: (p: Pick) => void }) {
@@ -51,7 +51,7 @@ export function JobGrid({ grid, onPick }: { grid: SysGridOut; onPick: (p: Pick) 
         </tbody>
       </table>
       <div className="jg-legend muted">
-        {(["success", "retry_success", "failed", "running", "missing", "pending", "na"] as const).map((s) => (
+        {(["success", "retry_success", "failed", "running", "missing", "blocked", "pending", "na"] as const).map((s) => (
           <span key={s}><i className={`jc ${s}`} />{STATUS_TEXT[s]}</span>
         ))}
       </div>

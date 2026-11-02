@@ -217,7 +217,7 @@ pre.cmd.log { max-height: 260px; overflow: auto; white-space: pre; user-select: 
 .jc:disabled { cursor: default; }
 .jc.success { background: #16a34a; } .jc.retry_success { background: #86efac; } .jc.failed { background: #ef4444; }
 .jc.running { background: #3b82f6; } .jc.missing { background: transparent; box-shadow: inset 0 0 0 1px #facc15; }
-.jc.pending { background: #222735; } .jc.na { background: transparent; box-shadow: inset 0 0 0 1px #1f2330; }
+.jc.pending { background: #222735; } .jc.blocked { background: repeating-linear-gradient(45deg, #2a2e39 0 3px, #161a24 3px 6px); } .jc.na { background: transparent; box-shadow: inset 0 0 0 1px #1f2330; }
 .jg-legend { display: flex; gap: 12px; margin-top: 8px; font-size: 11px; flex-wrap: wrap; }
 .jg-legend span { display: inline-flex; align-items: center; gap: 4px; } .jg-legend .jc { width: 10px; height: 10px; display: inline-block; }
 .sys-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 480px; }

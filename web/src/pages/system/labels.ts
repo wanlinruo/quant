@@ -1,6 +1,6 @@
 export const STATUS_TEXT: Record<string, string> = {
   success: "成功", retry_success: "重试后成功", failed: "失败", running: "运行中",
-  missing: "未运行", pending: "未到时间", na: "未上线",
+  missing: "未运行", pending: "未到时间", blocked: "上游未完成", na: "未上线",
 };
 
 export const SOURCE_TEXT: Record<string, [string, string]> = {

@@ -957,7 +957,9 @@ class SysCardOut(BaseModel):
 
 class SysCellOut(BaseModel):
     date: date
-    status: Literal["success", "retry_success", "failed", "running", "missing", "pending", "na"]
+    status: Literal[
+        "success", "retry_success", "failed", "running", "missing", "pending", "blocked", "na"
+    ]
     attempts: int = 0
     duration_s: float | None = None
 
