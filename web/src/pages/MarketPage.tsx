@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import type {
   AccountPoint,
@@ -25,7 +25,7 @@ import { CandleChart } from "../charts/CandleChart";
 import { LineChart } from "../charts/LineChart";
 import { useApi } from "../hooks/useApi";
 import { compact, money, num, pct, signedMoney, signedPct } from "../lib/format";
-import { etParts } from "../lib/time";
+import { etParts, formatDateTimeET } from "../lib/time";
 import { useShell } from "../shell";
 
 // 行情条 10 项的固定顺序：ETF 代理来自 market_data 快照，宏观项来自 market_extras（FRED / Coinbase）
@@ -110,8 +110,8 @@ function filterMovers(all: MoverOut[], f: FilterKey, mine: Set<string>): MoverOu
   }
 }
 
-type Full = Required<Omit<MarketOverview, "breadth" | "as_of" | "generated_at" | "coverage">> &
-  Pick<MarketOverview, "breadth" | "as_of" | "generated_at" | "coverage">;
+type Full = Required<Omit<MarketOverview, "breadth" | "as_of" | "generated_at" | "coverage" | "intraday_time">> &
+  Pick<MarketOverview, "breadth" | "as_of" | "generated_at" | "coverage" | "intraday_time">;
 
 /** 快照有数据时补齐可选字段；pending 或未加载时为 null。 */
 function full(m: MarketOverview | null): Full | null {
@@ -121,13 +121,22 @@ function full(m: MarketOverview | null): Full | null {
     coverage: m.coverage, strip: m.strip ?? [], highlights: m.highlights ?? "", breadth: m.breadth,
     styles: m.styles ?? [], sectors: m.sectors ?? [], movers: m.movers ?? [], heatmap: m.heatmap ?? {},
     index_candles: m.index_candles ?? {}, macro: m.macro ?? [], sector_periods: m.sector_periods ?? {},
+    intraday: m.intraday ?? false, intraday_time: m.intraday_time,
   };
 }
 
 /** 市场首页（设计 5.1，原型 v4）：盘后复盘，数据来自 market_data 任务的快照。 */
+const OVERVIEW_REFRESH_MS = import.meta.env.MODE === "test" ? 200 : 3 * 60_000;
+
 export function MarketPage() {
   const { account } = useShell();
   const market = useApi<MarketOverview>("/api/market/overview");
+  // 盘中快照约每 10 分钟更新（#93）：打开着的页面定时重新读取（读的是预计算文件，开销很小）
+  const { reload: reloadMarket } = market;
+  useEffect(() => {
+    const t = setInterval(reloadMarket, OVERVIEW_REFRESH_MS);
+    return () => clearInterval(t);
+  }, [reloadMarket]);
   const holdings = useApi<HoldingRow[]>(`/api/portfolio/${account}/holdings`);
   const m = useMemo(() => full(market.data), [market.data]);
   const mine = useMemo(() => new Set((holdings.data ?? []).map((h) => h.symbol)), [holdings.data]);
@@ -163,7 +172,13 @@ export function MarketPage() {
       {m && (
         <div className="sm highlights">
           <span>{m.highlights}</span>
-          <span className="muted">数据截至 {m.as_of}（美东收盘）</span>
+          {m.intraday && m.intraday_time ? (
+            <span className="muted">
+              盘中 · 截至 {formatDateTimeET(m.intraday_time)} ET · 约每 10 分钟更新（Finnhub，仅供查看）· 成交量相关指标收盘后更新
+            </span>
+          ) : (
+            <span className="muted">数据截至 {m.as_of}（美东收盘）</span>
+          )}
           {m.stale && <span className="pill warn">今日数据尚未发布，显示上一交易日</span>}
         </div>
       )}

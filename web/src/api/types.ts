@@ -398,7 +398,7 @@ export interface CandleOut {
   high: number;
   low: number;
   close: number;
-  volume: number;
+  volume?: number | null;
 }
 
 export interface ClosedTradeOut {
@@ -582,6 +582,8 @@ export interface MarketOverview {
   index_candles?: Record<string, CandleOut[]>;
   macro?: TickerItemOut[];
   sector_periods?: Record<string, Record<string, number | null>>;
+  intraday?: boolean;
+  intraday_time?: string | null;
 }
 
 export interface Meta {
