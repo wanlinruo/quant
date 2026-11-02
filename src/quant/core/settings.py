@@ -135,6 +135,12 @@ class StrategySettings(_Section):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+class QuotesSettings(_Section):
+    """面板盘中行情（#93，只供查看）：除指数与持仓外另看的代码。"""
+
+    watchlist: tuple[str, ...] = ()
+
+
 class CostSettings(_Section):
     """回测成本模型（PROJECT_PLAN 第 9 章）。
 
@@ -184,6 +190,7 @@ class Settings(BaseSettings):
     data: DataSettings = DataSettings()
     tiingo: TiingoSettings = TiingoSettings()
     board: BoardSettings = BoardSettings()
+    quotes: QuotesSettings = QuotesSettings()
 
     @field_validator("tiger_props_path")
     @classmethod

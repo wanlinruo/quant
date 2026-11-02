@@ -1165,3 +1165,23 @@ class SysAttemptOut(BaseModel):
     duration_s: float | None
     result: str
     error: str | None
+
+
+class IntradayQuoteOut(BaseModel):
+    symbol: str
+    price: float
+    prev_close: float | None = None
+    change_pct: float | None = None
+    quote_time: datetime
+
+
+class IntradayOut(BaseModel):
+    """盘中行情（#93，只供查看；交易用收盘日线）。"""
+
+    session: Literal["pre", "regular", "post", "overnight", "closed"]
+    session_text: str
+    as_of: datetime | None = None
+    stale: bool = False
+    source: str = "Finnhub"
+    note: str = ""
+    quotes: list[IntradayQuoteOut] = []

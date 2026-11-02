@@ -15,6 +15,7 @@ import type {
 import { ApiState } from "../components/ApiState";
 import { CalendarPanel } from "../components/CalendarPanel";
 import { EmptyState } from "../components/EmptyState";
+import { IntradayPanel } from "../components/IntradayPanel";
 import { Cell, Grid } from "../components/Grid";
 import { NewsPanel } from "../components/NewsPanel";
 import { Panel } from "../components/Panel";
@@ -167,6 +168,7 @@ export function MarketPage() {
           {m.stale && <span className="pill warn">今日数据尚未发布，显示上一交易日</span>}
         </div>
       )}
+      <IntradayPanel holdings={holdings.data ?? []} link={link} />
       <Grid>
         <Cell span={9}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

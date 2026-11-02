@@ -329,3 +329,17 @@ class SystemMetric(Base):
     disk_used: Mapped[int | None] = mapped_column(BigInteger)
     disk_total: Mapped[int | None] = mapped_column(BigInteger)
     extra: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+
+class IntradayQuote(Base):
+    """盘中最新报价（#93，只供面板查看；交易只用日线）。每只标的一行，quotes 服务每分钟覆盖。"""
+
+    __tablename__ = "intraday_quotes"
+
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    price: Mapped[float] = mapped_column(Float)
+    prev_close: Mapped[float | None] = mapped_column(Float)
+    change_pct: Mapped[float | None] = mapped_column(Float)
+    quote_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source: Mapped[str] = mapped_column(String(16))

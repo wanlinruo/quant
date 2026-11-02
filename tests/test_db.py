@@ -32,6 +32,7 @@ TABLES = {
     "backtest_positions",
     "backtest_daily",
     "system_flags",
+    "intraday_quotes",
     "system_metrics",
     "job_attempts",
 }
