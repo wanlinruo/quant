@@ -194,3 +194,15 @@ def test_overview_uses_daily_next_morning_or_when_daily_caught_up(
     _at(monkeypatch, "2026-11-03T13:00:00+00:00")  # 次日盘前：盘中快照是昨天的
     o = client.get("/api/market/overview").json()
     assert o["intraday"] is False and o["as_of"] == "2026-10-30"
+
+
+def test_overview_prefers_daily_once_it_catches_up(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_pair(tmp_path)
+    p = snapshot_path(tmp_path)
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    doc["as_of"] = "2026-11-02"  # 夜间日线已生成
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    _at(monkeypatch, "2026-11-03T02:00:00+00:00")  # 11-02 晚上 21:00 ET
+    assert client.get("/api/market/overview").json()["intraday"] is False

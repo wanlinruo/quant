@@ -8,6 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
@@ -24,6 +25,7 @@ NOW = datetime(2026, 11, 2, 15, 0, tzinfo=UTC)  # 美东 10:00，常规时段
 class FakeFinnhub:
     def __init__(self, missing: set[str] = frozenset(), limit_at: int | None = None) -> None:  # type: ignore[assignment]
         self.missing, self.limit_at = missing, limit_at
+        self.at = NOW
         self.calls: list[str] = []
 
     def quote(self, symbol: str) -> Quote | None:
@@ -33,7 +35,9 @@ class FakeFinnhub:
         if symbol in self.missing:
             return None
         px = 100.0 + len(self.calls)
-        return Quote(px, 99.0, 0.01, NOW - timedelta(seconds=30), open=99.5, high=px + 1, low=99.0)
+        return Quote(
+            px, 99.0, 0.01, self.at - timedelta(seconds=30), open=99.5, high=px + 1, low=99.0
+        )
 
 
 def test_symbols_order_and_cap() -> None:
@@ -153,4 +157,46 @@ def test_stop_requested_ends_round_early(db_url: str, tmp_path: Path) -> None:
     fh = FakeFinnhub()
     quotes.poll_once(eng, fh, (), NOW, tmp_path, stop=lambda: len(fh.calls) >= 3)
     assert len(fh.calls) == 3
+    eng.dispose()
+
+
+# ---- 终审修复 ----
+
+
+@needs_db
+def test_cut_short_round_does_not_overwrite_snapshot(db_url: str, tmp_path: Path) -> None:
+    _market(tmp_path)
+    eng = create_engine(db_url)
+    quotes.poll_once(eng, FakeFinnhub(limit_at=3), (), NOW, tmp_path)  # 第 4 只被限流
+    assert not intraday_snapshot_path(tmp_path).exists()  # 覆盖率不足，不写
+    eng.dispose()
+
+
+@needs_db
+def test_cache_fills_gaps_across_rounds(db_url: str, tmp_path: Path) -> None:
+    _market(tmp_path)
+    eng = create_engine(db_url)
+    cache: dict[str, Quote] = {}
+    quotes.poll_once(eng, FakeFinnhub(), (), NOW, tmp_path, cache=cache)  # 完整一轮
+    path = intraday_snapshot_path(tmp_path)
+    first = path.read_text(encoding="utf-8")
+    quotes.poll_once(
+        eng, FakeFinnhub(limit_at=3), (), NOW + timedelta(minutes=10), tmp_path, cache=cache
+    )
+    second = path.read_text(encoding="utf-8")
+    assert second != first and json.loads(second)["coverage"] == pytest.approx(
+        1.0
+    )  # 缺的用上一轮补
+    eng.dispose()
+
+
+@needs_db
+def test_skip_when_daily_history_is_behind(db_url: str, tmp_path: Path) -> None:
+    _market(tmp_path)  # 日线截至 10-30（周五）
+    eng = create_engine(db_url)
+    later = NOW + timedelta(days=1)  # 11-03：上一交易日 11-02 的日线缺失
+    fh = FakeFinnhub()
+    fh.at = later
+    quotes.poll_once(eng, fh, (), later, tmp_path)
+    assert not intraday_snapshot_path(tmp_path).exists()
     eng.dispose()

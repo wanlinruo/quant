@@ -471,6 +471,9 @@ def build_snapshot(
     strip = ticker_strip(close)
     br = breadth(close, p["high"], p["low"], p["volume"], members)
     secs = sectors(close)
+    text = highlights(strip, secs, br, close)
+    if intraday:
+        text = text.replace(" 收于 ", " 盘中报 ")  # 盘中不说“收于”
     return MarketSnapshot(
         as_of=close.index[-1].date().isoformat(),
         stale=stale,
@@ -478,7 +481,7 @@ def build_snapshot(
         members=len(members),
         coverage=have / len(members) if members else None,
         strip=strip,
-        highlights=highlights(strip, secs, br, close),
+        highlights=text,
         breadth=br,
         styles=styles(close),
         sectors=secs,

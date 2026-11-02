@@ -48,6 +48,7 @@ from quant.market.session import ET, us_session
 log = logging.getLogger("quant.quotes")
 
 MAX_SYMBOLS = 700
+MIN_COVERAGE = 0.9  # 今天有报价的标的比例低于此值时不更新盘中快照
 SOURCE = "finnhub"
 AUTH_BACKOFF = timedelta(minutes=30)
 
@@ -93,6 +94,7 @@ def poll_once(
     now: datetime,
     data_dir: Path,
     stop: Callable[[], bool] = lambda: False,
+    cache: dict[str, Quote] | None = None,
 ) -> int:
     """取一轮报价写入 intraday_quotes，并重算盘中首页快照；返回写入条数。
 
@@ -129,17 +131,37 @@ def poll_once(
                 )
             )
     if gics is not None:
-        _write_snapshot(data_dir, gics, held, got, now)
+        # 跨轮缓存今天的报价：被限流或打断的一轮，缺的标的用上一轮的价格补
+        merged = cache if cache is not None else {}
+        merged.update(got)
+        _write_snapshot(data_dir, gics, held, merged, now, symbols)
     return len(got)
 
 
 def _write_snapshot(
-    data_dir: Path, gics: GicsTable, held: set[str], got: dict[str, Quote], now: datetime
+    data_dir: Path,
+    gics: GicsTable,
+    held: set[str],
+    quotes: dict[str, Quote],
+    now: datetime,
+    symbols: Sequence[str],
 ) -> None:
-    """用今天（美东）的盘中报价拼当日 K 线，重算首页快照；当日已有日线时不写。"""
+    """用今天（美东）的盘中报价拼当日 K 线，重算首页快照。
+
+    不写的情况：覆盖不足 MIN_COVERAGE（避免用残缺数据覆盖完整快照）；已存日线不是上一交易日
+    （否则“1 日”实为多日涨跌）；当日日线已入库。
+    """
     today = now.astimezone(ET).date()
-    fresh = {s: q for s, q in got.items() if q.time.astimezone(ET).date() == today}
-    if not fresh:
+    for s in [s for s, q in quotes.items() if q.time.astimezone(ET).date() != today]:
+        del quotes[s]  # 只留今天的
+    fresh = {s: quotes[s] for s in symbols if s in quotes}
+    if not symbols or len(fresh) / len(symbols) < MIN_COVERAGE:
+        log.info("盘中快照未更新：今天有报价的标的 %d / %d", len(fresh), len(symbols))
+        return
+    store = MarketStore(data_dir)
+    days = store.days()
+    if not days or days[-1] != get_calendar().previous_trading_day(today):
+        log.warning("盘中快照未更新：已存日线截至 %s，不是上一交易日", days[-1] if days else None)
         return
     bar = pd.DataFrame(
         {
@@ -149,7 +171,7 @@ def _write_snapshot(
             "close": {s: q.price for s, q in fresh.items()},
         }
     )
-    snap = build_snapshot(MarketStore(data_dir), gics, today, stale=False, held=held, today_bar=bar)
+    snap = build_snapshot(store, gics, today, stale=False, held=held, today_bar=bar)
     if not snap.intraday:
         return
     doc = snap.to_json()
@@ -189,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     paused_until: datetime | None = None
+    cache: dict[str, Quote] = {}
     log.info("quotes 启动：常规时段每 %.0f 秒采集一次", args.interval)
     while not stop.requested:
         started = time.monotonic()
@@ -206,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
                     now,
                     settings.data_dir,
                     stop=lambda: stop.requested,
+                    cache=cache,
                 )
                 log.info("盘中行情 %d 只", n)
             except FinnhubAuthError as e:

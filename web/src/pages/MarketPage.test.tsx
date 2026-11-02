@@ -269,4 +269,14 @@ describe("MarketPage", () => {
     expect(screen.getByText(/约每 10 分钟更新/)).toBeInTheDocument();
     expect(screen.queryByText(/美东收盘/)).toBeNull();
   });
+
+  it("reloads the overview periodically so intraday data refreshes on an open page", async () => {
+    const fetch = mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW] });
+    renderPage(<MarketPage />, "/");
+    await screen.findByTestId("ticker-strip");
+    const calls = () => fetch.mock.calls.filter(([u]) => new URL(String(u), "http://x").pathname === "/api/market/overview").length;
+    const first = calls();
+    await new Promise((r) => setTimeout(r, 500));
+    expect(calls()).toBeGreaterThan(first);
+  });
 });

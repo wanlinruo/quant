@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import type {
   AccountPoint,
@@ -126,9 +126,17 @@ function full(m: MarketOverview | null): Full | null {
 }
 
 /** 市场首页（设计 5.1，原型 v4）：盘后复盘，数据来自 market_data 任务的快照。 */
+const OVERVIEW_REFRESH_MS = import.meta.env.MODE === "test" ? 200 : 3 * 60_000;
+
 export function MarketPage() {
   const { account } = useShell();
   const market = useApi<MarketOverview>("/api/market/overview");
+  // 盘中快照约每 10 分钟更新（#93）：打开着的页面定时重新读取（读的是预计算文件，开销很小）
+  const { reload: reloadMarket } = market;
+  useEffect(() => {
+    const t = setInterval(reloadMarket, OVERVIEW_REFRESH_MS);
+    return () => clearInterval(t);
+  }, [reloadMarket]);
   const holdings = useApi<HoldingRow[]>(`/api/portfolio/${account}/holdings`);
   const m = useMemo(() => full(market.data), [market.data]);
   const mine = useMemo(() => new Set((holdings.data ?? []).map((h) => h.symbol)), [holdings.data]);

@@ -268,3 +268,13 @@ def test_intraday_bar_ignored_when_day_already_stored(tmp_path: object) -> None:
     assert doc["intraday"] is False  # 当日日线已入库：以日线为准
     spy = next(t for t in doc["strip"] if t["symbol"] == "SPY")
     assert spy["change_pct"] < 0.5
+
+
+def test_intraday_highlights_do_not_say_closed(tmp_path: object) -> None:
+    from datetime import date
+
+    store = _store(tmp_path)
+    prev = frames()["close"].iloc[-1]
+    bar = pd.DataFrame({"open": prev, "high": prev, "low": prev, "close": prev * 1.01})
+    doc = b.build_snapshot(store, GICS, date(2026, 11, 2), stale=False, today_bar=bar).to_json()
+    assert "收于" not in doc["highlights"] and "盘中报" in doc["highlights"]
