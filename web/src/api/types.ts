@@ -503,6 +503,24 @@ export interface HoldingRow {
   holding_days: number;
 }
 
+export interface IntradayOut {
+  session: "pre" | "regular" | "post" | "overnight" | "closed";
+  session_text: string;
+  as_of?: string | null;
+  stale?: boolean;
+  source?: string;
+  note?: string;
+  quotes?: IntradayQuoteOut[];
+}
+
+export interface IntradayQuoteOut {
+  symbol: string;
+  price: number;
+  prev_close?: number | null;
+  change_pct?: number | null;
+  quote_time: string;
+}
+
 export interface JobStatusOut {
   mode: "sim" | "paper" | "live";
   job_name: string;
