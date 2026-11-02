@@ -87,6 +87,31 @@ def test_api_schemas_render_to_ts() -> None:
     assert 'export type Mode = "sim" | "paper" | "live";' in ts or 'mode: "sim"' in ts
 
 
-@pytest.mark.skipif(not WEB_TYPES.exists(), reason="前端生成文件尚未提交（Task 4）")
 def test_ts_types_match_frontend() -> None:
     assert WEB_TYPES.read_text(encoding="utf-8") == _export("--ts"), "运行 make api-types 重新生成"
+
+
+@pytest.mark.parametrize(
+    "schemas",
+    [
+        {
+            "Item": {
+                "type": "object",
+                "properties": {"x": {"type": "object", "properties": {"a": {"type": "integer"}}}},
+            }
+        },
+        {"Item-Input": {"type": "object", "properties": {"a": {"type": "integer"}}}},
+        {"Item-Output": {"type": "object", "properties": {"a": {"type": "integer"}}}},
+    ],
+    ids=["inline-object", "input-model", "output-model"],
+)
+def test_ts_generator_rejects_unsupported_shapes(schemas: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        render_ts_schemas(schemas)
+
+
+@pytest.mark.parametrize("path", ["/", "/api/health", "/system"])
+def test_head_returns_200(path: str, tmp_path: Path) -> None:
+    (tmp_path / "index.html").write_text("<html></html>")
+    client = TestClient(create_app(static_dir=tmp_path))
+    assert client.head(path).status_code == 200
