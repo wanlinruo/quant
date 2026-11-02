@@ -28,8 +28,10 @@ from quant.core.settings import ConfigError, Settings, load_settings
 from quant.data.backtest_data import make_runner
 from quant.db.backtests import claim_next, fail_run, make_engine
 from quant.db.models import BacktestRun
+from quant.engine import robustness
 from quant.engine.backtester import BacktestResult
-from quant.engine.runner import BacktestSpec, run_spec, save_result
+from quant.engine.robustness import ROBUST_KEY
+from quant.engine.runner import CASH_KEY, COSTS_KEY, BacktestSpec, run_spec, save_result
 
 log = logging.getLogger("quant.backtest_worker")
 
@@ -44,6 +46,7 @@ def process_one(engine: Engine, settings: Settings, runner: Runner = run_spec) -
             return None
         run_id, strategy, start, end = run.id, run.strategy, run.start, run.end
         stored = dict(run.params)
+        is_child = run.parent_id is not None
     log.info("开始回测 #%s %s %s~%s", run_id, strategy, start, end)
     try:
         spec = BacktestSpec.from_stored(strategy, start, end, stored, settings)
@@ -64,7 +67,42 @@ def process_one(engine: Engine, settings: Settings, runner: Runner = run_spec) -
             fail_run(session, run_id, detail)
         return run_id
     log.info("回测 #%s 完成：年化 %.2f%%", run_id, result.metrics.cagr * 100)
+    if stored.get(ROBUST_KEY) and not is_child:
+        try:
+            with Session(engine) as session, session.begin():
+                n = spawn_robustness(session, run_id, spec)
+            log.info("回测 #%s：已生成 %d 个稳健性检验子任务", run_id, n)
+        except Exception:  # 生成失败不影响父回测结果
+            log.exception("回测 #%s 生成稳健性检验子任务失败", run_id)
     return run_id
+
+
+def spawn_robustness(session: Session, parent_id: int, spec: BacktestSpec) -> int:
+    """父回测完成后插入子回测（排在队尾）；返回子任务数。"""
+    base = spec.stored_params()
+    costs, cash = base[COSTS_KEY], base[CASH_KEY]
+    variants = robustness.plan(spec.strategy, spec.params, spec.start, spec.end)
+    for v in variants:
+        c = robustness.scale_costs(costs, v.cost_mult) if v.cost_mult is not None else costs
+        session.add(
+            BacktestRun(
+                strategy=spec.strategy,
+                params={**v.params, COSTS_KEY: c, CASH_KEY: cash},
+                start=v.start,
+                end=spec.end,
+                status="queued",
+                parent_id=parent_id,
+                variant={
+                    "kind": v.kind,
+                    "label": v.label,
+                    "x": v.x,
+                    "y": v.y,
+                    "neighbor": v.neighbor,
+                    "cost_mult": v.cost_mult,
+                },
+            )
+        )
+    return len(variants)
 
 
 STALE_RUNNING_ERROR = (
