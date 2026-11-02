@@ -98,6 +98,7 @@ export interface BacktestRunOut {
   error: string;
   created_at: string;
   finished_at: string | null;
+  robust?: RobustProgressOut | null;
 }
 
 export interface BacktestSubmit {
@@ -112,6 +113,7 @@ export interface BacktestSubmit {
   cash: number | string;
   costs: CostsIn;
   params?: Record<string, unknown> | null;
+  robustness?: boolean;
 }
 
 export interface BacktestTrades {
@@ -735,6 +737,54 @@ export interface RankPoint {
   rank: number | null;
 }
 
+export interface RbCellOut {
+  x: number;
+  y: number;
+  label: string;
+  run_id?: number | null;
+  status: string;
+  metrics?: RbMetricsOut | null;
+  center?: boolean;
+}
+
+export interface RbGridOut {
+  x_label: string;
+  y_label: string;
+  x_values: string[];
+  y_values: string[];
+  cells: RbCellOut[];
+}
+
+export interface RbMetricsOut {
+  cagr?: number | null;
+  sharpe?: number | null;
+  max_drawdown?: number | null;
+}
+
+export interface RbRowOut {
+  label: string;
+  run_id?: number | null;
+  status: string;
+  metrics?: RbMetricsOut | null;
+  passed?: boolean | null;
+  base?: boolean;
+}
+
+export interface RbWfOut {
+  train_years: number;
+  note?: string;
+  segments?: RbWfSegOut[];
+  strategy?: RbMetricsOut | null;
+  base?: RbMetricsOut | null;
+}
+
+export interface RbWfSegOut {
+  year: number;
+  chosen: string;
+  test_return: number;
+  base_return: number;
+}
+
 export interface RebalancePreview {
   signal_date: string | null;
   rows: PreviewRow[];
@@ -764,6 +814,27 @@ export interface RiskOut {
   beta_spy: number | null;
   corr_qqq: number | null;
   var95_1d: number | null;
+}
+
+export interface RobustProgressOut {
+  total: number;
+  done: number;
+  failed: number;
+  queued: number;
+  running: number;
+}
+
+export interface RobustnessOut {
+  status: "not_requested" | "pending" | "done";
+  note?: string;
+  progress?: RobustProgressOut | null;
+  grid?: RbGridOut | null;
+  neighbors?: RbRowOut[];
+  neighbors_verdict?: boolean | null;
+  neighbors_note?: string;
+  walk_forward?: RbWfOut | null;
+  costs?: RbRowOut[];
+  starts?: RbRowOut[];
 }
 
 export interface SectorRowOut {

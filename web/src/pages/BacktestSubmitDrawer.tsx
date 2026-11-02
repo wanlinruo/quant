@@ -90,6 +90,7 @@ export function BacktestSubmitDrawer({ defaults, initial, onClose, onSubmitted }
   const [edits, setEdits] = useState<Record<string, string>>(() => (initial && initial.strategy !== "etf_momentum" ? initialEdits(p) : {}));
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [robust, setRobust] = useState(false);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
 
   async function submit() {
@@ -116,6 +117,7 @@ export function BacktestSubmitDrawer({ defaults, initial, onClose, onSubmitted }
         slippage: form.slippage,
       },
       params: form.strategy === "etf_momentum" ? null : changedParams(schema.data?.[form.strategy] ?? [], edits),
+      robustness: robust,
     };
     try {
       const r = await api.post<SubmitResult>("/api/backtests", body);
@@ -176,6 +178,10 @@ export function BacktestSubmitDrawer({ defaults, initial, onClose, onSubmitted }
       )}
       {field("初始资金（美元）", "cash", "number")}
       <div className="three">{field("每股佣金", "commission_per_share")}{field("单笔最低佣金", "min_commission")}{field("滑点", "slippage")}</div>
+      <label className="field-check">
+        <input type="checkbox" checked={robust} onChange={(e) => setRobust(e.target.checked)} /> 同时跑稳健性检验
+        <span className="muted sm">（完成后自动排队约 17 个子回测：参数网格、相邻参数、成本 ×0/×2/×3、起点推后；每个约 3 分钟）</span>
+      </label>
       {errors.length > 0 && (
         <div className="error-box">{errors.map((m) => <div key={m}>{m}</div>)}</div>
       )}

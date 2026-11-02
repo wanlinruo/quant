@@ -16,6 +16,8 @@ from quant.api.schemas import BacktestSubmit, ParamField
 from quant.core.settings import CostSettings
 from quant.data.store import is_valid_symbol
 from quant.db.backtests import create_run
+from quant.engine import robustness
+from quant.engine.robustness import ROBUST_KEY
 from quant.engine.runner import CASH_KEY, COSTS_KEY
 from quant.strategies import STRATEGIES, get_strategy
 from quant.strategies.etf_momentum import MomentumParams
@@ -76,6 +78,11 @@ def build_submission(
                 errors.append(f"策略参数：{e}")
     errors += _apply_costs(params, req, configured)
     params[CASH_KEY] = str(req.cash)
+    if req.robustness:
+        if robustness.supported(req.strategy):
+            params[ROBUST_KEY] = True  # 父回测完成后由 worker 生成子任务（#68）
+        else:
+            errors.append(f"稳健性检验：{req.strategy} 暂不支持")
     return params, errors
 
 

@@ -13,7 +13,7 @@ const p2 = (v: number | null | undefined) => (v == null ? "—" : pct(v, 2));
 const tone = (v: number | null | undefined) => (v == null || v === 0 ? "" : v > 0 ? "up" : "down");
 const mnum = (m: M, k: string) => (m && typeof m[k] === "number" ? (m[k] as number) : null);
 
-function Sub({ title, children, note }: { title: string; children: React.ReactNode; note?: string }) {
+export function Sub({ title, children, note }: { title: string; children: React.ReactNode; note?: string }) {
   return (
     <div className="subpanel">
       <div className="subpanel-h"><b>{title}</b>{note && <span className="muted sm">{note}</span>}</div>

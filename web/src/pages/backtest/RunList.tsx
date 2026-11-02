@@ -60,6 +60,7 @@ export function RunList({ result, selected, currentId, max, canCreate, onOpen, o
                 <span className={`pill ${STATUS_PILL[r.status] ?? "hold"}`}>{STATUS_TEXT[r.status] ?? r.status}</span>
                 <b>#{r.id}</b>
                 <span className="muted">{r.strategy}</span>
+                {r.robust && <span className="pill info" title="稳健性检验子回测：完成 + 失败 / 总数">稳健 {r.robust.done + r.robust.failed}/{r.robust.total}</span>}
                 <span style={{ flex: 1 }} />
                 <span className="num up">{cagr !== undefined ? pct(cagr, 1) : ""}</span>
                 <span className="num down">{mdd !== undefined ? pct(mdd, 1) : ""}</span>

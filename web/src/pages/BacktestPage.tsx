@@ -12,6 +12,7 @@ import { MainChart } from "./backtest/MainChart";
 import { PositionsTab } from "./backtest/PositionsTab";
 import { TradesTab } from "./backtest/TradesTab";
 import { RunHeader } from "./backtest/RunHeader";
+import { RobustTab } from "./backtest/RobustTab";
 import { RunList } from "./backtest/RunList";
 import { BacktestSubmitDrawer, type DrawerInitial } from "./BacktestSubmitDrawer";
 
@@ -147,7 +148,7 @@ type TabBodyProps = { tab: TabKey; a: BacktestAnalysis | null; loading: boolean;
 function TabBody({ tab, a, loading, runId, trade, onTrade }: TabBodyProps) {
   if (tab === "trades") return <TradesTab runId={runId} selected={trade} onSelect={onTrade} />;
   if (tab === "positions") return <PositionsTab runId={runId} />;
-  if (tab === "robust") return <EmptyState kind="pending" note="待稳健性检验（#68）：参数敏感性、walk-forward、成本与起点敏感性" />;
+  if (tab === "robust") return <RobustTab runId={runId} strategy={a?.strategy ?? ""} />;
   if (!a) return loading ? <div className="muted sm">加载中…</div> : <EmptyState />;
   if (tab === "params") return <ParamsTab a={a} />;
   if (a.status !== "done") return <EmptyState note={a.status === "failed" ? `回测失败：${a.error ?? ""}` : "回测尚未完成"} />;

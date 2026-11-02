@@ -227,6 +227,11 @@ class BacktestRun(Base):
     created_at: Mapped[datetime] = _created_at()
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 稳健性检验的子回测（#68）：父任务编号与变体说明（kind、label、x、y、neighbor、cost_mult）
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("backtest_runs.id", ondelete="CASCADE"), index=True
+    )
+    variant: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     __table_args__ = (
         CheckConstraint(_in("status", STATUSES), name="status"),

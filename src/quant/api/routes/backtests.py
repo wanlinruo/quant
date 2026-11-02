@@ -13,6 +13,7 @@ from quant.api import queries
 from quant.api.backtest_view import analysis, compare_view, positions_view, trades_view
 from quant.api.backtests import param_schema, submit
 from quant.api.deps import get_session, get_settings
+from quant.api.robustness_view import robustness_view
 from quant.api.schemas import (
     BacktestAnalysis,
     BacktestCompare,
@@ -26,6 +27,7 @@ from quant.api.schemas import (
     ParamField,
     Progress,
     QuotaOut,
+    RobustnessOut,
     SubmitResult,
 )
 from quant.core.calendar import get_calendar
@@ -83,6 +85,15 @@ def _data_status() -> BacktestDataStatus:
 def run_analysis(run_id: int, s: SessionDep) -> BacktestAnalysis:
     """回测页：统计条、主图、概览、收益分析、回撤与风险、参数与日志（请求时计算，只读）。"""
     out = analysis(s, run_id, get_settings())
+    if out is None:
+        raise HTTPException(status_code=404, detail="回测不存在")
+    return out
+
+
+@router.get("/backtests/{run_id}/robustness")
+def run_robustness(run_id: int, s: SessionDep) -> RobustnessOut:
+    """回测页稳健性标签：子回测进度、参数热力图、相邻参数、walk-forward、成本与起点敏感性。"""
+    out = robustness_view(s, run_id)
     if out is None:
         raise HTTPException(status_code=404, detail="回测不存在")
     return out

@@ -174,13 +174,15 @@ describe("BacktestPage", () => {
   });
 
   it("main chart stays mounted across tabs and pending tabs say so", async () => {
-    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS] });
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS],
+      "/api/backtests/128/robustness": [200, { status: "not_requested", note: "未运行：新建回测时勾选“同时跑稳健性检验”" }] });
     const { user } = renderPage(<BacktestPage />, "/backtest");
     const chart = await screen.findByTestId("main-chart");
     await user.click(screen.getByRole("button", { name: "收益分析" }));
     await user.click(screen.getByRole("button", { name: "交易明细" }));
     await user.click(screen.getByRole("button", { name: "稳健性" }));
-    expect(screen.getByText(/#68/)).toBeInTheDocument();
+    expect(await screen.findByText(/未运行：新建回测时勾选/)).toBeInTheDocument();
+    expect(screen.queryByTestId("rb-grid")).toBeNull();
     expect(screen.getByTestId("main-chart")).toBe(chart);
   });
 
@@ -386,5 +388,50 @@ describe("BacktestPage", () => {
     await user.click(within(dlg).getByRole("button", { name: "提交到队列" }));
     expect(await within(dlg).findByText(/momentum.top_n 须为数字/)).toBeInTheDocument();
     expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(false);
+  });
+
+  it("robustness tab shows heatmap, neighbors, walk-forward, costs and starts", async () => {
+    const m = (cagr: number, sharpe: number, max_drawdown: number) => ({ cagr, sharpe, max_drawdown });
+    const cells = [0, 1, 2].flatMap((y) => [0, 1, 2].map((x) => ({
+      x, y, label: `c${x}${y}`, run_id: 200 + x + 3 * y, status: x === 2 && y === 0 ? "skipped" : "done",
+      metrics: x === 2 && y === 0 ? null : m(0.1 + x * 0.02, 1 + x * 0.1, -0.2), center: x === 1 && y === 1,
+    })));
+    const ROB = {
+      status: "pending", note: "", progress: { total: 17, done: 15, failed: 1, queued: 1, running: 0 },
+      grid: { x_label: "动量仓比例", y_label: "择时波动阈值", x_values: ["30%", "40%", "50%"], y_values: ["25%", "30%", "35%"], cells },
+      neighbors: [{ label: "动量仓比例 30% · 择时波动阈值 30%", run_id: 203, status: "done", metrics: m(0.1, 0.9, -0.2), passed: false, base: false },
+        { label: "动量只数 5", run_id: 210, status: "failed", metrics: null, passed: null, base: false }],
+      neighbors_verdict: null, neighbors_note: "不完整：1 项未完成或失败",
+      walk_forward: { train_years: 3, note: "每年用前 3 年夏普最高的参数", segments: [{ year: 2019, chosen: "c001", test_return: 0.12, base_return: 0.1 }],
+        strategy: m(0.11, 1.0, -0.2), base: m(0.1, 1.1, -0.18) },
+      costs: [{ label: "成本 ×0", run_id: 211, status: "done", metrics: m(0.2, 1.4, -0.2), passed: null, base: false },
+        { label: "成本 ×1（本次）", run_id: 128, status: "done", metrics: m(0.18, 1.3, -0.2), passed: null, base: true }],
+      starts: [{ label: "起点 2016-10-28（本次）", run_id: 128, status: "done", metrics: m(0.18, 1.3, -0.2), passed: null, base: true },
+        { label: "起点 2017-01-28", run_id: 214, status: "queued", metrics: null, passed: null, base: false }],
+    };
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS], "/api/backtests/128/robustness": [200, ROB] });
+    renderPage(<BacktestPage />, "/backtest?tab=robust");
+    const grid = await screen.findByTestId("rb-grid");
+    expect(grid.querySelectorAll(".rb-cell")).toHaveLength(9);
+    expect(grid.querySelector(".rb-cell.center")).toHaveTextContent("1.10");
+    expect(grid.querySelector(".rb-cell.skipped")).toHaveTextContent("—");
+    expect(screen.getByText(/15 \/ 17/)).toBeInTheDocument();
+    expect(screen.getByText("不完整：1 项未完成或失败")).toBeInTheDocument();
+    expect(screen.getByText("动量仓比例 30% · 择时波动阈值 30%").closest("tr")).toHaveTextContent("未通过");
+    expect(screen.getByText("2019").closest("tr")).toHaveTextContent("c001");
+    expect(screen.getByText("成本 ×1（本次）")).toBeInTheDocument();
+    expect(screen.getByText("起点 2017-01-28").closest("tr")).toHaveTextContent("排队");
+  });
+
+  it("drawer can request robustness and list shows progress", async () => {
+    const parent = { ...run(140), robust: { total: 17, done: 3, failed: 0, queued: 14, running: 0 } };
+    const fetch = mockApi({ "/api/backtests": [200, [parent]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/140/analysis": [200, ANALYSIS], "POST /api/backtests": [201, { id: 141 }] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    expect(await screen.findByText(/稳健 3\/17/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "+ 新建回测" }));
+    await user.click(await screen.findByLabelText(/同时跑稳健性检验/));
+    await user.click(screen.getByRole("button", { name: "提交到队列" }));
+    const post = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST");
+    expect(JSON.parse(String((post![1] as RequestInit).body)).robustness).toBe(true);
   });
 });
