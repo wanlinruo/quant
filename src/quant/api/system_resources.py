@@ -179,6 +179,10 @@ def resources(s: Session, now: datetime) -> SysResourcesOut:
         warn(SysItemOut(level="warn", text=f"磁盘已用 {disk_pct:.0f}%"))
     if out.disk.days_left is not None and out.disk.days_left < FULL_WARN_DAYS:
         warn(SysItemOut(level="warn", text=f"磁盘预计 {out.disk.days_left:.0f} 天后写满"))
+    if out.containers and out.containers[0].stale and now - last_h <= STALE:
+        warn(
+            SysItemOut(level="warn", text="容器状态读取中断：主机采样正常，检查 docker-proxy 容器")
+        )
     for c in out.containers:
         if not c.stale and c.state != "running":
             warn(SysItemOut(level="warn", text=f"容器 {c.name} 未在运行：{c.state}"))

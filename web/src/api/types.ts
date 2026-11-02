@@ -745,6 +745,7 @@ export interface RbCellOut {
   status: string;
   metrics?: RbMetricsOut | null;
   center?: boolean;
+  error?: string | null;
 }
 
 export interface RbGridOut {
@@ -768,6 +769,7 @@ export interface RbRowOut {
   metrics?: RbMetricsOut | null;
   passed?: boolean | null;
   base?: boolean;
+  error?: string | null;
 }
 
 export interface RbWfOut {

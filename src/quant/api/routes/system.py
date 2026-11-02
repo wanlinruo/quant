@@ -6,6 +6,7 @@ from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from quant.api import queries, system_view
@@ -51,8 +52,14 @@ def overview(mode: Mode) -> SystemOverview:
     settings, cal = get_settings(), get_calendar()
     if eng is None:
         return system_view.overview(None, mode, settings, cal)
-    with Session(eng) as s:
-        return system_view.overview(s, mode, settings, cal)
+    try:
+        with Session(eng) as s:
+            return system_view.overview(s, mode, settings, cal)
+    except OperationalError as e:  # 数据库连不上：降级为只显示日历与本地数据文件
+        reason = type(getattr(e, "orig", e)).__name__
+        return system_view.overview(
+            None, mode, settings, cal, no_db=f"{system_view.DB_DOWN}（{reason}）"
+        )
 
 
 @router.get("/system/job-runs")
