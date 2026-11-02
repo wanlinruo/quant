@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from quant.api.schemas import IntradayOut, IntradayQuoteOut
+from quant.api.schemas import IntradayOut, IntradayPositionOut, IntradayQuoteOut
 from quant.core.calendar import TradingCalendar
-from quant.db.models import IntradayQuote
+from quant.db.models import Fill, IntradayQuote, PositionSnapshot
 from quant.market.session import ET, SESSION_TEXT, us_session
 
 STALE = timedelta(minutes=5)
@@ -23,7 +23,52 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def intraday(s: Session | None, cal: TradingCalendar) -> IntradayOut:
+def _positions(
+    s: Session, mode: str, quotes: dict[str, IntradayQuote], since: datetime
+) -> list[IntradayPositionOut]:
+    """当日盈亏 = 现持股 × 现价 − 隔夜股数 × 昨收 − 今日买入金额 + 今日卖出金额。
+
+    隔夜股数 = 现持股 − 今日买入股数 + 今日卖出股数（调仓日新买入的从成交价算起）。
+    """
+    snap_day = s.scalar(
+        select(func.max(PositionSnapshot.snapshot_date)).where(PositionSnapshot.mode == mode)
+    )
+    if snap_day is None:
+        return []
+    held = s.scalars(
+        select(PositionSnapshot).where(
+            PositionSnapshot.mode == mode, PositionSnapshot.snapshot_date == snap_day
+        )
+    ).all()
+    traded: dict[str, list[tuple[int, float]]] = {}  # 买为正股数
+    for f in s.scalars(select(Fill).where(Fill.mode == mode, Fill.filled_at >= since)):
+        sign = 1 if f.side.upper() == "BUY" else -1
+        traded.setdefault(f.symbol, []).append((sign * f.qty, float(f.price)))
+    out = []
+    for p in sorted(held, key=lambda x: x.symbol):
+        q = quotes.get(p.symbol)
+        if q is None or p.qty == 0:
+            continue
+        fills = traded.get(p.symbol, [])
+        carried = p.qty - sum(n for n, _ in fills)
+        pnl = None
+        if q.prev_close is not None or carried == 0:
+            base = carried * (q.prev_close or 0.0) + sum(n * px for n, px in fills)
+            pnl = p.qty * q.price - base
+        out.append(
+            IntradayPositionOut(
+                symbol=p.symbol,
+                qty=p.qty,
+                price=q.price,
+                change_pct=q.change_pct,
+                day_pnl=pnl,
+                traded_today=bool(fills),
+            )
+        )
+    return out
+
+
+def intraday(s: Session | None, cal: TradingCalendar, mode: str | None = None) -> IntradayOut:
     now = _now()
     session = us_session(cal, now)
     out = IntradayOut(session=session, session_text=SESSION_TEXT[session])
@@ -62,4 +107,8 @@ def intraday(s: Session | None, cal: TradingCalendar) -> IntradayOut:
     else:
         out.stale = True
     out.note = VIEW_ONLY + ("；行情延迟，采集可能中断" if out.stale else "")
+    if mode is not None:
+        out.positions = _positions(s, mode, {r.symbol: r for r in rows}, opened)
+        pnls = [p.day_pnl for p in out.positions if p.day_pnl is not None]
+        out.day_pnl = sum(pnls) if pnls else None
     return out

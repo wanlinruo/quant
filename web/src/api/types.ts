@@ -511,6 +511,17 @@ export interface IntradayOut {
   source?: string;
   note?: string;
   quotes?: IntradayQuoteOut[];
+  positions?: IntradayPositionOut[];
+  day_pnl?: number | null;
+}
+
+export interface IntradayPositionOut {
+  symbol: string;
+  qty: number;
+  price: number;
+  change_pct?: number | null;
+  day_pnl?: number | null;
+  traded_today?: boolean;
 }
 
 export interface IntradayQuoteOut {

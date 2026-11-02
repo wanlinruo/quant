@@ -24,6 +24,7 @@ from quant.api.schemas import (
     MarketCalendar,
     MarketNews,
     MarketOverview,
+    Mode,
     NewsRefOut,
     TickerItemOut,
 )
@@ -42,14 +43,14 @@ def _now() -> float:
 
 
 @router.get("/market/intraday")
-def market_intraday() -> IntradayOut:
+def market_intraday(mode: Mode | None = None) -> IntradayOut:
     """盘中行情（#93）：常规时段返回今天的最新报价；其它时段只返回所处时段与说明。"""
     eng, cal = get_engine(), get_calendar()
     if eng is None:
         return intraday_view.intraday(None, cal)
     try:
         with Session(eng) as s:
-            return intraday_view.intraday(s, cal)
+            return intraday_view.intraday(s, cal, mode)
     except OperationalError:  # 数据库连不上：只返回时段与说明，不影响首页其它区块
         return intraday_view.intraday(None, cal)
 
