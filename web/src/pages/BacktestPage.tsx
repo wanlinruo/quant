@@ -6,6 +6,7 @@ import { Cell, Grid } from "../components/Grid";
 import { Panel } from "../components/Panel";
 import { Tabs } from "../components/Tabs";
 import { useApi } from "../hooks/useApi";
+import { downloadCsv } from "../lib/csv";
 import { OverviewTab, ParamsTab, ReturnsTab, RiskTab } from "./backtest/AnalysisTabs";
 import { CompareView } from "./backtest/CompareView";
 import { MainChart } from "./backtest/MainChart";
@@ -33,13 +34,7 @@ type TabKey = (typeof TABS)[number]["key"];
 function exportCsv(a: BacktestAnalysis) {
   const s = a.series;
   if (!s) return;
-  const rows = ["date,strategy,qqq,spy,drawdown", ...s.dates.map((d, i) => [d, s.strategy[i], s.qqq?.[i] ?? "", s.spy?.[i] ?? "", s.drawdown[i]].join(","))];
-  const url = URL.createObjectURL(new Blob([rows.join("\n")], { type: "text/csv" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `backtest-${a.id}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadCsv(`backtest-${a.id}.csv`, [["date", "strategy", "qqq", "spy", "drawdown"], ...s.dates.map((d, i) => [d, s.strategy[i], s.qqq?.[i], s.spy?.[i], s.drawdown[i]])]);
 }
 
 export function BacktestPage() {

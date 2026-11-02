@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { downloadCsv } from "../../lib/csv";
 import type { BacktestTrades, BtTradeOut } from "../../api/types";
 import { ApiState } from "../../components/ApiState";
 import { EmptyState } from "../../components/EmptyState";
@@ -30,14 +31,8 @@ function Scatter({ rows }: { rows: BtTradeOut[] }) {
 }
 
 function exportCsv(runId: number, rows: BtTradeOut[]) {
-  const head = "seq,symbol,sleeve,open_date,open_price,close_date,close_price,qty,days,ret,pnl,exit_reason";
-  const body = rows.map((t) => [t.seq, t.symbol, t.sleeve, t.open_date, t.open_price, t.close_date ?? "", t.close_price ?? "", t.qty, t.days, t.ret ?? "", t.pnl, t.exit_reason ?? ""].join(","));
-  const url = URL.createObjectURL(new Blob([[head, ...body].join("\n")], { type: "text/csv" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `backtest-${runId}-trades.csv`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const head = ["seq", "symbol", "sleeve", "open_date", "open_price", "close_date", "close_price", "qty", "days", "ret", "pnl", "exit_reason"];
+  downloadCsv(`backtest-${runId}-trades.csv`, [head, ...rows.map((t) => [t.seq, t.symbol, t.sleeve, t.open_date, t.open_price, t.close_date, t.close_price, t.qty, t.days, t.ret, t.pnl, t.exit_reason])]);
 }
 
 /** 交易明细：汇总卡、逐笔表（筛选、导出、点一行在主图标出开平仓）、散点、按平仓原因、按股票 */
