@@ -620,7 +620,7 @@ class CandleOut(BaseModel):
     high: float
     low: float
     close: float
-    volume: float
+    volume: float | None = None  # 盘中当日 K 线没有成交量（#93）
 
 
 class MarketOverview(BaseModel):
@@ -640,6 +640,9 @@ class MarketOverview(BaseModel):
     index_candles: dict[str, list[CandleOut]] = {}
     macro: list[TickerItemOut] = []  # VIX、美债、美元、原油、比特币（market_extras）
     sector_periods: dict[str, dict[str, float | None]] = {}  # 板块 ETF 区间收益（个股页）
+    # 盘中快照（#93）：最后一天为盘中价格，约每 10 分钟更新；成交量相关指标收盘后更新
+    intraday: bool = False
+    intraday_time: datetime | None = None
 
 
 class NewsItemOut(BaseModel):

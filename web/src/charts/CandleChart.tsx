@@ -1,7 +1,7 @@
 import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, HistogramSeries, LineSeries, type SeriesMarker, type Time } from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
 
-export type Candle = { date: string; open: number; high: number; low: number; close: number; volume: number };
+export type Candle = { date: string; open: number; high: number; low: number; close: number; volume?: number | null };
 
 const MA_COLORS = ["#f5a623", "#22d3ee", "#a855f7", "#e879f9"];
 const UP = "#22c55e";
@@ -63,7 +63,8 @@ export function CandleChart({ bars, height, mas, periods = [], trades = [], earn
     const vol = chart.addSeries(HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" } });
     chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
     candles.priceScale().applyOptions({ scaleMargins: { top: 0.05, bottom: 0.25 } });
-    vol.setData(bars.map((b) => ({ time: b.date, value: b.volume, color: b.close >= b.open ? "rgba(34,197,94,.4)" : "rgba(239,68,68,.4)" })));
+    // 盘中当日 K 线没有成交量（#93）：不画这一根的成交量
+    vol.setData(bars.filter((b) => b.volume != null).map((b) => ({ time: b.date, value: b.volume as number, color: b.close >= b.open ? "rgba(34,197,94,.4)" : "rgba(239,68,68,.4)" })));
     mas.forEach((w, i) => {
       chart.addSeries(LineSeries, { color: MA_COLORS[i % MA_COLORS.length], lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
         .setData(sma(bars, w));

@@ -29,7 +29,14 @@ from quant.api.schemas import (
     TickerItemOut,
 )
 from quant.core.calendar import get_calendar
-from quant.data.market_store import calendar_path, macro_path, news_path, snapshot_path
+from quant.data.market_store import (
+    calendar_path,
+    intraday_snapshot_path,
+    macro_path,
+    news_path,
+    snapshot_path,
+)
+from quant.market.session import ET
 
 router = APIRouter()
 log = logging.getLogger("quant.api.market")
@@ -104,12 +111,23 @@ def _reasons(data_dir: Path, as_of: Any) -> dict[str, NewsRefOut]:
         return {}
 
 
+def _pick_snapshot(daily: Any, intra: Any) -> Any:
+    """盘中快照（#93）是今天（美东）的、且晚于日线快照时用它；否则用日线快照。"""
+    if not isinstance(intra, dict) or not intra.get("intraday"):
+        return daily
+    today = intraday_view._now().astimezone(ET).date().isoformat()
+    daily_as_of = daily.get("as_of") if isinstance(daily, dict) else None
+    if intra.get("as_of") != today or (daily_as_of is not None and daily_as_of >= today):
+        return daily
+    return intra
+
+
 @router.get("/market/overview")
 def overview() -> MarketOverview:
     """首页看板：只读 market_data 快照与 market_extras 的宏观、新闻文件；缺失或损坏为 pending。"""
     data_dir = get_settings().data_dir
     macro = _macro(data_dir)
-    doc = _load(snapshot_path(data_dir))
+    doc = _pick_snapshot(_load(snapshot_path(data_dir)), _load(intraday_snapshot_path(data_dir)))
     if not isinstance(doc, dict):
         return MarketOverview(status="pending", macro=macro)
     try:

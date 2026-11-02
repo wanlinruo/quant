@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from quant.data.market_store import ETF_SET, SECTOR_ETF, GicsTable
+from quant.data.market_store import ETF_SET, SECTOR_ETF, GicsTable, MarketStore
 from quant.market import board as b
 
 N = 300
@@ -223,3 +223,58 @@ def test_movers_keep_signal_rows_beyond_cap() -> None:
     m = [m for m in got if m.symbol.startswith("M")]
     assert len(g) == 30 and all("跳空" in x.signals for x in g)
     assert len(m) == b.MOVER_LIMIT
+
+
+# ---- 盘中当日 K 线（#93）----
+
+
+def _store(tmp_path: object, days: pd.DatetimeIndex = IDX) -> MarketStore:
+    from pathlib import Path
+
+    store = MarketStore(Path(str(tmp_path)))
+    f = frames()
+    for d in days:
+        day = pd.DataFrame({k: f[k].loc[d] for k in ("open", "high", "low", "close", "volume")})
+        day = day.rename_axis("symbol").reset_index()
+        day["vwap"] = day["close"]
+        store.write_day(d.date(), day, keep=set(day["symbol"]))
+    return store
+
+
+def test_snapshot_with_intraday_bar(tmp_path: object) -> None:
+    from datetime import date
+
+    store = _store(tmp_path)
+    today = date(2026, 11, 2)  # 已存日线截至 10-30（周五）
+    prev = frames()["close"].iloc[-1]
+    bar = pd.DataFrame(
+        {"open": prev, "high": prev * 1.03, "low": prev * 0.99, "close": prev * 1.02}
+    ).drop(index=["NEW"])  # 部分标的没有盘中报价
+    doc = b.build_snapshot(store, GICS, today, stale=False, today_bar=bar).to_json()
+    json.dumps(doc, allow_nan=False)
+    assert doc["as_of"] == "2026-11-02" and doc["intraday"] is True
+    spy = next(t for t in doc["strip"] if t["symbol"] == "SPY")
+    assert spy["change_pct"] == pytest.approx(0.02)  # 相对上一交易日收盘
+    assert doc["breadth"]["up_volume_ratio"]["value"] is None  # 盘中没有成交量
+    assert doc["index_candles"]["SPY"][-1]["volume"] is None
+    assert doc["index_candles"]["SPY"][-1]["close"] == pytest.approx(prev["SPY"] * 1.02)
+
+
+def test_intraday_bar_ignored_when_day_already_stored(tmp_path: object) -> None:
+    store = _store(tmp_path)
+    prev = frames()["close"].iloc[-1]
+    bar = pd.DataFrame({"open": prev, "high": prev, "low": prev, "close": prev * 2})
+    doc = b.build_snapshot(store, GICS, IDX[-1].date(), stale=False, today_bar=bar).to_json()
+    assert doc["intraday"] is False  # 当日日线已入库：以日线为准
+    spy = next(t for t in doc["strip"] if t["symbol"] == "SPY")
+    assert spy["change_pct"] < 0.5
+
+
+def test_intraday_highlights_do_not_say_closed(tmp_path: object) -> None:
+    from datetime import date
+
+    store = _store(tmp_path)
+    prev = frames()["close"].iloc[-1]
+    bar = pd.DataFrame({"open": prev, "high": prev, "low": prev, "close": prev * 1.01})
+    doc = b.build_snapshot(store, GICS, date(2026, 11, 2), stale=False, today_bar=bar).to_json()
+    assert "收于" not in doc["highlights"] and "盘中报" in doc["highlights"]
