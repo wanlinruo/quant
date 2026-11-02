@@ -29,7 +29,7 @@ from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.coinbase import btc_daily
 from quant.data.providers.finnhub import EarningsRaw, FinnhubAuthError, NewsRaw
 from quant.data.providers.forexfactory import this_week
-from quant.data.providers.fred import FredAuthError, Obs
+from quant.data.providers.fred import FredAuthError, FredUnreachable, Obs
 from quant.data.providers.http import Fetch, http_fetch
 from quant.data.quota import atomic_write_text
 from quant.market.calendar import ACTUALS, build_calendar, fred_actual, merge_ff
@@ -98,10 +98,12 @@ def run_market_extras(
         for series, _, _ in MACRO_SERIES.values():
             try:
                 fred_obs[series] = fred.observations(series, today - timedelta(days=MACRO_LOOKBACK))
-            except DataUnavailableError as e:
+            except (FredUnreachable, FredAuthError) as e:
                 fail(f"FRED {series} ", e)
-                fred_down = True  # 一次失败即停：FRED 无响应时每次请求要等 60 秒
+                fred_down = True  # 连不上即停：FRED 无响应时每次请求要等 60 秒
                 break
+            except DataUnavailableError as e:  # 单个序列出错（4xx、解析失败）：跳过这一个
+                fail(f"FRED {series} ", e)
     try:
         btc = btc_daily(fetch, now=now)
     except DataUnavailableError as e:
@@ -175,6 +177,7 @@ def run_market_extras(
     actuals: dict[str, str | None] = {}
     if fred is not None and not fred_down:
         cache: dict[str, tuple[list[Obs], datetime]] = {}
+        bad: set[str] = set()
         start = datetime.combine(prev_day, time(0), ET)
         for ev in ff:
             t = datetime.fromisoformat(ev["time"]).astimezone(ET)
@@ -182,13 +185,19 @@ def run_market_extras(
             if spec is None or not (start <= t <= gen):
                 continue
             series = spec[0]
+            if series in bad:
+                continue
             try:
                 if series not in cache:
                     cache[series] = (fred.observations(series, t.date() - timedelta(days=400)),
                                      fred.last_updated(series))  # fmt: skip
-            except DataUnavailableError as err:
+            except (FredUnreachable, FredAuthError) as err:
                 fail(f"FRED {series} ", err)
                 break
+            except DataUnavailableError as err:  # 只影响这个序列的实际值
+                fail(f"FRED {series} ", err)
+                bad.add(series)
+                continue
             obs, upd = cache[series]
             actuals[f"{ev['title']}|{t.date().isoformat()}"] = fred_actual(
                 ev["title"], t.date(), obs, upd
