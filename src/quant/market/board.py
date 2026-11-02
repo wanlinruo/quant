@@ -332,7 +332,7 @@ class Candle:
     high: float
     low: float
     close: float
-    volume: float
+    volume: float | None  # 盘中当日 K 线为空
 
 
 def index_candles(
@@ -351,7 +351,7 @@ def index_candles(
             continue
         df = (
             pd.DataFrame({"o": open_[s], "h": high[s], "l": low[s], "c": close[s], "v": volume[s]})
-            .dropna()
+            .dropna(subset=["o", "h", "l", "c"])  # 盘中当日 K 线没有成交量
             .iloc[-days:]
         )
         out[s] = [
@@ -409,6 +409,9 @@ class MarketSnapshot:
     index_candles: dict[str, list[Candle]] = field(default_factory=dict)
     # 板块 ETF 的区间收益（口径同个股页 period_returns），个股页“板块 ETF”行用（#70 第 3 批）
     sector_periods: dict[str, dict[str, float | None]] = field(default_factory=dict)
+    # 盘中快照（#93）：最后一天为盘中价格拼出的当日 K 线（没有成交量）
+    intraday: bool = False
+    intraday_time: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = _clean(asdict(self))
@@ -425,10 +428,36 @@ def _clean(x: Any) -> Any:
     return x
 
 
+def _append_today(p: dict[str, pd.DataFrame], day: date, bar: pd.DataFrame) -> bool:
+    """把盘中当日 K 线（index 为代码，列 open / high / low / close）拼到各面板最后一行。
+
+    当日晚于已存日线时才拼；成交量为空。返回是否拼接。
+    """
+    close = p["close"]
+    ts = pd.Timestamp(day)
+    if close.empty or ts <= close.index[-1]:
+        return False
+    for f in ("open", "high", "low", "close", "volume"):
+        df = p[f]
+        row = (
+            bar[f].reindex(df.columns)
+            if f in bar.columns
+            else pd.Series(float("nan"), index=df.columns)
+        )
+        p[f] = pd.concat([df, row.astype(float).to_frame(ts).T])
+    return True
+
+
 def build_snapshot(
-    store: MarketStore, gics: GicsTable, as_of: date, stale: bool, held: Iterable[str] = ()
+    store: MarketStore,
+    gics: GicsTable,
+    as_of: date,
+    stale: bool,
+    held: Iterable[str] = (),
+    today_bar: pd.DataFrame | None = None,
 ) -> MarketSnapshot:
     p = {f: store.panel(f, last_n=HISTORY) for f in ("close", "open", "high", "low", "volume")}
+    intraday = today_bar is not None and _append_today(p, as_of, today_bar)
     close = p["close"]
     caps = {k: v.market_cap for k, v in store.caps().items()}
     members = gics.members
@@ -457,4 +486,5 @@ def build_snapshot(
         heatmap=heatmap(close, gics, caps),
         index_candles=index_candles(close, p["open"], p["high"], p["low"], p["volume"]),
         sector_periods=sector_periods(close),
+        intraday=intraday,
     )
