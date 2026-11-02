@@ -427,7 +427,7 @@ describe("BacktestPage", () => {
     const parent = { ...run(140), robust: { total: 17, done: 3, failed: 0, queued: 14, running: 0 } };
     const fetch = mockApi({ "/api/backtests": [200, [parent]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/140/analysis": [200, ANALYSIS], "POST /api/backtests": [201, { id: 141 }] });
     const { user } = renderPage(<BacktestPage />, "/backtest");
-    expect(await screen.findByText(/稳健性 3 \/ 17/)).toBeInTheDocument();
+    expect(await screen.findByText(/稳健 3\/17/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "+ 新建回测" }));
     await user.click(await screen.findByLabelText(/同时跑稳健性检验/));
     await user.click(screen.getByRole("button", { name: "提交到队列" }));
