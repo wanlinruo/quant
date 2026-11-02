@@ -128,8 +128,11 @@ def test_portfolio_and_meta_with_data(client_db: TestClient) -> None:
 @needs_db
 def test_system_endpoints_with_data(client_db: TestClient) -> None:
     assert client_db.get("/api/system/queue").json() == {
-        "queued": 1, "running": 0, "done": 0, "failed": 1,
-    }  # fmt: skip
+        "queued": 1,
+        "running": 0,
+        "done": 0,
+        "failed": 1,
+    }
     assert client_db.get("/api/system/flags").json()["trading_enabled"] == "false"
     jobs = {j["job_name"] for j in client_db.get("/api/system/jobs").json()}
     assert jobs == {"daily_data", "daily_signal"}
@@ -175,11 +178,17 @@ def test_submit_invalid_does_not_insert(client_db: TestClient, db_url: str) -> N
 LAST = date(2026, 10, 28)  # 最近一个已完成交易日
 
 FORM: dict[str, Any] = {
-    "strategy": "etf_momentum", "universe": ["SPY", "QQQ"], "safe_asset": "SHY",
-    "lookback": 126, "top_k": 1, "sma_window": 200, "start": date(2016, 1, 4),
-    "end": date(2026, 10, 28), "cash": Decimal("100000"),
+    "strategy": "etf_momentum",
+    "universe": ["SPY", "QQQ"],
+    "safe_asset": "SHY",
+    "lookback": 126,
+    "top_k": 1,
+    "sma_window": 200,
+    "start": date(2016, 1, 4),
+    "end": date(2026, 10, 28),
+    "cash": Decimal("100000"),
     "costs": {"commission_per_share": "0.005", "min_commission": "1", "slippage": "0.0005"},
-}  # fmt: skip
+}
 
 
 def _req(**change: Any) -> BacktestSubmit:
@@ -192,9 +201,12 @@ def test_build_submission_ok() -> None:
     assert errors == []
     assert params["universe"] == ["SPY", "QQQ"]
     assert params["_costs"] == {
-        "commission_per_share": "0.005", "min_commission": "1", "slippage": "0.0005",
-        "platform_per_share": "0", "platform_min": "0",
-    }  # fmt: skip
+        "commission_per_share": "0.005",
+        "min_commission": "1",
+        "slippage": "0.0005",
+        "platform_per_share": "0",
+        "platform_min": "0",
+    }
     assert params["_cash"] == "100000"
 
 
@@ -236,10 +248,12 @@ def test_build_submission_normalizes_symbols() -> None:
 def test_build_submission_keeps_configured_platform_fees() -> None:
     """面板只覆盖佣金、最低佣金和滑点；平台费与封顶沿用配置，和命令行回测口径一致。"""
     configured = CostSettings(
-        commission_per_share=Decimal("0.0039"), min_commission=Decimal("0.99"),
-        platform_per_share=Decimal("0.004"), platform_min=Decimal("1"),
+        commission_per_share=Decimal("0.0039"),
+        min_commission=Decimal("0.99"),
+        platform_per_share=Decimal("0.004"),
+        platform_min=Decimal("1"),
         max_fee_pct=Decimal("0.005"),
-    )  # fmt: skip
+    )
     params, errors = build_submission(_req(), configured, LAST)
     assert errors == []
     spec = BacktestSpec.from_stored(
@@ -333,8 +347,9 @@ def client_tiingo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[T
     state = bd.BackfillState.load(bd.state_path(tmp_path))
     ledger = QuotaLedger(bd.quota_path(tmp_path), TiingoSettings())
     for s in bd.fixed_symbols():
-        state.symbols[s] = bd.SymbolState("ok", today.isoformat(), today.strftime("%Y-%m"),
-                                          last_date="2026-10-28")  # fmt: skip
+        state.symbols[s] = bd.SymbolState(
+            "ok", today.isoformat(), today.strftime("%Y-%m"), last_date="2026-10-28"
+        )
         ledger.record(s)
     state.save()
     _clear()
@@ -359,8 +374,9 @@ def test_defaults_end_clamped_to_data_end(client_tiingo: TestClient) -> None:
 
 
 def test_submit_start_before_min_is_422() -> None:
-    _, errors = build_submission(_req(start=date(2010, 1, 4)), CostSettings(), LAST,
-                                 min_start=date(2014, 7, 1))  # fmt: skip
+    _, errors = build_submission(
+        _req(start=date(2010, 1, 4)), CostSettings(), LAST, min_start=date(2014, 7, 1)
+    )
     assert any("开始日期：不能早于 2014-07-01" in e for e in errors), errors
 
 
@@ -405,10 +421,12 @@ def test_param_schema_uses_configured(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 
 def test_submit_combo_with_param_overrides() -> None:
-    req = BacktestSubmit(**{**valid_submit_body(), "strategy": "combo",
-                            "params": {"swing": {"stop_pct": 0.05}}})  # fmt: skip
-    params, errors = build_submission(req, CostSettings(), date(2026, 10, 30),
-                                      strategy_params={"momentum": {"top_n": 10}})  # fmt: skip
+    req = BacktestSubmit(
+        **{**valid_submit_body(), "strategy": "combo", "params": {"swing": {"stop_pct": 0.05}}}
+    )
+    params, errors = build_submission(
+        req, CostSettings(), date(2026, 10, 30), strategy_params={"momentum": {"top_n": 10}}
+    )
     assert errors == []
     assert params["swing"] == {"stop_pct": 0.05} and params["momentum"] == {"top_n": 10}
     bad = BacktestSubmit(**{**valid_submit_body(), "strategy": "combo", "params": {"nope": 1}})
@@ -460,3 +478,44 @@ def test_form_strategy_rejects_params() -> None:
     )
     _, errors = build_submission(req, CostSettings(), date(2026, 10, 30))
     assert errors
+
+
+# ---- 稳健性检验（#68）----
+
+
+def test_submit_robustness_marks_parent() -> None:
+    costs = CostSettings(commission_per_share=Decimal("0.005"), min_commission=Decimal("1"))
+    params, errors = build_submission(_req(strategy="combo", robustness=True), costs, LAST)
+    assert errors == [] and params["_robust"] is True
+    params, _ = build_submission(_req(strategy="combo"), costs, LAST)
+    assert "_robust" not in params
+
+
+@pytest.mark.db
+@needs_db
+def test_list_hides_children_and_shows_progress(client_db: TestClient, db_url: str) -> None:
+    parent = client_db.post(
+        "/api/backtests", json=valid_submit_body() | {"robustness": True}
+    ).json()["id"]
+    eng = create_engine(db_url)
+    with Session(eng) as s, s.begin():
+        for st in ("done", "failed", "queued"):
+            s.add(
+                BacktestRun(
+                    strategy="etf_momentum",
+                    params={},
+                    start=date(2020, 1, 2),
+                    end=date(2021, 1, 4),
+                    status=st,
+                    parent_id=parent,
+                    variant={"kind": "cost", "label": "x"},
+                )
+            )
+    eng.dispose()
+    rows = client_db.get("/api/backtests").json()
+    assert all(r["id"] != parent + 1 for r in rows)
+    me = next(r for r in rows if r["id"] == parent)
+    assert me["robust"] == {"total": 3, "done": 1, "failed": 1, "queued": 1, "running": 0}
+    assert "_robust" not in me["params"]
+    other = next(r for r in rows if r["id"] != parent)
+    assert other["robust"] is None

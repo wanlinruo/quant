@@ -217,3 +217,48 @@ def test_save_error_recorded_as_failure(engine: Engine, monkeypatch: pytest.Monk
     with Session(engine) as s:
         run = s.get(BacktestRun, rid)
         assert run is not None and run.status == "failed" and "写库失败" in (run.error or "")
+
+
+def _robust_parent(engine: Engine) -> int:
+    costs = {"commission_per_share": "0.005", "min_commission": "1", "slippage": "0.0005"}
+    stored = {"lookback": 126, "_costs": costs, "_cash": "50000", "_robust": True}
+    with Session(engine) as s, s.begin():
+        return create_run(s, "etf_momentum", stored, date(2016, 1, 4), date(2026, 10, 30))
+
+
+@pytest.mark.db
+@needs_db
+def test_parent_done_spawns_robustness_children(engine: Engine) -> None:
+    parent = _robust_parent(engine)
+    assert process_one(engine, SETTINGS, lambda spec, st: _fake_result()) == parent
+    with Session(engine) as s:
+        kids = s.scalars(select(BacktestRun).where(BacktestRun.parent_id == parent)).all()
+        assert kids and all(k.status == "queued" for k in kids)
+        kinds = {k.variant["kind"] for k in kids if k.variant}
+        assert kinds == {"grid", "extra", "cost", "start"}
+        cost3 = next(k for k in kids if k.variant and k.variant.get("cost_mult") == 3)
+        assert cost3.params["_costs"]["slippage"] == "0.0015" and cost3.params["_cash"] == "50000"
+        assert "_robust" not in cost3.params
+        grid = next(k for k in kids if k.variant and k.variant["kind"] == "grid")
+        assert grid.params["lookback"] in (84, 126, 168)
+        later = next(k for k in kids if k.variant and k.variant["kind"] == "start")
+        assert later.start == date(2016, 4, 4)
+    # 子任务完成后不再生成孙任务
+    n = len(kids)
+    process_one(engine, SETTINGS, lambda spec, st: _fake_result())
+    with Session(engine) as s:
+        assert s.query(BacktestRun).count() == n + 1
+
+
+@pytest.mark.db
+@needs_db
+def test_failed_parent_spawns_nothing(engine: Engine) -> None:
+    parent = _robust_parent(engine)
+
+    def boom(spec: BacktestSpec, st: Settings) -> BacktestResult:
+        raise RuntimeError("x")
+
+    process_one(engine, SETTINGS, boom)
+    with Session(engine) as s:
+        assert s.query(BacktestRun).count() == 1
+        assert s.get(BacktestRun, parent).status == "failed"  # type: ignore[union-attr]

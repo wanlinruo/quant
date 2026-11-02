@@ -140,20 +140,28 @@ def _from_dict(d: dict[str, Any] | None) -> Metrics | None:
     return Metrics(**vals)
 
 
-def checks(split: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    """组合策略验收标准（combo_checks 的 5 项）；缺数据的项与“相邻设置”（需稳健性检验）为 None。"""
+def checks(split: dict[str, dict[str, Any]], neighbors: bool | None = None) -> list[dict[str, Any]]:
+    """组合策略验收标准（combo_checks 的 5 项）；缺数据的项为 None。
+
+    “相邻设置”取稳健性检验子回测的判定（neighbors），未运行或未完成时为 None。
+    """
     full, qfull = _from_dict(split["full"]["strategy"]), _from_dict(split["full"]["qqq"])
     ins, qins = _from_dict(split["ins"]["strategy"]), _from_dict(split["ins"]["qqq"])
     oos, qoos = _from_dict(split["oos"]["strategy"]), _from_dict(split["oos"]["qqq"])
     if full is None:
-        return [{"label": lbl, "passed": None} for lbl in CHECK_LABELS]
+        return [
+            {"label": lbl, "passed": neighbors if i == 4 else None}
+            for i, lbl in enumerate(CHECK_LABELS)
+        ]
     q = qfull or full
     res = combo_checks(full, q, ins or full, qins or q, oos or full, qoos or q, [])
     out: list[dict[str, Any]] = []
     for i, (label, passed) in enumerate(res.items()):
         seg_missing = ins is None or oos is None or qins is None or qoos is None
         missing = (i in (1, 3) and qfull is None) or (i == 3 and seg_missing)
-        if missing or i == 4:
+        if i == 4:
+            out.append({"label": label, "passed": neighbors})
+        elif missing:
             out.append({"label": label, "passed": None})
         else:
             out.append({"label": label, "passed": bool(passed)})

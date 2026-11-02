@@ -255,3 +255,16 @@ pre.cmd.log { max-height: 260px; overflow: auto; white-space: pre; user-select: 
 .trend-legend span { display: inline-flex; align-items: center; gap: 4px; } .trend-legend i { width: 10px; height: 2px; display: inline-block; }
 .sys-disk { display: grid; gap: 6px; } .sys-disk .bar { width: 100%; margin: 0; display: block; } .sys-disk b { font-size: 16px; color: var(--text-strong); } .sys-disk b.down { color: var(--down); }
 .sys-tbl .r { text-align: right; }
+
+/* 回测稳健性（#68） */
+.rb { display: grid; gap: 12px; }
+.rb-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.rb-progress { display: flex; gap: 8px; align-items: center; }
+.rb-heat { display: grid; grid-template-columns: 48px repeat(3, minmax(0, 1fr)); gap: 4px; margin-bottom: 6px; }
+.rb-heat .ax { text-align: center; align-self: center; }
+.rb-row { display: contents; }
+.rb-cell { border: 1px solid var(--border); border-radius: 6px; padding: 8px 6px; display: grid; justify-items: center; gap: 2px; min-height: 52px; align-content: center; }
+.rb-cell b { color: var(--text-strong); font-size: 15px; }
+.rb-cell.center { outline: 2px solid var(--primary); outline-offset: -2px; }
+.dt tr.base-row td { color: var(--text-strong); font-weight: 600; }
+.field-check { display: block; margin: 8px 0; }
