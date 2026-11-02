@@ -1175,6 +1175,15 @@ class IntradayQuoteOut(BaseModel):
     quote_time: datetime
 
 
+class IntradayPositionOut(BaseModel):
+    symbol: str
+    qty: int
+    price: float
+    change_pct: float | None = None
+    day_pnl: float | None = None  # 隔夜持有部分按昨收、今天成交部分按成交价
+    traded_today: bool = False
+
+
 class IntradayOut(BaseModel):
     """盘中行情（#93，只供查看；交易用收盘日线）。"""
 
@@ -1185,3 +1194,5 @@ class IntradayOut(BaseModel):
     source: str = "Finnhub"
     note: str = ""
     quotes: list[IntradayQuoteOut] = []
+    positions: list[IntradayPositionOut] = []  # 给定 mode 时：该账户持仓的当日盈亏
+    day_pnl: float | None = None
