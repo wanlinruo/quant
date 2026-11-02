@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import type { BacktestAnalysis, BacktestDataStatus, BacktestDefaults, BacktestRunOut, BtTradeOut } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
@@ -14,6 +14,7 @@ import { PositionsTab } from "./backtest/PositionsTab";
 import { TradesTab } from "./backtest/TradesTab";
 import { RunHeader } from "./backtest/RunHeader";
 import { RobustTab } from "./backtest/RobustTab";
+import { RUNS_REFRESH_MS } from "./backtest/robustRefresh";
 import { RunList } from "./backtest/RunList";
 import { BacktestSubmitDrawer, type DrawerInitial } from "./BacktestSubmitDrawer";
 
@@ -65,6 +66,21 @@ export function BacktestPage() {
   const compare = selected.length >= 2;
   const analysis = useApi<BacktestAnalysis>(current && !compare ? `/api/backtests/${current.id}/analysis` : null);
   const a = analysis.data && analysis.data.id === current?.id ? analysis.data : null;
+  // 有排队或运行中的回测时定时刷新列表；选中回测的状态变化后重新取分析
+  const busy = list.some((r) => r.status === "queued" || r.status === "running");
+  const { reload: reloadRuns } = runs;
+  const { reload: reloadAnalysis } = analysis;
+  useEffect(() => {
+    if (!busy) return;
+    const t = setInterval(reloadRuns, RUNS_REFRESH_MS);
+    return () => clearInterval(t);
+  }, [busy, reloadRuns]);
+  const currentStatus = current?.status;
+  const seenStatus = useRef(currentStatus);
+  useEffect(() => {
+    if (seenStatus.current !== currentStatus && currentStatus !== undefined) reloadAnalysis();
+    seenStatus.current = currentStatus;
+  }, [currentStatus, reloadAnalysis]);
   const trade = picked && picked.run === current?.id ? picked.t : null;
 
   /** 点行：单个查看时切换到这一个；对比模式下排到第一位（满 5 个时挤掉最后一个）。同步网址。 */
@@ -114,7 +130,7 @@ export function BacktestPage() {
                 marks={trade ? [trade.open_date, ...(trade.close_date ? [trade.close_date] : [])] : undefined}
               />
               <Panel title={TABS.find((t) => t.key === tab)?.label ?? ""} right={<Tabs tabs={TABS.map((t) => ({ key: t.key, label: t.label }))} value={tab} onChange={setTab} />}>
-                <TabBody tab={tab} a={a} loading={analysis.loading} runId={current.id} trade={trade?.seq ?? null} onTrade={(t) => setPicked({ run: current.id, t })} />
+                <TabBody tab={tab} a={a} loading={analysis.loading} error={analysis.error?.message ?? null} runId={current.id} trade={trade?.seq ?? null} onTrade={(t) => setPicked({ run: current.id, t })} />
               </Panel>
             </div>
           ) : (
@@ -138,13 +154,13 @@ export function BacktestPage() {
   );
 }
 
-type TabBodyProps = { tab: TabKey; a: BacktestAnalysis | null; loading: boolean; runId: number; trade: number | null; onTrade: (t: BtTradeOut) => void };
+type TabBodyProps = { tab: TabKey; a: BacktestAnalysis | null; loading: boolean; error: string | null; runId: number; trade: number | null; onTrade: (t: BtTradeOut) => void };
 
-function TabBody({ tab, a, loading, runId, trade, onTrade }: TabBodyProps) {
+function TabBody({ tab, a, loading, error, runId, trade, onTrade }: TabBodyProps) {
   if (tab === "trades") return <TradesTab runId={runId} selected={trade} onSelect={onTrade} />;
   if (tab === "positions") return <PositionsTab runId={runId} />;
   if (tab === "robust") return <RobustTab runId={runId} strategy={a?.strategy ?? ""} />;
-  if (!a) return loading ? <div className="muted sm">加载中…</div> : <EmptyState />;
+  if (!a) return error ? <div className="error-box">分析加载失败：{error}</div> : loading ? <div className="muted sm">加载中…</div> : <EmptyState />;
   if (tab === "params") return <ParamsTab a={a} />;
   if (a.status !== "done") return <EmptyState note={a.status === "failed" ? `回测失败：${a.error ?? ""}` : "回测尚未完成"} />;
   if (tab === "overview") return <OverviewTab a={a} />;
