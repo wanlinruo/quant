@@ -90,6 +90,27 @@ def _walk_forward(s: Session, parent: BacktestRun, grid: list[BacktestRun]) -> R
     return out
 
 
+def _neighbors(kids: list[BacktestRun], combo: bool) -> tuple[list[RbRowOut], bool | None, str]:
+    """相邻参数逐个检查：行、判定（只有组合策略有阈值，全部完成才判定）、说明。"""
+    rows = [_row(k) for k in kids if (k.variant or {}).get("neighbor")]
+    if not combo:
+        return rows, None, "验收阈值只针对组合策略；这里列出各相邻参数相对本次的变化"
+    for r in rows:
+        r.passed = _passes(r.metrics) if r.status == "done" else None
+    unfinished = [r for r in rows if r.status != "done"]
+    if unfinished:
+        return rows, None, f"不完整：{len(unfinished)} 项未完成或失败"
+    if not rows:
+        return rows, None, ""
+    note = f"每项回撤 ≥ {NEIGHBOR_MAX_DRAWDOWN:.0%} 且夏普 ≥ {NEIGHBOR_MIN_SHARPE}"
+    return rows, all(bool(r.passed) for r in rows), note
+
+
+def _children(s: Session, run_id: int) -> list[BacktestRun]:
+    q = select(BacktestRun).where(BacktestRun.parent_id == run_id).order_by(BacktestRun.id)
+    return list(s.scalars(q))
+
+
 def robustness_view(s: Session, run_id: int) -> RobustnessOut | None:
     parent = s.get(BacktestRun, run_id)
     if parent is None:
@@ -98,11 +119,7 @@ def robustness_view(s: Session, run_id: int) -> RobustnessOut | None:
         return RobustnessOut(status="not_requested", note=NOT_REQUESTED)
     if parent.status == "failed":
         return RobustnessOut(status="not_requested", note="本次回测失败，没有生成子回测")
-    kids = list(
-        s.scalars(
-            select(BacktestRun).where(BacktestRun.parent_id == run_id).order_by(BacktestRun.id)
-        )
-    )
+    kids = _children(s, run_id)
     progress = robust_progress(s, [run_id]).get(run_id)
     pending = parent.status != "done" or any(k.status not in FINISHED for k in kids)
     out = RobustnessOut(status="pending" if pending else "done", progress=progress)
@@ -155,21 +172,7 @@ def robustness_view(s: Session, run_id: int) -> RobustnessOut | None:
                     grid_cells.append(RbCellOut(x=x, y=y, label=label, status="skipped"))
         out.grid = RbGridOut(x_label=xl, y_label=yl, x_values=xs, y_values=ys, cells=grid_cells)
 
-    nb = [k for k in kids if (k.variant or {}).get("neighbor")]
-    out.neighbors = [_row(k) for k in nb]
-    if combo:
-        for r in out.neighbors:
-            r.passed = _passes(r.metrics) if r.status == "done" else None
-        unfinished = [r for r in out.neighbors if r.status != "done"]
-        if unfinished:
-            out.neighbors_note = f"不完整：{len(unfinished)} 项未完成或失败"
-        elif out.neighbors:
-            out.neighbors_verdict = all(bool(r.passed) for r in out.neighbors)
-            out.neighbors_note = (
-                f"每项回撤 ≥ {NEIGHBOR_MAX_DRAWDOWN:.0%} 且夏普 ≥ {NEIGHBOR_MIN_SHARPE}"
-            )
-    else:
-        out.neighbors_note = "验收阈值只针对组合策略；这里列出各相邻参数相对本次的变化"
+    out.neighbors, out.neighbors_verdict, out.neighbors_note = _neighbors(kids, combo)
 
     grid = by_kind.get("grid", [])
     if not any(k.status not in FINISHED for k in grid):
@@ -198,5 +201,7 @@ def robustness_view(s: Session, run_id: int) -> RobustnessOut | None:
 
 def neighbor_verdict(s: Session, run_id: int) -> bool | None:
     """概览“相邻设置”验收项：子回测全部完成时的判定，否则 None。"""
-    v = robustness_view(s, run_id)
-    return v.neighbors_verdict if v is not None else None
+    parent = s.get(BacktestRun, run_id)
+    if parent is None or parent.status != "done" or not parent.params.get(robustness.ROBUST_KEY):
+        return None
+    return _neighbors(_children(s, run_id), parent.strategy == "combo")[1]

@@ -155,3 +155,20 @@ def test_overview_neighbor_check_uses_children(client: TestClient, db_url: str) 
     pid = _seed(db_url)
     checks = client.get(f"/api/backtests/{pid}/analysis").json()["overview"]["checks"]
     assert checks[-1]["label"].startswith("相邻设置") and checks[-1]["passed"] is False
+
+
+def test_overview_does_not_load_walk_forward(
+    client: TestClient, db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """概览只需要相邻判定，不读子回测净值（性能）。"""
+    import quant.api.robustness_view as rv
+
+    pid = _seed(db_url)
+
+    def boom(*a: object) -> None:
+        raise AssertionError("概览不应计算 walk-forward")
+
+    monkeypatch.setattr(rv, "_walk_forward", boom)
+    r = client.get(f"/api/backtests/{pid}/analysis")
+    assert r.status_code == 200
+    assert r.json()["overview"]["checks"][-1]["passed"] is False
