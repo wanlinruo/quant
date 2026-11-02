@@ -1,7 +1,7 @@
 """盘中行情接口（#93）：常规时段返回当天最新报价；其它时段只返回所处时段与说明。"""
 
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -146,3 +146,115 @@ def test_no_false_delay_warning_right_after_open(
     d = TestClient(create_app()).get("/api/market/intraday").json()
     _clear()
     assert d["stale"] is False and "采集中" in d["note"]
+
+
+# ---- 持仓当日盈亏（调仓日从成交价算起）----
+
+
+def _seed_positions(db_url: str) -> None:
+    from decimal import Decimal
+
+    from quant.db.models import Fill, PositionSnapshot
+
+    eng = create_engine(db_url)
+    t = OPEN_NOW - timedelta(minutes=10)  # 今天 09:50 成交
+    with Session(eng) as s, s.begin():
+        for sym, price, pc in (
+            ("CRWD", 244.96, 250.4),
+            ("MSFT", 410.0, 400.0),
+            ("AAPL", 200.0, 190.0),
+        ):
+            s.merge(
+                IntradayQuote(
+                    symbol=sym,
+                    price=price,
+                    prev_close=pc,
+                    change_pct=price / pc - 1,
+                    quote_time=OPEN_NOW,
+                    fetched_at=OPEN_NOW,
+                    source="finnhub",
+                )
+            )
+        snap = date(2026, 11, 2)
+        for sym, qty in (("CRWD", 391), ("MSFT", 10), ("AAPL", 5)):
+            s.add(
+                PositionSnapshot(
+                    snapshot_date=snap,
+                    mode="paper",
+                    symbol=sym,
+                    qty=qty,
+                    avg_cost=Decimal(1),
+                    market_value=Decimal(1),
+                )
+            )
+        s.add(
+            PositionSnapshot(
+                snapshot_date=snap,
+                mode="live",
+                symbol="MSFT",
+                qty=99,
+                avg_cost=Decimal(1),
+                market_value=Decimal(1),
+            )
+        )
+        s.add_all(
+            [
+                Fill(
+                    broker_order_id="1",
+                    mode="paper",
+                    symbol="CRWD",
+                    side="BUY",
+                    qty=391,
+                    price=Decimal("242.306"),
+                    commission=Decimal(0),
+                    filled_at=t,
+                ),
+                Fill(
+                    broker_order_id="2",
+                    mode="paper",
+                    symbol="AAPL",
+                    side="SELL",
+                    qty=5,
+                    price=Decimal("195"),
+                    commission=Decimal(0),
+                    filled_at=t,
+                ),
+                Fill(
+                    broker_order_id="3",
+                    mode="paper",
+                    symbol="MSFT",
+                    side="BUY",
+                    qty=3,
+                    price=Decimal("405"),
+                    commission=Decimal(0),
+                    filled_at=t - timedelta(days=3),
+                ),
+            ]
+        )
+    eng.dispose()
+
+
+@needs_db
+def test_day_pnl_counts_from_fill_price_on_trade_day(
+    client: TestClient, db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import quant.api.intraday_view as iv
+
+    _seed_positions(db_url)
+    monkeypatch.setattr(iv, "_now", lambda: OPEN_NOW + timedelta(minutes=1))
+    d = client.get("/api/market/intraday", params={"mode": "paper"}).json()
+    pos = {p["symbol"]: p for p in d["positions"]}
+    assert set(pos) == {"CRWD", "MSFT", "AAPL"}  # 只取该账户
+    # 今天 242.306 买入：391 × (244.96 − 242.306)，不是按昨收 250.4
+    assert (
+        pos["CRWD"]["day_pnl"] == pytest.approx(391 * (244.96 - 242.306))
+        and pos["CRWD"]["traded_today"]
+    )
+    # 隔夜持有、今天没成交：按昨收
+    assert (
+        pos["MSFT"]["day_pnl"] == pytest.approx(10 * (410 - 400))
+        and not pos["MSFT"]["traded_today"]
+    )
+    # 昨天持有 10 股、今天 195 卖出 5 股：5 × (200 − 190) + 5 × (195 − 190)
+    assert pos["AAPL"]["day_pnl"] == pytest.approx(5 * 10 + 5 * 5)
+    assert d["day_pnl"] == pytest.approx(sum(p["day_pnl"] for p in d["positions"]))

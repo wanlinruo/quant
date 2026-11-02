@@ -168,7 +168,7 @@ export function MarketPage() {
           {m.stale && <span className="pill warn">今日数据尚未发布，显示上一交易日</span>}
         </div>
       )}
-      <IntradayPanel holdings={holdings.data ?? []} link={link} />
+      <IntradayPanel mode={account} link={link} />
       <Grid>
         <Cell span={9}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

@@ -258,15 +258,20 @@ describe("MarketPage", () => {
   it("intraday panel shows index and holdings with today's P&L during regular hours", async () => {
     const q = (symbol: string, price: number, prev: number) => ({ symbol, price, prev_close: prev, change_pct: price / prev - 1, quote_time: "2026-11-02T15:00:00Z" });
     const INTRA = { session: "regular", session_text: "盘中", as_of: "2026-11-02T15:00:00Z", stale: false, source: "Finnhub",
-      note: "Finnhub 盘中报价 · 仅供查看，交易用收盘日线", quotes: [q("SPY", 760, 755.72), q("QQQ", 700, 690.49), q("MSFT", 410, 400)] };
-    mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW], "/api/market/intraday": [200, INTRA],
-      "/api/portfolio/paper/holdings": [200, [{ symbol: "MSFT", qty: 10 }, { symbol: "QQQ", qty: 2 }]] });
+      note: "Finnhub 盘中报价 · 仅供查看，交易用收盘日线", quotes: [q("SPY", 760, 755.72), q("QQQ", 700, 690.49), q("CRWD", 244.96, 250.4)],
+      positions: [{ symbol: "CRWD", qty: 391, price: 244.96, change_pct: -0.0217, day_pnl: 1037.69, traded_today: true },
+        { symbol: "MSFT", qty: 10, price: 410, change_pct: 0.025, day_pnl: 100, traded_today: false }],
+      day_pnl: 1137.69 };
+    const fetch = mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW], "/api/market/intraday": [200, INTRA] });
     renderPage(<MarketPage />, "/");
     const panel = await screen.findByTestId("intraday");
     expect(within(panel).getByText("仅供查看", { exact: false })).toBeInTheDocument();
-    const msft = within(panel).getByText("MSFT").closest("tr") as HTMLElement;
-    expect(msft).toHaveTextContent("+$100");  // 10 × (410 − 400)
-    expect(within(panel).getByTestId("intraday-total")).toHaveTextContent("+$119");  // 100 + 2 × 9.51
+    const crwd = within(panel).getByText("CRWD").closest("tr") as HTMLElement;
+    expect(crwd).toHaveTextContent("+$1,037.69");
+    expect(crwd).toHaveTextContent("今日成交");
+    expect(within(panel).getByTestId("intraday-total")).toHaveTextContent("+$1,137.69");
+    const url = fetch.mock.calls.map(([u]) => String(u)).find((u) => u.includes("/api/market/intraday"));
+    expect(url).toContain("mode=paper");
   });
 
   it("intraday panel outside regular hours only explains the session", async () => {

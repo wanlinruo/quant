@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Link } from "react-router";
-import type { HoldingRow, IntradayOut, IntradayQuoteOut } from "../api/types";
+import type { IntradayOut } from "../api/types";
 import { useApi } from "../hooks/useApi";
 import { num, signedMoney, signedPct } from "../lib/format";
 import { etParts } from "../lib/time";
@@ -11,8 +11,8 @@ const INDEX = ["SPY", "QQQ", "DIA", "IWM"];
 const tone = (v: number | null | undefined) => (v == null ? "" : v > 0 ? "up" : v < 0 ? "down" : "");
 
 /** 首页盘中行情（#93）：只供查看，交易用收盘日线。接口出错时整块不显示。 */
-export function IntradayPanel({ holdings, link }: { holdings: HoldingRow[]; link: (s: string) => { pathname: string; search: string } }) {
-  const res = useApi<IntradayOut>("/api/market/intraday");
+export function IntradayPanel({ mode, link }: { mode: string; link: (s: string) => { pathname: string; search: string } }) {
+  const res = useApi<IntradayOut>("/api/market/intraday", { mode });
   const { reload } = res;
   useEffect(() => {
     const t = setInterval(reload, INTRADAY_REFRESH_MS);
@@ -29,11 +29,8 @@ export function IntradayPanel({ holdings, link }: { holdings: HoldingRow[]; link
   const quotes = new Map((d.quotes ?? []).map((q) => [q.symbol, q]));
   if (d.session !== "regular" || quotes.size === 0)
     return <section className="panel intraday-line" data-testid="intraday"><b>盘中行情</b> {head}</section>;
-  const rows = holdings
-    .map((h) => ({ h, q: quotes.get(h.symbol) }))
-    .filter((x): x is { h: HoldingRow; q: IntradayQuoteOut } => x.q !== undefined);
-  const pnl = (h: HoldingRow, q: IntradayQuoteOut) => (q.prev_close == null ? null : h.qty * (q.price - q.prev_close));
-  const total = rows.reduce((a, { h, q }) => a + (pnl(h, q) ?? 0), 0);
+  // 当日盈亏由后端计算：隔夜部分按昨收，今天成交的部分按成交价（调仓日不误算）
+  const rows = d.positions ?? [];
   return (
     <div data-testid="intraday">
       <Panel title="盘中行情" right={head}>
@@ -54,17 +51,17 @@ export function IntradayPanel({ holdings, link }: { holdings: HoldingRow[]; link
             <table className="dt compact">
               <thead><tr><th>持仓</th><th className="r">盘中价</th><th className="r">今日涨跌</th><th className="r">股数</th><th className="r">当日盈亏</th></tr></thead>
               <tbody>
-                {rows.map(({ h, q }) => (
-                  <tr key={h.symbol}>
-                    <td><Link to={link(h.symbol)}>{h.symbol}</Link></td>
-                    <td className="r num">{num(q.price, 2)}</td>
-                    <td className={`r num ${tone(q.change_pct)}`}>{signedPct(q.change_pct)}</td>
-                    <td className="r num">{h.qty}</td>
-                    <td className={`r num ${tone(pnl(h, q))}`}>{signedMoney(pnl(h, q))}</td>
+                {rows.map((p) => (
+                  <tr key={p.symbol}>
+                    <td><Link to={link(p.symbol)}>{p.symbol}</Link>{p.traded_today && <span className="tag" title="今天有成交：当日盈亏从成交价算起">今日成交</span>}</td>
+                    <td className="r num">{num(p.price, 2)}</td>
+                    <td className={`r num ${tone(p.change_pct)}`}>{signedPct(p.change_pct)}</td>
+                    <td className="r num">{p.qty}</td>
+                    <td className={`r num ${tone(p.day_pnl)}`}>{signedMoney(p.day_pnl)}</td>
                   </tr>
                 ))}
               </tbody>
-              <tfoot><tr><td colSpan={4} className="muted">合计（有盘中报价的持仓）</td><td className={`r num ${tone(total)}`} data-testid="intraday-total">{signedMoney(total)}</td></tr></tfoot>
+              <tfoot><tr><td colSpan={4} className="muted">合计（有盘中报价的持仓）</td><td className={`r num ${tone(d.day_pnl)}`} data-testid="intraday-total">{signedMoney(d.day_pnl)}</td></tr></tfoot>
             </table>
           )}
         </div>
