@@ -368,7 +368,7 @@ LOWER_BETTER = {"volatility"}  # 回撤为负数，取最大值（最浅）即�
 
 def compare_view(s: Session, ids: list[int]) -> BacktestCompare:
     runs, skipped, eqs = [], [], []
-    for rid in ids:
+    for rid in dict.fromkeys(ids):  # 去重，保持顺序
         run = s.get(BacktestRun, rid)
         eq = _equity(s, rid) if run is not None and run.status == "done" else None
         if run is None or eq is None:

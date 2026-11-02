@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -161,19 +162,50 @@ def code_version() -> str | None:
         here = Path(__file__).resolve().parent
         cmd = ["git", "rev-parse", "--short", "HEAD"]
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=5, cwd=here, check=True)
-        return out.stdout.strip() or None
+        sha = out.stdout.strip()
+        if not sha:
+            return None
+        st = ["git", "status", "--porcelain", "--untracked-files=no"]
+        dirty = subprocess.run(st, capture_output=True, text=True, timeout=5, cwd=here, check=True)
+        return f"{sha}-dirty" if dirty.stdout.strip() else sha  # 有未提交改动时标出
     except (OSError, subprocess.SubprocessError):
         return None
 
 
 class _Collect(logging.Handler):
-    def __init__(self) -> None:
+    """收集 quant.* 的 INFO 及以上日志；forward_level 不为 None 时，把达到该级别的记录
+    转交根日志器（代替向上传播），终端看到的级别与平时一致。"""
+
+    def __init__(self, forward_level: int | None) -> None:
         super().__init__(logging.INFO)
         self.lines: list[str] = []
+        self.forward_level = forward_level
 
     def emit(self, record: logging.LogRecord) -> None:
         t = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
         self.lines.append(f"{t} {record.levelname} {record.getMessage()}")
+        if self.forward_level is not None and record.levelno >= self.forward_level:
+            logging.getLogger().handle(record)
+
+
+@contextmanager
+def capture_quant_logs() -> Iterator[_Collect]:
+    """临时把 quant 日志器调到 INFO 以收集日志；原本更高的级别下，INFO 不传给终端。"""
+    lg = logging.getLogger("quant")
+    old_level, old_prop = lg.level, lg.propagate
+    effective = lg.getEffectiveLevel()
+    raise_level = effective > logging.INFO
+    handler = _Collect(effective if raise_level and old_prop else None)
+    lg.addHandler(handler)
+    if raise_level:
+        lg.setLevel(logging.INFO)
+        lg.propagate = False
+    try:
+        yield handler
+    finally:
+        lg.removeHandler(handler)
+        lg.setLevel(old_level)
+        lg.propagate = old_prop
 
 
 def run_spec(
@@ -183,17 +215,8 @@ def run_spec(
     refresh_data: bool = False,
 ) -> BacktestResult:
     """准备数据并回测；同时记录代码版本与运行期间 quant.* 的 INFO 及以上日志（最多 200 行）。"""
-    handler = _Collect()
-    root = logging.getLogger("quant")
-    old_level = root.level
-    root.addHandler(handler)
-    if root.getEffectiveLevel() > logging.INFO:
-        root.setLevel(logging.INFO)
-    try:
+    with capture_quant_logs() as handler:
         result = _run_spec(spec, settings, provider, refresh_data)
-    finally:
-        root.removeHandler(handler)
-        root.setLevel(old_level)
     return replace(result, code_version=code_version(), log=trim_log(handler.lines))
 
 

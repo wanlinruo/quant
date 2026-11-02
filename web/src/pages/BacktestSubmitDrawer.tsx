@@ -147,7 +147,13 @@ export function BacktestSubmitDrawer({ defaults, initial, onClose, onSubmitted }
       </div>
       <label className="field">
         <span>策略</span>
-        <select value={form.strategy} onChange={set("strategy")}>
+        <select
+          value={form.strategy}
+          onChange={(e) => {
+            setForm({ ...form, strategy: e.target.value });
+            setEdits({}); // 改过的参数只属于原策略
+          }}
+        >
           {defaults.strategies.map((s) => <option key={s}>{s}</option>)}
         </select>
       </label>
