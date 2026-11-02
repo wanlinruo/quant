@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from quant.data.market_store import ETF_SET, SECTOR_ETF, GicsTable
+from quant.data.market_store import ETF_SET, SECTOR_ETF, GicsTable, MarketStore
 from quant.market import board as b
 
 N = 300
@@ -228,10 +228,8 @@ def test_movers_keep_signal_rows_beyond_cap() -> None:
 # ---- 盘中当日 K 线（#93）----
 
 
-def _store(tmp_path: object, days: pd.DatetimeIndex = IDX) -> "MarketStore":  # type: ignore[name-defined]
+def _store(tmp_path: object, days: pd.DatetimeIndex = IDX) -> MarketStore:
     from pathlib import Path
-
-    from quant.data.market_store import MarketStore
 
     store = MarketStore(Path(str(tmp_path)))
     f = frames()

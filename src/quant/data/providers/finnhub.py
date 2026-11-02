@@ -78,6 +78,9 @@ class Quote:
     prev_close: float | None
     change_pct: float | None  # 小数，如 -0.0123
     time: datetime  # 最新成交时间（UTC）
+    open: float | None = None  # 当日开盘、最高、最低（拼盘中当日 K 线用）
+    high: float | None = None
+    low: float | None = None
 
 
 class FinnhubClient:
@@ -170,4 +173,7 @@ class FinnhubClient:
             _num(body.get("pc")) or None,
             dp / 100 if dp is not None else None,
             datetime.fromtimestamp(t, UTC),
+            open=_num(body.get("o")) or None,
+            high=_num(body.get("h")) or None,
+            low=_num(body.get("l")) or None,
         )
