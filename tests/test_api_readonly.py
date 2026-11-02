@@ -86,7 +86,7 @@ def _get_paths(tmp: Path) -> list[str]:
     out = {
         prefix + r.path.replace("{path:path}", "x")
         for prefix, r in routes
-        if isinstance(r, APIRoute) and "GET" in r.methods
+        if isinstance(r, APIRoute) and "GET" in (r.methods or set())
     }
     return sorted(re.sub(r"\{[^}]+\}", "1", p) for p in out)
 
