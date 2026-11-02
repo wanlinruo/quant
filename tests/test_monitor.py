@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -51,7 +50,7 @@ class FakeDocker:
             ]
         if path.endswith("/stats?stream=false"):
             if self.fail_stats:
-                raise httpx.ConnectError("down")
+                raise OSError("down")
             return {
                 "cpu_stats": {
                     "cpu_usage": {"total_usage": 3_000},
@@ -110,7 +109,7 @@ def test_docker_failure_keeps_host(tmp_path: Path) -> None:
 def test_docker_unreachable_keeps_host(tmp_path: Path) -> None:
     class Down:
         def get(self, path: str) -> Any:
-            raise httpx.ConnectError("proxy down")
+            raise OSError("proxy down")
 
     rows = monitor.Collector(Down(), _proc(tmp_path, STAT1), tmp_path).collect(NOW)
     assert [r.kind for r in rows] == ["host"]
@@ -158,3 +157,25 @@ def test_malformed_docker_payload_keeps_host(tmp_path: Path) -> None:
 
     rows = monitor.Collector(Weird(), _proc(tmp_path, STAT1), tmp_path).collect(NOW)
     assert any(r.kind == "host" for r in rows)
+
+
+def test_monitor_uses_only_runtime_dependencies() -> None:
+    """生产镜像不装开发依赖（httpx 等），monitor 只能用标准库与运行时依赖。"""
+    src = Path(monitor.__file__).read_text(encoding="utf-8")
+    assert "httpx" not in src
+
+
+def test_http_docker_reads_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+
+    seen = []
+
+    def fake_urlopen(url: str, timeout: float) -> Any:
+        seen.append(url)
+        return io.BytesIO(b'[{"Id": "x"}]')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    assert monitor.HttpDocker("http://docker-proxy:2375/").get("/containers/json?all=1") == [
+        {"Id": "x"}
+    ]
+    assert seen == ["http://docker-proxy:2375/containers/json?all=1"]
