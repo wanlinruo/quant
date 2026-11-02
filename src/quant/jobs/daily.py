@@ -473,10 +473,10 @@ def _weights_text(weights: dict[str, float]) -> str:
     return "，".join(f"{s} {w:.0%}" for s, w in sorted(weights.items(), key=lambda x: -x[1]))
 
 
-def _all_holdings(ctx: JobContext) -> set[str]:
-    """各账户（模式）最新持仓快照中的代码；没有数据库时为空。"""
+def _all_holdings(ctx: JobContext) -> set[str] | None:
+    """各账户（模式）最新持仓快照中的代码；没有数据库时为 None（不知道持仓）。"""
     if ctx.engine is None:
-        return set()
+        return None
     with Session(ctx.engine) as s:
         latest = (
             select(PositionSnapshot.mode, func.max(PositionSnapshot.snapshot_date))
@@ -504,7 +504,7 @@ def market_data(ctx: JobContext, d: date) -> str:
     from quant.data.providers.massive import MassiveClient
     from quant.market.job import run_market_data
 
-    holdings = _all_holdings(ctx)
+    holdings = _all_holdings(ctx) or set()
     now_day = ctx.calendar.last_completed_trading_day(ctx.now())
     return run_market_data(MassiveClient(key), ctx.settings.data_dir, d, ctx.calendar,
                            ctx.settings.board, holdings, now_day=now_day)  # fmt: skip
@@ -525,7 +525,7 @@ def market_extras(ctx: JobContext, d: date) -> str:
         now=ctx.now(),
         today=d,
         cal=ctx.calendar,
-        holdings=_all_holdings(ctx),
+        holdings=_all_holdings(ctx) or set(),
         fred=FredClient(fred_key) if fred_key else None,
         finnhub=FinnhubClient(fh_key) if fh_key else None,
     )

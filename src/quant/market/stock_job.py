@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -63,13 +64,14 @@ def run_stock_data(
     data_dir: Path,
     today: date,
     now: datetime,
-    holdings: set[str],
+    holdings: AbstractSet[str] | None,
     finnhub: FinnhubLike,
     metrics_per_run: int = 120,
 ) -> str:
     gics = load_gics(data_dir)
     members = set(gics.members) if gics else set()
-    universe = sorted(s for s in members | holdings
+    held = set(holdings or ())
+    universe = sorted(s for s in members | held
                       if s not in ETF_SET and STOCK_SYMBOL_RE.match(s))  # fmt: skip
     docs: dict[str, dict[str, Any]] = {}
     for s in universe:
@@ -77,7 +79,7 @@ def run_stock_data(
         docs[s] = _load(p) if p else {}
 
     def order(field: str) -> list[str]:
-        return sorted(universe, key=lambda s: (s not in holdings, docs[s].get(field) or "", s))
+        return sorted(universe, key=lambda s: (s not in held, docs[s].get(field) or "", s))
 
     def save(s: str) -> None:
         p = stock_path(data_dir, s)
@@ -112,7 +114,8 @@ def run_stock_data(
     except DataUnavailableError as e:
         notes.append(f"限流或故障，停在{stage}阶段（{e}）")
     removed = 0
-    if gics is not None:  # 读不到成分表时一个都不删（避免误删全部）
+    # 读不到成分表、或不知道持仓（没有数据库）时一个都不删：避免误删全部或仍持有的代码
+    if gics is not None and holdings is not None:
         keep = set(universe)
         for p in (market_dir(data_dir) / "stocks").glob("*.json"):
             if p.stem not in keep:

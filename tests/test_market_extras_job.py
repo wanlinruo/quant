@@ -14,7 +14,7 @@ from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.coinbase import URL as COINBASE_URL
 from quant.data.providers.finnhub import EarningsRaw, FinnhubAuthError, NewsRaw
 from quant.data.providers.forexfactory import URL as FF_URL
-from quant.data.providers.fred import Obs
+from quant.data.providers.fred import FredUnreachable, Obs
 from quant.market.extras_job import run_market_extras
 
 CAL = get_calendar()
@@ -24,14 +24,18 @@ T_NEWS = datetime(2026, 11, 6, 18, 0, tzinfo=UTC)
 
 
 class FakeFred:
-    def __init__(self, fail: set[str] = frozenset()) -> None:  # type: ignore[assignment]
-        self.fail = fail
+    """fail：连不上（FredUnreachable）；bad：单个序列返回错误（如 4xx、解析失败）。"""
+
+    def __init__(self, fail: set[str] = frozenset(), bad: set[str] = frozenset()) -> None:  # type: ignore[assignment]
+        self.fail, self.bad = fail, bad
         self.calls: list[str] = []
 
     def observations(self, series: str, start: date) -> list[Obs]:
         self.calls.append(series)
         if series in self.fail:
-            raise DataUnavailableError("down")
+            raise FredUnreachable("down")
+        if series in self.bad:
+            raise DataUnavailableError("FRED X 返回 404")
         if series == "PAYEMS":
             return [Obs(date(2026, 9, 1), 159_000.0), Obs(date(2026, 10, 1), 159_063.0)]
         return [Obs(date(2026, 11, 4), 17.0), Obs(date(2026, 11, 5), 17.5)]
@@ -260,3 +264,12 @@ def test_fred_stops_after_network_failure(tmp_path: Path) -> None:
     summary = run(tmp_path, fred=fred, finnhub=None)
     assert fred.calls == ["VIXCLS"]  # 宏观与实际值都不再请求
     assert summary.count("FRED") == 1
+
+
+def test_fred_single_series_error_does_not_stop_others(tmp_path: Path) -> None:
+    fred = FakeFred(bad={"VIXCLS"})
+    summary = run(tmp_path, fred=fred, finnhub=None)
+    assert fred.calls[0] == "VIXCLS" and len(fred.calls) > 1  # 其它序列照常请求
+    assert "VIXCLS" in summary
+    symbols = [i["symbol"] for i in read(tmp_path, "macro.json")["items"]]
+    assert "VIX" not in symbols and "US10Y" in symbols

@@ -6,7 +6,7 @@ import { ShellContext } from "../shell";
 import { currentLocation, mkMeta, mockApi, renderAt, renderPage } from "../test/utils";
 import { BacktestPage } from "./BacktestPage";
 import { ANALYSIS, POSITIONS, TRADES } from "./backtest/analysisFixture";
-import { ROBUST_REFRESH_MS } from "./backtest/robustRefresh";
+import { ROBUST_REFRESH_MS, RUNS_REFRESH_MS } from "./backtest/robustRefresh";
 
 const run = (id: number, status = "done") => ({
   id, strategy: "combo", status, start: "2016-10-28", end: "2026-10-29", params: {}, costs: null,
@@ -472,5 +472,21 @@ describe("BacktestPage", () => {
     await user.selectOptions(strategy, "combo");
     const again = await within(dlg).findByLabelText("swing.stop_pct");
     expect(again).toHaveValue(0.07);
+  });
+
+  it("refreshes the list while a run is queued or running", async () => {
+    const fetch = mockApi({ "/api/backtests": [200, [run(160, "running")]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/160/analysis": [200, { ...ANALYSIS, id: 160, status: "running" }] });
+    renderPage(<BacktestPage />, "/backtest");
+    await screen.findByText("#160");
+    const calls = () => fetch.mock.calls.filter(([u]) => new URL(String(u), "http://x").pathname === "/api/backtests").length;
+    const first = calls();
+    await new Promise((r) => setTimeout(r, RUNS_REFRESH_MS * 2 + 100));
+    expect(calls()).toBeGreaterThan(first);
+  });
+
+  it("shows the analysis error instead of an empty state", async () => {
+    mockApi({ "/api/backtests": [200, [run(170)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/170/analysis": [500, { detail: "分析失败：数据缺失" }] });
+    renderPage(<BacktestPage />, "/backtest");
+    expect(await screen.findByText(/分析失败：数据缺失/)).toBeInTheDocument();
   });
 });

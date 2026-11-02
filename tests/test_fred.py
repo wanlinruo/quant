@@ -1,13 +1,15 @@
 """FRED 客户端（#69 第 2 批 Task 1）。不访问网络。"""
 
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
+from typing import Any
 
 import pytest
 from pydantic import SecretStr
 
 from fakes import FakeFetch
 from quant.data.providers.base import DataUnavailableError
-from quant.data.providers.fred import FredAuthError, FredClient, Obs
+from quant.data.providers.fred import FredAuthError, FredClient, FredUnreachable, Obs
 
 
 def client(fetch: object, key: str = "k") -> FredClient:
@@ -53,3 +55,27 @@ def test_network_error_message_has_no_url() -> None:
         client(boom, "SECRET").observations("X", date(2026, 1, 1))
     assert "SECRET" not in str(e.value)
     assert e.value.__cause__ is None and e.value.__suppress_context__
+
+
+@pytest.mark.parametrize("status", [500, 503, 429])
+def test_server_errors_are_unreachable(status: int) -> None:
+    with pytest.raises(FredUnreachable):
+        client(FakeFetch((status, "oops")), "SECRET").observations("X", date(2026, 1, 1))
+
+
+def test_client_error_is_not_unreachable() -> None:
+    with pytest.raises(DataUnavailableError) as e:
+        client(FakeFetch((404, {"error_message": "Bad series"})), "SECRET").observations(
+            "X", date(2026, 1, 1)
+        )
+    assert not isinstance(e.value, FredUnreachable)
+
+
+def test_network_error_is_unreachable() -> None:
+    def boom(url: str, headers: Mapping[str, str]) -> tuple[int, Any]:
+        raise OSError("timeout")
+
+    with pytest.raises(FredUnreachable):
+        FredClient(SecretStr("K"), fetch=boom, sleep=lambda s: None).observations(
+            "X", date(2026, 1, 1)
+        )

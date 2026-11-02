@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Sequence
+from collections.abc import Set as AbstractSet
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -57,9 +58,9 @@ def gics(data_dir: Path, syms: list[str]) -> None:
     p.write_text("Symbol,Security,GICS Sector,GICS Sub-Industry\n" + rows, encoding="utf-8")
 
 
-def run(data_dir: Path, fh: FakeFinnhub, holdings: set[str] | None = None, today: date = TODAY,
-        metrics_per_run: int = 120) -> str:  # fmt: skip
-    return run_stock_data(data_dir=data_dir, today=today, now=NOW, holdings=holdings or set(),
+def run(data_dir: Path, fh: FakeFinnhub, holdings: AbstractSet[str] | None = frozenset(),
+        today: date = TODAY, metrics_per_run: int = 120) -> str:  # fmt: skip
+    return run_stock_data(data_dir=data_dir, today=today, now=NOW, holdings=holdings,
                           finnhub=fh, metrics_per_run=metrics_per_run)  # fmt: skip
 
 
@@ -180,3 +181,12 @@ def test_no_cleanup_without_gics(tmp_path: Path) -> None:
     run(tmp_path, FakeFinnhub(), holdings={"S0"}, today=TODAY + timedelta(days=1))
     left = sorted(p.stem for p in (tmp_path / "market" / "stocks").glob("*.json"))
     assert left == ["S0", "S1"]
+
+
+def test_unknown_holdings_keep_non_member_files(tmp_path: Path) -> None:
+    """没有数据库时不知道持仓（holdings=None）：不删非成分股文件，可能仍在持有。"""
+    gics(tmp_path, ["S0"])
+    run(tmp_path, FakeFinnhub(), holdings={"HELD"})
+    run(tmp_path, FakeFinnhub(), holdings=None, today=TODAY + timedelta(days=1))
+    left = sorted(p.stem for p in (tmp_path / "market" / "stocks").glob("*.json"))
+    assert left == ["HELD", "S0"]
