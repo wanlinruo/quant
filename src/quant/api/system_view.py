@@ -30,6 +30,7 @@ from quant.api.schemas import (
     SystemOverview,
     SysTodayOut,
 )
+from quant.api.system_resources import resources
 from quant.core.calendar import TradingCalendar
 from quant.core.settings import Settings
 from quant.data.events import load_fomc_dates
@@ -525,6 +526,10 @@ def overview(
     grid = _grid(s, mode, days, cal, settings, now)
     timeline = _timeline(grid, s, mode, today, cal, settings)
     cards, banner = _cards_and_banner(s, mode, settings, grid, timeline, today, sources, now)
+    res = resources(s, now)
+    if res.items:
+        banner.items = [*banner.items, *res.items]
+        banner.level = "error" if banner.level == "error" else "warn"
     return SystemOverview(
         mode=mode,
         today=today,
@@ -537,6 +542,7 @@ def overview(
         upcoming=upcoming,
         events=_events(s, mode, now),
         queue=_queue(s),
+        resources=res,
     )
 
 

@@ -9,7 +9,8 @@ import { useApi } from "../hooks/useApi";
 import { formatDateTimeET } from "../lib/time";
 import { useShell } from "../shell";
 import { AttemptsDialog, JobGrid } from "./system/JobGrid";
-import { Banner, Events, Pending, Queue, Risk, Sources, Timeline, Upcoming } from "./system/Panels";
+import { Banner, Events, Queue, Risk, Sources, Timeline, Upcoming } from "./system/Panels";
+import { Containers, DiskForecast, NO_SAMPLES, ResourceCard, TrendChart } from "./system/Resources";
 
 const ROW4_H = 330;
 const ROW5_H = 300;
@@ -39,7 +40,9 @@ export function SystemPage() {
               {(o.cards ?? []).map((c) => <Cell key={c.key} span={2}>{card(c)}</Cell>)}
             </Grid>
             <Grid>
-              {RESOURCES.map((r) => <Cell key={r} span={3}><Stat label={r} value="—" sub={<Pending />} /></Cell>)}
+              {(o.resources?.cards?.length ? o.resources.cards : RESOURCES.map((label) => ({ key: label, label, text: NO_SAMPLES }))).map((c) => (
+                <Cell key={c.key} span={3}><ResourceCard c={c} /></Cell>
+              ))}
             </Grid>
             <Grid>
               <Cell span={9}>
@@ -59,7 +62,7 @@ export function SystemPage() {
               <Cell span={3}><Panel title="接下来的交易日" height={ROW5_H} scroll><Upcoming rows={o.upcoming ?? []} /></Panel></Cell>
             </Grid>
             <Grid>
-              <Cell span={5}><Panel title="服务容器" height={ROW6_H}><Pending /></Panel></Cell>
+              <Cell span={5}><Panel title="服务容器" height={ROW6_H} scroll><Containers rows={o.resources?.containers ?? []} version={o.resources?.version} /></Panel></Cell>
               <Cell span={4}><Panel title="告警与事件 · 近 30 天" height={ROW6_H} scroll><Events rows={o.events ?? []} /></Panel></Cell>
               <Cell span={3}>
                 <Panel title="回测队列" height={ROW6_H}>
@@ -68,8 +71,8 @@ export function SystemPage() {
               </Cell>
             </Grid>
             <Grid>
-              <Cell span={9}><Panel title="资源趋势 · 7 天" height={150}><Pending /></Panel></Cell>
-              <Cell span={3}><Panel title="磁盘写满预测" height={150}><Pending /></Panel></Cell>
+              <Cell span={9}><Panel title="资源趋势 · 7 天" height={170}><TrendChart t={o.resources?.trends ?? {}} /></Panel></Cell>
+              <Cell span={3}><Panel title="磁盘写满预测" height={170}>{o.resources?.disk ? <DiskForecast d={o.resources.disk} /> : <div className="muted">{NO_SAMPLES}</div>}</Panel></Cell>
             </Grid>
             {pick && <AttemptsDialog mode={account} pick={pick} onClose={() => setPick(null)} />}
           </>

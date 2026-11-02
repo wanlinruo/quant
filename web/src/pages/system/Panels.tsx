@@ -4,7 +4,6 @@ import { etParts, formatDateTimeET } from "../../lib/time";
 import { duration, SOURCE_TEXT, STATUS_TEXT } from "./labels";
 
 const LEVEL_TEXT = { ok: "正常", warn: "需要注意", error: "出错" } as const;
-export const PENDING_RESOURCES = "资源采集接入中（#71 B 批）";
 
 export function Banner({ banner }: { banner: SysBannerOut }) {
   const items = banner.items ?? [];
@@ -137,8 +136,4 @@ export function Queue({ q }: { q: SysQueueOut }) {
       <div className="muted">最近完成：{formatDateTimeET(q.last_finished)}</div>
     </div>
   );
-}
-
-export function Pending({ text = PENDING_RESOURCES }: { text?: string }) {
-  return <div className="muted sys-pending">{text}</div>;
 }

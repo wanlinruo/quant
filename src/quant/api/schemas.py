@@ -1024,6 +1024,52 @@ class SysQueueOut(BaseModel):
     last_finished: datetime | None = None
 
 
+class SysResourceOut(BaseModel):
+    key: str
+    label: str
+    value: float | None = None  # 百分比
+    text: str = ""
+    level: Literal["ok", "warn", "error", "info"] = "info"
+    series: list[float | None] = []  # 24 小时，每 5 分钟均值
+
+
+class SysContainerOut(BaseModel):
+    name: str
+    state: str | None = None
+    status: str | None = None
+    cpu_pct: float | None = None
+    mem_bytes: int | None = None
+    mem_limit: int | None = None
+    started_at: str | None = None
+    restarts: int | None = None
+    stale: bool = False  # 超过 5 分钟没有新采样
+
+
+class SysTrendOut(BaseModel):
+    times: list[datetime] = []  # 7 天，每小时
+    cpu: list[float | None] = []
+    mem: list[float | None] = []
+    disk: list[float | None] = []
+
+
+class SysDiskOut(BaseModel):
+    used: int | None = None
+    total: int | None = None
+    per_day: float | None = None  # 字节 / 天
+    days_left: float | None = None
+    note: str = ""
+
+
+class SysResourcesOut(BaseModel):
+    sampled_at: datetime | None = None
+    version: str | None = None
+    cards: list[SysResourceOut] = []
+    containers: list[SysContainerOut] = []
+    trends: SysTrendOut = SysTrendOut()
+    disk: SysDiskOut = SysDiskOut()
+    items: list[SysItemOut] = []  # 横幅提示
+
+
 class SystemOverview(BaseModel):
     mode: str
     today: date
@@ -1036,6 +1082,7 @@ class SystemOverview(BaseModel):
     upcoming: list[SysDayOut] = []
     events: list[SysEventOut] = []
     queue: SysQueueOut | None = None
+    resources: SysResourcesOut | None = None
 
 
 class SysAttemptOut(BaseModel):
