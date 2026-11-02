@@ -86,6 +86,67 @@ class RobustProgressOut(BaseModel):
     running: int
 
 
+class RbMetricsOut(BaseModel):
+    cagr: float | None = None
+    sharpe: float | None = None
+    max_drawdown: float | None = None
+
+
+class RbRowOut(BaseModel):
+    label: str
+    run_id: int | None = None
+    status: str
+    metrics: RbMetricsOut | None = None
+    passed: bool | None = None  # 只有组合策略的相邻设置判定
+    base: bool = False  # 本次（父回测）
+
+
+class RbCellOut(BaseModel):
+    x: int
+    y: int
+    label: str
+    run_id: int | None = None
+    status: str  # done / queued / running / failed / skipped（参数越界未跑）
+    metrics: RbMetricsOut | None = None
+    center: bool = False
+
+
+class RbGridOut(BaseModel):
+    x_label: str
+    y_label: str
+    x_values: list[str]
+    y_values: list[str]
+    cells: list[RbCellOut]
+
+
+class RbWfSegOut(BaseModel):
+    year: int
+    chosen: str
+    test_return: float
+    base_return: float
+
+
+class RbWfOut(BaseModel):
+    train_years: int
+    note: str = ""
+    segments: list[RbWfSegOut] = []
+    strategy: RbMetricsOut | None = None  # 拼接的样本外
+    base: RbMetricsOut | None = None  # 本次参数同期
+
+
+class RobustnessOut(BaseModel):
+    status: Literal["not_requested", "pending", "done"]
+    note: str = ""
+    progress: RobustProgressOut | None = None
+    grid: RbGridOut | None = None
+    neighbors: list[RbRowOut] = []
+    neighbors_verdict: bool | None = None
+    neighbors_note: str = ""
+    walk_forward: RbWfOut | None = None
+    costs: list[RbRowOut] = []
+    starts: list[RbRowOut] = []
+
+
 class BacktestRunOut(BaseModel):
     id: int
     strategy: str

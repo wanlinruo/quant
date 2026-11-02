@@ -7,11 +7,15 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import Any, Literal
+
+import numpy as np
+import pandas as pd
 
 from quant.strategies.combo import V2_SWING, ComboParams
 from quant.strategies.etf_momentum import MomentumParams as EtfParams
@@ -185,3 +189,82 @@ def scale_costs(raw: Mapping[str, str], mult: float) -> dict[str, str]:
             d = Decimal(v)
             out[k] = str((d * Decimal(str(mult))).quantize(d))
     return out
+
+
+def grid_axes(
+    strategy: str, params: Mapping[str, Any]
+) -> tuple[tuple[str, list[str]], tuple[str, list[str]]]:
+    """网格两轴的名称与 3 个取值（显示用，中间为父回测的值）。"""
+    ax, ay, _ = AXES[strategy]
+    base = {k: v for k, v in params.items() if not k.startswith("_")}
+    out = []
+    for a in (ax, ay):
+        b = _get(base, DEFAULTS[strategy], a.path)
+        out.append((a.label, [a.fmt.format(_value(b, a.step, k)) for k in (-1, 0, 1)]))
+    return out[0], out[1]
+
+
+# ---- walk-forward：用网格各格的净值逐年滚动选参 ----
+
+TRAIN_YEARS = 3
+
+
+@dataclass(frozen=True)
+class WfSegment:
+    year: int
+    chosen: str
+    test_return: float
+    base_return: float
+
+
+@dataclass(frozen=True)
+class WalkForward:
+    segments: list[WfSegment]
+    oos: pd.Series  # 拼接的样本外净值（起点 1）
+    base: pd.Series  # 父回测同期净值（起点 1）
+
+
+def _sharpe(r: pd.Series) -> float:
+    sd = float(r.std())
+    return float(r.mean()) / sd * math.sqrt(252) if sd > 0 else float("-inf")
+
+
+def _ret(r: pd.Series) -> float:
+    return float(np.prod(1 + r.to_numpy(dtype=float)) - 1)
+
+
+def _year(r: pd.Series, year: int) -> pd.Series:
+    return r.loc[pd.DatetimeIndex(r.index).year == year]
+
+
+def walk_forward(
+    series: Mapping[str, pd.Series], base: str, train_years: int = TRAIN_YEARS
+) -> WalkForward | None:
+    """每个测试年选训练期（前 train_years 个完整日历年）夏普最高的一格，取其该年收益。
+
+    series 为各格净值（日期索引，含父回测 base）；历史不足 train_years + 1 年时返回 None。
+    """
+    rets = {k: s.sort_index().pct_change().dropna() for k, s in series.items() if len(s) > 1}
+    if base not in rets:
+        return None
+    first = max(r.index[0] for r in rets.values())
+    last = min(r.index[-1] for r in rets.values())
+    y0 = first.year + (0 if (first.month, first.day) <= (1, 10) else 1)  # 第一个完整日历年
+    segs: list[WfSegment] = []
+    oos_parts: list[pd.Series] = []
+    base_parts: list[pd.Series] = []
+    for year in range(y0 + train_years, last.year + 1):
+        lo, hi = pd.Timestamp(year - train_years, 1, 1), pd.Timestamp(year - 1, 12, 31)
+        score = {k: _sharpe(r[(r.index >= lo) & (r.index <= hi)]) for k, r in rets.items()}
+        chosen = max(sorted(score), key=lambda k: score[k])
+        test, btest = _year(rets[chosen], year), _year(rets[base], year)
+        if test.empty:
+            continue
+        segs.append(WfSegment(year, chosen, _ret(test), _ret(btest)))
+        oos_parts.append(test)
+        base_parts.append(btest)
+    if not segs:
+        return None
+    return WalkForward(
+        segs, (1 + pd.concat(oos_parts)).cumprod(), (1 + pd.concat(base_parts)).cumprod()
+    )

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from quant.api import backtest_analysis as ba
 from quant.api.backtests import FORM_STRATEGY
+from quant.api.robustness_view import neighbor_verdict
 from quant.api.schemas import (
     BacktestAnalysis,
     BacktestCompare,
@@ -187,7 +188,9 @@ def analysis(s: Session, run_id: int, settings: Settings) -> BacktestAnalysis | 
                       .order_by(BacktestDaily.day)).all()  # fmt: skip
     sleeves = _sleeve_series(list(daily), out["initial_cash"]) if daily else None
     split = ba.split_metrics(eq, qqq)
-    out["overview"] = BtOverviewOut(checks=ba.checks(split), split=split, yearly=ba.yearly(eq, qqq))
+    out["overview"] = BtOverviewOut(
+        checks=ba.checks(split, neighbor_verdict(s, run_id)), split=split, yearly=ba.yearly(eq, qqq)
+    )
     out["returns"] = BtReturnsOut(
         monthly=ba.monthly_table(eq, qqq), distribution=ba.distribution(eq),
         best_worst=ba.best_worst(eq), rolling=ba.rolling_12m(eq), sleeves=sleeves,
