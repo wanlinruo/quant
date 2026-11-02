@@ -54,6 +54,14 @@ def _row(r: BacktestRun, label: str | None = None, base: bool = False) -> RbRowO
     )
 
 
+def _err(r: BacktestRun) -> str | None:
+    return (
+        r.error.strip().splitlines()[0]
+        if r.status == "failed" and r.error and r.error.strip()
+        else None
+    )
+
+
 def _equity(s: Session, ids: list[int]) -> dict[int, pd.Series]:
     out: dict[int, dict[Any, float]] = {}
     for p in s.scalars(
@@ -73,6 +81,10 @@ def _wf_metrics(eq: pd.Series) -> RbMetricsOut:
 def _walk_forward(s: Session, parent: BacktestRun, grid: list[BacktestRun]) -> RbWfOut:
     out = RbWfOut(train_years=robustness.TRAIN_YEARS)
     done = [r for r in grid if r.status == "done"]
+    failed = len(grid) - len(done)
+    if len(done) + 1 < 2:
+        out.note = "参数网格的有效格子不足 2 个（子回测失败），不计算"
+        return out
     eq = _equity(s, [parent.id, *(r.id for r in done)])
     labels = {
         parent.id: BASE_LABEL,
@@ -87,6 +99,8 @@ def _walk_forward(s: Session, parent: BacktestRun, grid: list[BacktestRun]) -> R
     out.segments = [RbWfSegOut(**vars(x)) for x in wf.segments]
     out.strategy, out.base = _wf_metrics(wf.oos), _wf_metrics(wf.base)
     out.note = f"每年用前 {robustness.TRAIN_YEARS} 年夏普最高的参数，拼接各测试年的收益"
+    if failed:
+        out.note += f"；排除 {failed} 个失败的格子"
     return out
 
 
@@ -166,6 +180,7 @@ def robustness_view(s: Session, run_id: int) -> RobustnessOut | None:
                             run_id=cr.id,
                             status=cr.status,
                             metrics=_metrics(cr.metrics) if cr.status == "done" else None,
+                            error=_err(cr),
                         )
                     )
                 else:

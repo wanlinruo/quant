@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from api_fixtures import needs_db
@@ -172,3 +172,43 @@ def test_overview_does_not_load_walk_forward(
     r = client.get(f"/api/backtests/{pid}/analysis")
     assert r.status_code == 200
     assert r.json()["overview"]["checks"][-1]["passed"] is False
+
+
+def test_failed_child_shows_reason_and_wf_excludes_it(client: TestClient, db_url: str) -> None:
+    pid = _seed(db_url)
+    eng = create_engine(db_url)
+    with Session(eng) as s, s.begin():
+        kid = s.scalars(
+            select(BacktestRun).where(BacktestRun.parent_id == pid).order_by(BacktestRun.id)
+        ).first()
+        assert kid is not None and (kid.variant or {}).get("kind") == "grid"
+        kid.status, kid.error, kid.metrics = "failed", "ValueError: 数据不足\n详情", None
+        label = (kid.variant or {})["label"]
+    eng.dispose()
+    d = get(client, pid)
+    cell = next(c for c in d["grid"]["cells"] if c["label"] == label)
+    assert cell["status"] == "failed" and cell["error"] == "ValueError: 数据不足"
+    assert "排除 1 个失败的格子" in d["walk_forward"]["note"]
+
+
+def test_walk_forward_needs_two_valid_cells(client: TestClient, db_url: str) -> None:
+    pid = _seed(db_url)
+    eng = create_engine(db_url)
+    with Session(eng) as s, s.begin():
+        for k in s.scalars(select(BacktestRun).where(BacktestRun.parent_id == pid)):
+            if (k.variant or {}).get("kind") == "grid":
+                k.status, k.metrics = "failed", None
+    eng.dispose()
+    wf = get(client, pid)["walk_forward"]
+    assert wf["segments"] == [] and "有效格子不足" in wf["note"]
+
+
+def test_delete_parent_cascades(db_url: str) -> None:
+    pid = _seed(db_url)
+    eng = create_engine(db_url)
+    with Session(eng) as s, s.begin():
+        s.delete(s.get(BacktestRun, pid))
+    with Session(eng) as s:
+        assert s.scalars(select(BacktestRun).where(BacktestRun.parent_id == pid)).first() is None
+        assert s.query(BacktestRun).count() == 0
+    eng.dispose()

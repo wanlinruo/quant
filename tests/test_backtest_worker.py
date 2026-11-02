@@ -262,3 +262,41 @@ def test_failed_parent_spawns_nothing(engine: Engine) -> None:
     with Session(engine) as s:
         assert s.query(BacktestRun).count() == 1
         assert s.get(BacktestRun, parent).status == "failed"  # type: ignore[union-attr]
+
+
+@pytest.mark.db
+@needs_db
+def test_cost_variant_beyond_slippage_cap_skipped(engine: Engine) -> None:
+    costs = {"commission_per_share": "0.005", "min_commission": "1", "slippage": "0.04"}
+    with Session(engine) as s, s.begin():
+        parent = create_run(
+            s,
+            "etf_momentum",
+            {"_costs": costs, "_cash": "1000", "_robust": True},
+            date(2016, 1, 4),
+            date(2026, 10, 30),
+        )
+    process_one(engine, SETTINGS, lambda spec, st: _fake_result())
+    with Session(engine) as s:
+        mults = sorted(
+            (k.variant or {}).get("cost_mult") or 0
+            for k in s.scalars(select(BacktestRun).where(BacktestRun.parent_id == parent))
+            if (k.variant or {}).get("kind") == "cost"
+        )
+    assert mults == [0, 2]  # ×3 后滑点 0.12 超过上限 0.1
+
+
+@pytest.mark.db
+@needs_db
+def test_spawn_failure_keeps_parent_done(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    import quant.jobs.backtest_worker as bw
+
+    def boom(*a: object) -> int:
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(bw, "spawn_robustness", boom)
+    parent = _robust_parent(engine)
+    process_one(engine, SETTINGS, lambda spec, st: _fake_result())
+    with Session(engine) as s:
+        run = s.get(BacktestRun, parent)
+        assert run is not None and run.status == "done" and s.query(BacktestRun).count() == 1

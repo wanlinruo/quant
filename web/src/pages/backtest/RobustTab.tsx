@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { RbCellOut, RbMetricsOut, RbRowOut, RobustnessOut } from "../../api/types";
 import { ApiState } from "../../components/ApiState";
 import { EmptyState } from "../../components/EmptyState";
@@ -5,6 +6,7 @@ import { useApi } from "../../hooks/useApi";
 import { STATUS_PILL, STATUS_TEXT } from "../../lib/backtestStatus";
 import { num, pct, signedPct } from "../../lib/format";
 import { Sub } from "./AnalysisTabs";
+import { ROBUST_REFRESH_MS } from "./robustRefresh";
 
 /** 夏普着色：≤ 0.5 红，1.0 中性，≥ 1.5 绿。 */
 function heat(sharpe: number | null | undefined): string {
@@ -22,7 +24,7 @@ function Cell({ c }: { c: RbCellOut }) {
           <b className="num">{num(m.sharpe, 2)}</b>
           <span className="num sm">{pct(m.cagr, 1)} · {pct(m.max_drawdown, 0)}</span>
         </>
-      ) : c.status === "skipped" ? <span className="muted">—</span> : <span className={`pill ${STATUS_PILL[c.status] ?? "hold"}`}>{STATUS_TEXT[c.status] ?? c.status}</span>}
+      ) : c.status === "skipped" ? <span className="muted">—</span> : <span className={`pill ${STATUS_PILL[c.status] ?? "hold"}`} title={c.error ?? undefined}>{STATUS_TEXT[c.status] ?? c.status}</span>}
     </div>
   );
 }
@@ -46,7 +48,7 @@ function Rows({ rows, verdict }: { rows: RbRowOut[]; verdict?: boolean }) {
           <tr key={`${r.label}-${r.run_id}`} className={r.base ? "base-row" : ""}>
             <td>{r.label}</td>
             <Mcols m={r.metrics} />
-            <td><span className={`pill ${STATUS_PILL[r.status] ?? "hold"}`}>{STATUS_TEXT[r.status] ?? r.status}</span></td>
+            <td><span className={`pill ${STATUS_PILL[r.status] ?? "hold"}`} title={r.error ?? undefined}>{STATUS_TEXT[r.status] ?? r.status}</span></td>
             {verdict && <td>{r.passed === true ? <span className="pill ok">通过</span> : r.passed === false ? <span className="pill err">未通过</span> : "—"}</td>}
           </tr>
         ))}
@@ -58,6 +60,13 @@ function Rows({ rows, verdict }: { rows: RbRowOut[]; verdict?: boolean }) {
 /** 稳健性：参数热力图、相邻参数、walk-forward、成本与起始时间敏感性（#68）。 */
 export function RobustTab({ runId, strategy }: { runId: number; strategy: string }) {
   const res = useApi<RobustnessOut>(`/api/backtests/${runId}/robustness`);
+  const pending = res.data?.status === "pending";
+  const { reload } = res;
+  useEffect(() => {
+    if (!pending) return;
+    const t = setInterval(reload, ROBUST_REFRESH_MS);
+    return () => clearInterval(t);
+  }, [pending, reload]);
   return (
     <ApiState result={res}>
       {(d) => {
