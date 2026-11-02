@@ -250,3 +250,8 @@ pre.cmd.log { max-height: 260px; overflow: auto; white-space: pre; user-select: 
 .sys-queue { display: grid; gap: 10px; }
 .sys-queue .q4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .sys-queue .q4 b { color: var(--text-strong); font-size: 18px; }
+.res-sub { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.trend-legend { display: flex; gap: 14px; font-size: 11px; margin-bottom: 4px; }
+.trend-legend span { display: inline-flex; align-items: center; gap: 4px; } .trend-legend i { width: 10px; height: 2px; display: inline-block; }
+.sys-disk { display: grid; gap: 6px; } .sys-disk .bar { width: 100%; margin: 0; display: block; } .sys-disk b { font-size: 16px; color: var(--text-strong); } .sys-disk b.down { color: var(--down); }
+.sys-tbl .r { text-align: right; }

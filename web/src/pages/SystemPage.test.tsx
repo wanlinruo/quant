@@ -33,6 +33,22 @@ const SYS = {
          { label: "标的范围", used: null, limit: null, kind: "text", text: "白名单 + 标普 500 成分" }],
   upcoming: [{ date: "2026-10-30", weekday: "周五", tags: ["月末调仓"] }, { date: "2026-11-26", weekday: "周四", tags: ["休市"] }],
   events: [{ time: "2026-10-28T21:00:00Z", level: "error", text: "daily_signal 2026-10-28 第 1 次失败：数据校验未通过" }],
+  resources: {
+    sampled_at: "2026-10-28T22:00:00Z", version: "abc1234",
+    cards: [
+      { key: "cpu", label: "CPU", value: 12, text: "", level: "ok", series: [10, null, 12] },
+      { key: "mem", label: "内存", value: 50, text: "2.0 / 4.0 GB", level: "ok", series: [50, 50] },
+      { key: "disk", label: "磁盘", value: 88, text: "88.0 / 100.0 GB", level: "warn", series: [87, 88] },
+      { key: "latency", label: "老虎接口延迟", value: null, text: "待接入（monitor 不持有券商凭证）", level: "info", series: [] },
+    ],
+    containers: [
+      { name: "dashboard", state: "running", status: "Up 2 hours", cpu_pct: 1.5, mem_bytes: 536870912, mem_limit: 1073741824, started_at: "2026-10-28T20:00:00Z", restarts: 3, stale: false },
+      { name: "monitor", state: "exited", status: "Exited (1)", cpu_pct: null, mem_bytes: null, mem_limit: null, started_at: null, restarts: 0, stale: false },
+    ],
+    trends: { times: ["2026-10-28T20:00:00Z", "2026-10-28T21:00:00Z"], cpu: [10, 12], mem: [50, 51], disk: [87, null] },
+    disk: { used: 94489280512, total: 107374182400, per_day: 2147483648, days_left: 22.4, note: "每天约增长 2.00 GB" },
+    items: [],
+  },
   queue: { queued: 1, running: 1, done: 3, failed: 1, current_id: 7, current_strategy: "combo", current_started: "2026-10-28T20:00:00Z", last_finished: "2026-10-28T19:00:00Z" },
 };
 const BASE = { "/api/system/overview": [200, SYS], "/api/market/data-status": [200, []] } as const;
@@ -77,6 +93,25 @@ describe("SystemPage", () => {
     expect(screen.getByText("月末调仓")).toBeInTheDocument();
     expect(screen.getByText(/第 1 次失败/)).toBeInTheDocument();
     expect(screen.getByText(/#7 combo/)).toBeInTheDocument();
-    expect(screen.getAllByText(/资源采集接入中/).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("resources: cards, containers, trend and disk forecast", async () => {
+    mockApi(BASE);
+    renderPage(<SystemPage />, "/system");
+    expect(await screen.findByText("12.0%")).toBeInTheDocument();
+    expect(screen.getByText("2.0 / 4.0 GB")).toBeInTheDocument();
+    expect(screen.getByText(/待接入/)).toBeInTheDocument();
+    const row = screen.getByText("monitor").closest("tr") as HTMLElement;
+    expect(row).toHaveTextContent("exited");
+    expect(screen.getByText("dashboard").closest("tr")).toHaveTextContent("3");
+    expect(screen.getByText(/abc1234/)).toBeInTheDocument();
+    expect(screen.getByTestId("trend").querySelectorAll("polyline")).toHaveLength(3);
+    expect(screen.getByText(/约 22 天后写满/)).toBeInTheDocument();
+  });
+
+  it("resources without samples", async () => {
+    mockApi({ ...BASE, "/api/system/overview": [200, { ...SYS, resources: { sampled_at: null, cards: [], containers: [], items: [] } }] });
+    renderPage(<SystemPage />, "/system");
+    expect((await screen.findAllByText(/暂无资源采样/)).length).toBeGreaterThanOrEqual(3);
   });
 });
