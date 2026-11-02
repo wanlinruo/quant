@@ -79,3 +79,16 @@ def test_metrics_selected_keys() -> None:
     assert fetch.calls[0][0] == "https://finnhub.io/api/v1/stock/metric?symbol=BRK.B&metric=all"
     assert got["peTTM"] == 39.01 and got["grossMarginTTM"] is None and got["roeTTM"] is None
     assert "other" not in got and set(got) == set(METRIC_KEYS)
+
+
+def test_quote() -> None:
+    body = {"c": 344.63, "pc": 348.91, "dp": -1.2267, "t": 1761854400}
+    q = client(FakeFetch((200, body))).quote("AAPL")
+    assert q is not None and q.price == 344.63 and q.prev_close == 348.91
+    assert q.change_pct == pytest.approx(-0.012267)
+    assert q.time == datetime.fromtimestamp(1761854400, UTC)
+
+
+@pytest.mark.parametrize("body", [{"c": 0, "pc": 0, "t": 0}, {"c": None, "t": 1}, "oops"])
+def test_quote_missing_returns_none(body: object) -> None:
+    assert client(FakeFetch((200, body))).quote("ZZZZ") is None
