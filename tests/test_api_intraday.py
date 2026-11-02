@@ -107,3 +107,42 @@ def test_database_unreachable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
     r = TestClient(create_app()).get("/api/market/intraday")
     _clear()
     assert r.status_code == 200 and r.json()["quotes"] == []
+
+
+@needs_db
+def test_quote_from_before_open_is_not_shown(
+    client: TestClient, db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """开盘后首轮可能取到昨天收盘的报价（t 为昨天）：不当作盘中价显示。"""
+    eng = create_engine(db_url)
+    with Session(eng) as s, s.begin():
+        s.add(
+            IntradayQuote(
+                symbol="HALT",
+                price=1.0,
+                prev_close=1.0,
+                change_pct=0.0,
+                quote_time=datetime(2026, 10, 30, 20, 0, tzinfo=UTC),
+                fetched_at=OPEN_NOW,
+                source="finnhub",
+            )
+        )
+    eng.dispose()
+    d = get(client, OPEN_NOW + timedelta(minutes=1), monkeypatch)
+    assert "HALT" not in [q["symbol"] for q in d["quotes"]]
+
+
+def test_no_false_delay_warning_right_after_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, db_url: str
+) -> None:
+    import quant.api.intraday_view as iv
+
+    monkeypatch.setenv("QUANT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TRADING_MODE", "sim")
+    monkeypatch.setattr(
+        iv, "_now", lambda: datetime(2026, 11, 2, 14, 31, tzinfo=UTC)
+    )  # 09:31，首轮尚未写入
+    _clear()
+    d = TestClient(create_app()).get("/api/market/intraday").json()
+    _clear()
+    assert d["stale"] is False and "采集中" in d["note"]

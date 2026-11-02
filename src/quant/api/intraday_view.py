@@ -13,6 +13,7 @@ from quant.db.models import IntradayQuote
 from quant.market.session import ET, SESSION_TEXT, us_session
 
 STALE = timedelta(minutes=5)
+FIRST_ROUND = timedelta(minutes=3)
 VIEW_ONLY = "Finnhub 盘中报价 · 仅供查看，交易用收盘日线"
 EXTENDED = "扩展时段行情未接入，显示上一交易日收盘"
 NO_DB = "未配置数据库，盘中行情不可用"
@@ -37,7 +38,8 @@ def intraday(s: Session | None, cal: TradingCalendar) -> IntradayOut:
     opened = cal.session_open(now.astimezone(ET).date())  # 只取今天开盘后的报价
     rows = s.scalars(
         select(IntradayQuote)
-        .where(IntradayQuote.fetched_at >= opened)
+        # 报价时间也要在开盘后：开盘后首轮可能取到昨天收盘的报价（或停牌股的旧价）
+        .where(IntradayQuote.fetched_at >= opened, IntradayQuote.quote_time >= opened)
         .order_by(IntradayQuote.symbol)
     ).all()
     out.quotes = [
@@ -54,6 +56,9 @@ def intraday(s: Session | None, cal: TradingCalendar) -> IntradayOut:
         out.as_of = max(r.quote_time for r in rows)
         fetched = max(r.fetched_at for r in rows)
         out.stale = now - fetched > STALE
+    elif now - opened < FIRST_ROUND:
+        out.note = "开盘后首轮采集中"  # 不误报延迟
+        return out
     else:
         out.stale = True
     out.note = VIEW_ONLY + ("；行情延迟，采集可能中断" if out.stale else "")
