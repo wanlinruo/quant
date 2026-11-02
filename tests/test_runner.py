@@ -214,3 +214,49 @@ def test_log_truncated_keeps_head_and_tail() -> None:
     assert len(out) == 201 and out[0] == "l0" and out[99] == "l99" and out[-1] == "l499"
     assert "省略 300 行" in out[100]
     assert trim_log(lines[:10], 200) == lines[:10]
+
+
+def test_log_capture_does_not_leak_info_to_terminal() -> None:
+    """命令行回测：捕获 INFO 写入 metrics，但终端（根日志器的处理器）仍只看到原级别以上的。"""
+    import logging
+
+    from quant.engine.runner import capture_quant_logs
+
+    seen: list[str] = []
+
+    class ListHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            seen.append(record.getMessage())
+
+    root, quant_log = logging.getLogger(), logging.getLogger("quant")
+    h = ListHandler()
+    old_root, old_q = root.level, quant_log.level
+    root.addHandler(h)
+    root.setLevel(logging.WARNING)
+    quant_log.setLevel(logging.NOTSET)
+    try:
+        with capture_quant_logs() as cap:
+            logging.getLogger("quant.x").info("细节")
+            logging.getLogger("quant.x").warning("警告")
+        assert [x.split(" ", 2)[2] for x in cap.lines] == ["细节", "警告"]
+        assert seen == ["警告"]
+        assert quant_log.propagate is True and quant_log.level == logging.NOTSET
+    finally:
+        root.removeHandler(h)
+        root.setLevel(old_root)
+        quant_log.setLevel(old_q)
+
+
+def test_local_code_version_marks_dirty(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    import quant.engine.runner as runner_mod
+
+    monkeypatch.delenv("QUANT_GIT_SHA", raising=False)
+
+    def fake_run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        out = "abc1234\n" if "rev-parse" in cmd else " M src/x.py\n"
+        return subprocess.CompletedProcess(cmd, 0, out, "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert runner_mod.code_version() == "abc1234-dirty"

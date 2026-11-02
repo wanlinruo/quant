@@ -252,6 +252,8 @@ def test_compare_endpoint(setup: tuple[TestClient, dict[str, int]], db_url: str)
     )
     assert d["skipped"] == [ids["running"]]
     assert [r["id"] for r in d["runs"]] == [ids["done"], rid]
+    dup = client.get("/api/backtests/compare", params={"ids": [ids["done"], rid, ids["done"]]})
+    assert [r["id"] for r in dup.json()["runs"]] == [ids["done"], rid]  # 重复编号去重
     assert all(s[0] == pytest.approx(1.0) for s in d["series"].values())
     rows = {r["key"]: r for r in d["metrics"]}
     assert set(rows["cagr"]["values"]) == {str(ids["done"]), str(rid)}

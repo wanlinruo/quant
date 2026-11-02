@@ -457,4 +457,20 @@ describe("BacktestPage", () => {
     await new Promise((r) => setTimeout(r, ROBUST_REFRESH_MS + 100));
     expect(calls()).toBeGreaterThan(first);
   });
+
+  it("switching strategy clears edits made for the previous strategy", async () => {
+    mockApi({ "/api/backtests": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/param-schema": [200, SCHEMA] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click(await screen.findByRole("button", { name: "+ 新建回测" }));
+    await user.selectOptions(screen.getByRole("combobox"), "combo");
+    const dlg = screen.getByRole("dialog");
+    const stop = await within(dlg).findByLabelText("swing.stop_pct");
+    await user.clear(stop);
+    await user.type(stop, "0.05");
+    const strategy = within(dlg).getAllByRole("combobox")[0];
+    await user.selectOptions(strategy, "etf_momentum");
+    await user.selectOptions(strategy, "combo");
+    const again = await within(dlg).findByLabelText("swing.stop_pct");
+    expect(again).toHaveValue(0.07);
+  });
 });
