@@ -45,7 +45,7 @@ def test_out_of_range_cells_skipped() -> None:
 
 def test_costs_and_starts() -> None:
     vs = plan("swing_pullback", {}, S, E)
-    assert sorted(v.cost_mult for v in by_kind(vs, "cost")) == [0, 2, 3]
+    assert sorted(v.cost_mult or 0 for v in by_kind(vs, "cost")) == [0, 2, 3]
     assert [v.start for v in by_kind(vs, "start")] == [
         date(2016, 4, 4),
         date(2016, 7, 4),

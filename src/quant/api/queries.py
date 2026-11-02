@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 
 import pandas as pd
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from quant.api.schemas import (
     MODES,
@@ -26,6 +26,7 @@ from quant.api.schemas import (
     OrderOut,
     Position,
     QueueStatus,
+    RobustProgressOut,
     SignalOut,
 )
 from quant.core.calendar import TradingCalendar
@@ -42,6 +43,7 @@ from quant.db.models import (
     SystemFlag,
 )
 from quant.db.models import Fill as FillRow
+from quant.engine.robustness import ROBUST_KEY
 
 VALIDATION_WINDOW_DAYS = 365
 
@@ -151,17 +153,46 @@ def fills(s: Session, mode: Mode, limit: int = 200) -> list[FillOut]:
 # ---- 回测 ----
 
 
+def robust_progress(s: Session, parent_ids: Sequence[int]) -> dict[int, RobustProgressOut]:
+    counts: dict[int, dict[str, int]] = {}
+    if parent_ids:
+        for k in s.scalars(
+            select(BacktestRun)
+            .options(load_only(BacktestRun.parent_id, BacktestRun.status))
+            .where(BacktestRun.parent_id.in_(parent_ids))
+        ):
+            c = counts.setdefault(k.parent_id or 0, dict.fromkeys(BacktestRun.STATUSES, 0))
+            c[k.status] += 1
+    return {pid: RobustProgressOut(total=sum(c.values()), **c) for pid, c in counts.items()}
+
+
 def backtest_runs(s: Session, limit: int = 200) -> list[BacktestRunOut]:
-    runs = s.scalars(select(BacktestRun).order_by(BacktestRun.id.desc()).limit(limit)).all()
+    """回测列表（不含稳健性检验子任务）；父回测附子任务进度。"""
+    runs = s.scalars(
+        select(BacktestRun)
+        .where(BacktestRun.parent_id.is_(None))
+        .order_by(BacktestRun.id.desc())
+        .limit(limit)
+    ).all()
+    progress = robust_progress(s, [r.id for r in runs if r.params.get(ROBUST_KEY)])
+    empty = RobustProgressOut(total=0, done=0, failed=0, queued=0, running=0)
     return [
         BacktestRunOut(
-            id=r.id, strategy=r.strategy, status=r.status, start=r.start, end=r.end,
+            id=r.id,
+            strategy=r.strategy,
+            status=r.status,
+            start=r.start,
+            end=r.end,
             params={k: v for k, v in r.params.items() if not k.startswith("_")},
-            costs=r.params.get("_costs"), metrics=r.metrics or {},
-            error=_first_line(r.error), created_at=r.created_at, finished_at=r.finished_at,
+            costs=r.params.get("_costs"),
+            metrics=r.metrics or {},
+            error=_first_line(r.error),
+            created_at=r.created_at,
+            finished_at=r.finished_at,
+            robust=progress.get(r.id, empty) if r.params.get(ROBUST_KEY) else None,
         )
         for r in runs
-    ]  # fmt: skip
+    ]
 
 
 def backtest_equity(s: Session, run_ids: Sequence[int]) -> list[EquityPoint]:

@@ -78,6 +78,14 @@ class FillOut(BaseModel):
     commission: float
 
 
+class RobustProgressOut(BaseModel):
+    total: int
+    done: int
+    failed: int
+    queued: int
+    running: int
+
+
 class BacktestRunOut(BaseModel):
     id: int
     strategy: str
@@ -90,6 +98,7 @@ class BacktestRunOut(BaseModel):
     error: str
     created_at: datetime
     finished_at: datetime | None
+    robust: RobustProgressOut | None = None  # 只有勾选了稳健性检验的父回测有
 
 
 class EquityPoint(BaseModel):
@@ -161,6 +170,7 @@ class BacktestSubmit(BaseModel):
     costs: CostsIn
     # 非表单策略（如 combo）的参数覆盖：只含用户改过的键；嵌套组（momentum / swing）只含改过的子键
     params: dict[str, Any] | None = None
+    robustness: bool = False  # 同时跑稳健性检验（#68）
 
 
 class SubmitResult(BaseModel):
