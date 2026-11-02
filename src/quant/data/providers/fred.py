@@ -21,6 +21,10 @@ from quant.data.providers.http import Fetch, http_fetch
 BASE_URL = "https://api.stlouisfed.org/fred"
 
 
+class FredUnreachable(DataUnavailableError):
+    """连不上 FRED（网络错误、超时、5xx、429）：本轮后续请求也会失败，调用方应停止。"""
+
+
 class FredAuthError(DataUnavailableError):
     """key 无效（FRED 返回 400 并提示 api_key）。"""
 
@@ -54,13 +58,15 @@ class FredClient:
         try:
             status, body = self._fetch(f"{BASE_URL}{path}?{query}", {})
         except Exception as e:
-            raise DataUnavailableError(f"FRED {what} 请求失败（{type(e).__name__}）") from None
+            raise FredUnreachable(f"FRED {what} 请求失败（{type(e).__name__}）") from None
         finally:
             self._last = self._clock()
         if status == 400 and isinstance(body, dict) and "api_key" in str(body.get("error_message")):
             raise FredAuthError("FRED 拒绝访问，请检查 FRED_API_KEY")
+        if status >= 500 or status == 429:
+            raise FredUnreachable(f"FRED {what} 返回 {status}")
         if status != 200 or not isinstance(body, dict):
-            raise DataUnavailableError(f"FRED {what} 返回 {status}")
+            raise DataUnavailableError(f"FRED {what} 返回 {status}")  # 只影响这一个序列
         return body
 
     def observations(self, series: str, start: date) -> list[Obs]:
