@@ -434,4 +434,12 @@ describe("BacktestPage", () => {
     const post = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST");
     expect(JSON.parse(String((post![1] as RequestInit).body)).robustness).toBe(true);
   });
+
+  it("unchecking every run asks to pick one instead of saying there are none", async () => {
+    mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS] });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click(await screen.findByLabelText("对比 #128"));
+    expect(await screen.findByText(/勾选回测查看/)).toBeInTheDocument();
+    expect(screen.queryByText(/还没有回测记录/)).toBeNull();
+  });
 });

@@ -123,7 +123,7 @@ export function BacktestPage() {
               </Panel>
             </div>
           ) : (
-            <Panel title="回测报告"><EmptyState note="还没有回测记录，点击“+ 新建回测”提交" /></Panel>
+            <Panel title="回测报告"><EmptyState note={list.length ? "勾选回测查看（左侧列表）" : "还没有回测记录，点击“+ 新建回测”提交"} /></Panel>
           )}
         </Cell>
       </Grid>
