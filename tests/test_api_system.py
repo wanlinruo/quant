@@ -315,3 +315,88 @@ def test_overview_includes_resources(client: TestClient, db_url: str) -> None:
     d = ov(client)
     assert d["resources"]["sampled_at"] is not None
     assert any("资源采集已停止" in x["text"] for x in d["banner"]["items"])
+
+
+# ---- #89 暂缓项 ----
+
+
+def _cards(d: dict) -> dict:  # type: ignore[type-arg]
+    return {c["key"]: c for c in d["cards"]}
+
+
+@needs_db
+def test_reconcile_running_is_not_failure(client: TestClient, db_url: str) -> None:
+    eng = create_engine(db_url)
+    with Session(eng) as s, s.begin():
+        s.add(
+            JobRun(
+                mode="paper",
+                job_name="daily_execute",
+                trade_date=SEED_LAST_DAY,
+                status="running",
+                started_at=NOW - timedelta(hours=11),
+            )
+        )
+    eng.dispose()
+    c = _cards(ov(client))["reconcile"]
+    assert c["value"] == "执行中" and c["level"] == "info"
+
+
+@needs_db
+def test_today_jobs_counts_only_due_and_live_jobs(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _at(monkeypatch, datetime(2026, 10, 29, 16, 0, tzinfo=ET))  # 16:30 前
+    c = _cards(ov(client))["today_jobs"]
+    assert c["value"] == "0 / 0" and c["level"] == "ok"  # 该账户只上线了 data / signal，都未到时间
+    _at(monkeypatch, NOW)
+    c = _cards(ov(client))["today_jobs"]
+    assert c["value"] == "1 / 2" and c["level"] == "warn"
+
+
+@needs_db
+def test_sim_kill_switch_is_info(client: TestClient) -> None:
+    assert _cards(ov(client, "sim"))["kill_switch"]["level"] == "info"
+
+
+@needs_db
+def test_weekend_upcoming_starts_next_trading_day(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _at(monkeypatch, datetime(2026, 10, 31, 10, 0, tzinfo=ET))  # 周六
+    assert ov(client)["upcoming"][0]["date"] == "2026-11-02"
+
+
+@needs_db
+def test_success_rate_counts_missing_days(client: TestClient, db_url: str) -> None:
+    eng = create_engine(db_url)
+    t = datetime(2026, 10, 26, 21, tzinfo=UTC)
+    with Session(eng) as s, s.begin():  # 10-26 成功、10-27 缺失（daily_data 当天成功）、10-28 失败
+        s.add(
+            JobRun(
+                mode="paper",
+                job_name="daily_signal",
+                trade_date=date(2026, 10, 26),
+                status="success",
+                started_at=t,
+                finished_at=t,
+            )
+        )
+    eng.dispose()
+    sig = {r["job"]: r for r in ov(client)["grid"]["jobs"]}["daily_signal"]
+    assert {c["date"]: c["status"] for c in sig["cells"]}["2026-10-27"] == "missing"
+    assert sig["success_rate"] == pytest.approx(1 / 3)
+
+
+@needs_db
+def test_overview_when_database_unreachable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("QUANT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("QUANT_DATABASE_URL", "postgresql+psycopg://x:y@127.0.0.1:1/none")
+    monkeypatch.setenv("TRADING_MODE", "sim")
+    _clear()
+    r = TestClient(create_app()).get("/api/system/overview", params={"mode": "sim"})
+    _clear()
+    assert r.status_code == 200
+    assert "数据库连接失败" in r.json()["banner"]["items"][0]["text"]

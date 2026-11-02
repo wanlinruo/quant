@@ -124,3 +124,11 @@ def test_monitor_stopped_longer_than_window(s: Session) -> None:
     s.commit()
     r = sr.resources(s, NOW)
     assert any("资源采集已停止" in i.text for i in r.items)
+
+
+def test_proxy_down_while_host_fresh(s: Session) -> None:
+    s.add(host(NOW, 5.0, 50))
+    s.add(cont(NOW - timedelta(minutes=20), "scheduler"))
+    s.commit()
+    texts = [i.text for i in sr.resources(s, NOW).items]
+    assert any("容器状态" in t for t in texts)

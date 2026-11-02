@@ -8,7 +8,7 @@ import json
 from collections import defaultdict
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -59,6 +59,12 @@ GRID_DAYS = 30
 STALE_DAYS = 2
 WEEK = "一二三四五六日"
 NO_DB = "未配置数据库（QUANT_DATABASE_URL），只能显示日历与本地数据文件"
+RECONCILE_TEXT = {"success": "已对账", "running": "执行中"}
+RECONCILE_LEVEL: dict[str, Literal["ok", "warn", "error", "info"]] = {
+    "success": "ok",
+    "running": "info",
+}
+DB_DOWN = "数据库连接失败，只能显示日历与本地数据文件"
 
 
 # 与 scheduler 一致：daily_report 在 daily_execute 结束（成功或失败）后运行；
@@ -103,7 +109,7 @@ def _grid(
     plans = {d: dict(day_plan(d, settings.schedule, cal)) for d in days}
     rows = []
     for job in JOBS:
-        cells, durs, ok, have = [], [], 0, 0
+        cells, durs, ok, have, missing = [], [], 0, 0, 0
         for d in days:
             run = by.get((job, d))
             n = counts.get((job, d), 0)
@@ -122,6 +128,7 @@ def _grid(
                 else:
                     done = up_run.finished_at if up_run else None
                     st = "pending" if done is not None and done + GRACE > now else "missing"
+                missing += st == "missing"
                 cells.append(SysCellOut(date=d, status=st, attempts=n))
                 continue
             have += 1
@@ -138,7 +145,7 @@ def _grid(
             SysJobRowOut(
                 job=job,
                 cells=cells,
-                success_rate=ok / have if have else None,
+                success_rate=ok / (have + missing) if have + missing else None,
                 avg_s=sum(durs) / len(durs) if durs else None,
             )
         )
@@ -430,8 +437,9 @@ def _cards_and_banner(
     if failed_bt:
         items.append(SysItemOut(level="warn", text=f"近 7 天有 {len(failed_bt)} 个回测失败"))
     level = "error" if any(i.level == "error" for i in items) else "warn" if items else "ok"
-    planned = [t for t in timeline]
-    done = sum(1 for t in planned if t.status in ("success", "retry_success"))
+    # 只算该账户上线过、且已到计划时间的任务（未上线 na、未到时间 pending 不计）
+    due = [t for t in timeline if t.status not in ("na", "pending")]
+    done = sum(1 for t in due if t.status in ("success", "retry_success"))
     last_exec = s.scalars(
         select(JobRun)
         .where(JobRun.mode == mode, JobRun.job_name == "daily_execute")
@@ -460,7 +468,7 @@ def _cards_and_banner(
             sub=f"修改于 {flag.updated_at.astimezone(ET):%m-%d %H:%M}"
             if flag and flag.updated_at
             else "",
-            level="ok" if enabled else "warn",
+            level="info" if mode == "sim" else "ok" if enabled else "warn",
         ),
         SysCardOut(
             key="broker",
@@ -478,23 +486,21 @@ def _cards_and_banner(
         SysCardOut(
             key="reconcile",
             label="持仓对账",
-            value=("已对账" if last_exec.status == "success" else "失败")
-            if last_exec
-            else "暂无记录",
+            value=RECONCILE_TEXT.get(last_exec.status, "失败") if last_exec else "暂无记录",
             sub=(
                 f"{last_exec.trade_date}"
                 + (f"：{_first_line(last_exec.error)}" if last_exec.error else "")
             )
             if last_exec
             else "",
-            level=("ok" if last_exec.status == "success" else "error") if last_exec else "info",
+            level=RECONCILE_LEVEL.get(last_exec.status, "error") if last_exec else "info",
         ),
         SysCardOut(
             key="today_jobs",
             label="今日任务",
-            value=f"{done} / {len(planned)}",
-            sub=f"{today}（美东）",
-            level="ok" if done == len(planned) else "warn" if planned else "info",
+            value=f"{done} / {len(due)}",
+            sub=f"{today}（美东），已到计划时间的任务",
+            level="ok" if done == len(due) else "warn",
         ),
         SysCardOut(
             key="data",
@@ -508,19 +514,20 @@ def _cards_and_banner(
 
 
 def overview(
-    s: Session | None, mode: str, settings: Settings, cal: TradingCalendar
+    s: Session | None, mode: str, settings: Settings, cal: TradingCalendar, no_db: str = NO_DB
 ) -> SystemOverview:
     now = _now()
     today = _today(cal, now)
     sources = _sources(settings, cal, today)
-    upcoming = _upcoming(cal, today)
+    d0 = now.astimezone(ET).date()
+    upcoming = _upcoming(cal, d0 if cal.is_trading_day(d0) else cal.next_trading_day(d0))
     if s is None:
         return SystemOverview(
             mode=mode,
             today=today,
             sources=sources,
             upcoming=upcoming,
-            banner=SysBannerOut(level="warn", items=[SysItemOut(level="warn", text=NO_DB)]),
+            banner=SysBannerOut(level="warn", items=[SysItemOut(level="warn", text=no_db)]),
         )
     days = cal.trading_days(today - timedelta(days=60), today)[-GRID_DAYS:]
     grid = _grid(s, mode, days, cal, settings, now)

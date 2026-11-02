@@ -105,7 +105,8 @@ describe("SystemPage", () => {
     expect(row).toHaveTextContent("exited");
     expect(screen.getByText("dashboard").closest("tr")).toHaveTextContent("3");
     expect(screen.getByText(/abc1234/)).toBeInTheDocument();
-    expect(screen.getByTestId("trend").querySelectorAll("polyline")).toHaveLength(3);
+    expect(screen.getByTestId("trend").querySelectorAll("polyline")).toHaveLength(2);  // 磁盘只有一个点，不画线
+    expect(screen.getByText(/CPU（单核 %）/)).toBeInTheDocument();
     expect(screen.getByText(/约 22 天后写满/)).toBeInTheDocument();
   });
 
@@ -113,5 +114,14 @@ describe("SystemPage", () => {
     mockApi({ ...BASE, "/api/system/overview": [200, { ...SYS, resources: { sampled_at: null, cards: [], containers: [], items: [] } }] });
     renderPage(<SystemPage />, "/system");
     expect((await screen.findAllByText(/暂无资源采样/)).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("trend breaks the line at missing hours", async () => {
+    const trends = { times: ["2026-10-28T18:00:00Z", "2026-10-28T19:00:00Z", "2026-10-28T20:00:00Z", "2026-10-28T21:00:00Z", "2026-10-28T22:00:00Z"],
+      cpu: [10, 11, null, 12, 13], mem: [50, 50, 50, 50, 50], disk: [80, 80, 80, 80, 80] };
+    mockApi({ ...BASE, "/api/system/overview": [200, { ...SYS, resources: { ...SYS.resources, trends } }] });
+    renderPage(<SystemPage />, "/system");
+    const t = await screen.findByTestId("trend");
+    expect(t.querySelectorAll("polyline.cpu")).toHaveLength(2);
   });
 });
