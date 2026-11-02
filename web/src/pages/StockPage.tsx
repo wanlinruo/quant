@@ -12,7 +12,7 @@ import { CandleChart, type TradeMark } from "../charts/CandleChart";
 import { useApi } from "../hooks/useApi";
 import { toCandles } from "../lib/candles";
 import { compact, num, pct, signedPct } from "../lib/format";
-import { etParts, formatDateTimeET, toETDate } from "../lib/time";
+import { etParts, etYearsAgo, formatDateTimeET, toETDate } from "../lib/time";
 import { useShell } from "../shell";
 
 const YEARS = [1, 2, 3, 5, 10, 20];
@@ -20,12 +20,6 @@ const MAS = [10, 20, 120];
 const PERIOD_KEYS = ["1D", "1W", "1M", "3M", "6M", "YTD", "1Y"] as const;
 const PERIOD_TEXT: Record<string, string> = { "1D": "1日", "1W": "1周", "1M": "1月", "3M": "3月", "6M": "6月", YTD: "今年", "1Y": "1年" };
 const SLEEVE_TEXT: Record<string, string> = { momentum: "动量仓", swing: "波段仓", both: "波段+动量", exit: "待卖出" };
-
-function startOf(years: number): string {
-  const d = new Date();
-  d.setFullYear(d.getFullYear() - years);
-  return d.toISOString().slice(0, 10);
-}
 
 function tone(v: number | null | undefined): string {
   return v == null || v === 0 ? "" : v > 0 ? "up" : "down";
@@ -59,7 +53,7 @@ export function StockPage() {
   const [adjust, setAdjust] = useState(false);
   const [tab, setTab] = useState<"strategy" | "news" | "earnings" | "backtest">("strategy");
   const [focus, setFocus] = useState<string | null>(null);
-  const start = useMemo(() => startOf(years), [years]);
+  const start = useMemo(() => etYearsAgo(years), [years]);
   const res = useApi<BarsOut>(`/api/market/bars/${encodeURIComponent(symbol)}`, { start });
   const prof = useApi<StockProfile>(`/api/stock/${encodeURIComponent(symbol)}/profile`, { mode: account });
   const ext = useApi<StockExtras>(`/api/stock/${encodeURIComponent(symbol)}/extras`);

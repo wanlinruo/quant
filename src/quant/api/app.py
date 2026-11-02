@@ -16,6 +16,16 @@ from fastapi.staticfiles import StaticFiles
 from quant.api.errors import validation_error_handler
 from quant.api.routes import backtests, market, meta, portfolio, stock, system
 
+API_PREFIX = "/api"
+ROUTERS = (
+    meta.router,
+    portfolio.router,
+    backtests.router,
+    system.router,
+    market.router,
+    stock.router,
+)
+
 
 def _mount_web(app: FastAPI, static_dir: Path) -> None:
     root = static_dir.resolve()
@@ -23,6 +33,7 @@ def _mount_web(app: FastAPI, static_dir: Path) -> None:
         app.mount("/assets", StaticFiles(directory=root / "assets"), name="assets")
 
     @app.get("/{path:path}", include_in_schema=False)
+    @app.head("/{path:path}", include_in_schema=False)
     def spa(path: str) -> FileResponse:
         if path == "api" or path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not Found")
@@ -36,15 +47,8 @@ def create_app(static_dir: Path | None = None) -> FastAPI:
     """static_dir 为空时读环境变量 QUANT_WEB_DIR；都没有则只提供接口。"""
     app = FastAPI(title="quant 面板", docs_url=None, redoc_url=None)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
-    for r in (
-        meta.router,
-        portfolio.router,
-        backtests.router,
-        system.router,
-        market.router,
-        stock.router,
-    ):
-        app.include_router(r, prefix="/api")
+    for r in ROUTERS:
+        app.include_router(r, prefix=API_PREFIX)
     web = static_dir or (
         Path(os.environ["QUANT_WEB_DIR"]) if os.environ.get("QUANT_WEB_DIR") else None
     )

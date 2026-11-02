@@ -1,11 +1,14 @@
 """只读约束：面板接口不得具备下单、撤单、修改熔断开关的能力；唯一写操作是提交回测。"""
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
+from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 
-from quant.api.app import create_app
+from quant.api.app import API_PREFIX, ROUTERS, create_app
 
 API_DIR = Path(__file__).resolve().parents[1] / "src" / "quant" / "api"
 
@@ -74,3 +77,28 @@ def test_api_is_read_only(path: Path) -> None:
             and node.func.value.id in SESSION_NAMES
         ):
             assert node.func.attr not in WRITE_CALLS, f"{path.name} 调用了 .{node.func.attr}()"
+
+
+def _get_paths(tmp: Path) -> list[str]:
+    """所有 GET 路由（含 include_in_schema=False 与非装饰器注册的），路径参数填 1。"""
+    routes = [(API_PREFIX, r) for router in ROUTERS for r in router.routes]
+    routes += [("", r) for r in create_app(static_dir=tmp).routes]
+    out = {
+        prefix + r.path.replace("{path:path}", "x")
+        for prefix, r in routes
+        if isinstance(r, APIRoute) and "GET" in (r.methods or set())
+    }
+    return sorted(re.sub(r"\{[^}]+\}", "1", p) for p in out)
+
+
+def test_write_methods_rejected(tmp_path: Path) -> None:
+    """行为检查：除提交回测外，任何 GET 路径的写方法都返回 405（覆盖非装饰器注册的路由）。"""
+    (tmp_path / "index.html").write_text("<html></html>")
+    paths = _get_paths(tmp_path)
+    assert "/api/health" in paths and "/x" in paths and len(paths) > 30
+    client = TestClient(create_app(static_dir=tmp_path))
+    for path in paths:
+        for method in sorted(WRITE_METHODS):
+            if (method, path) == ("POST", "/api/backtests"):
+                continue
+            assert client.request(method, path).status_code == 405, (method, path)
