@@ -220,14 +220,19 @@ def queue_status(s: Session) -> QueueStatus:
 
 def job_status(s: Session, mode: Mode | None = None) -> list[JobStatusOut]:
     """每个账户、每个任务最近一次运行；给出 mode 时只看该账户。"""
-    q = select(JobRun).order_by(JobRun.started_at.desc()).limit(500)
-    rows = s.scalars(q.where(JobRun.mode == mode) if mode else q).all()
-    seen: set[tuple[str, str]] = set()
+    # DISTINCT ON：每个 (账户, 任务) 取最近一行，不受总行数限制（低频任务也能显示）
+    q = (
+        select(JobRun)
+        .distinct(JobRun.mode, JobRun.job_name)
+        .order_by(JobRun.mode, JobRun.job_name, JobRun.started_at.desc())
+    )
+    rows = sorted(
+        s.scalars(q.where(JobRun.mode == mode) if mode else q),
+        key=lambda r: r.started_at,
+        reverse=True,
+    )
     out = []
     for r in rows:
-        if (r.mode, r.job_name) in seen:
-            continue
-        seen.add((r.mode, r.job_name))
         out.append(
             JobStatusOut(mode=r.mode, job_name=r.job_name, trade_date=r.trade_date, status=r.status,
                          started_at=r.started_at, finished_at=r.finished_at,

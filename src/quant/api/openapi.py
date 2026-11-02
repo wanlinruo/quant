@@ -40,11 +40,12 @@ def _ts_type(schema: Mapping[str, Any] | bool) -> str:
         inner = _ts_type(schema.get("items", {}))
         return f"({inner})[]" if " | " in inner else f"{inner}[]"
     if t == "object":
+        if schema.get("properties"):
+            raise ValueError("不支持带属性的内联对象：请改为单独的模型（BaseModel）")
         extra = schema.get("additionalProperties")
-        if extra is not None and not schema.get("properties"):
-            return f"Record<string, {_ts_type(extra)}>"
-        if not schema.get("properties"):
-            return "Record<string, unknown>"
+        return (
+            f"Record<string, {_ts_type(extra)}>" if extra is not None else "Record<string, unknown>"
+        )
     return {
         "string": "string",
         "integer": "number",
@@ -56,6 +57,9 @@ def _ts_type(schema: Mapping[str, Any] | bool) -> str:
 
 def render_ts_schemas(schemas: Mapping[str, Mapping[str, Any]]) -> str:
     out = []
+    split = [n for n in schemas if n.endswith(("-Input", "-Output"))]
+    if split:
+        raise ValueError(f"模型被拆成输入 / 输出两份：{split}（同一模型请勿既作请求又作响应）")
     for name in sorted(schemas):
         sch = schemas[name]
         if "properties" not in sch:

@@ -41,3 +41,12 @@ export function toETDate(iso: string): string {
 export function etParts(iso: string): { date: string; time: string; week: string } {
   return parts(new Date(iso), "America/New_York");
 }
+
+/** 美东“今天”往前 years 年的日期 YYYY-MM-DD（2 月 29 日落到 28 日）。 */
+export function etYearsAgo(years: number, now: Date = new Date()): string {
+  const [y, m, d] = parts(now, "America/New_York").date.split("-").map(Number);
+  const year = y - years;
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const day = m === 2 && d === 29 && !leap ? 28 : d;
+  return `${year}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}

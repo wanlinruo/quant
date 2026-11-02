@@ -12,7 +12,8 @@
       {
         "allowConstantExport": true
       }
-    ]
+    ],
+    "react/exhaustive-deps": "error"
   },
   "overrides": [
     {

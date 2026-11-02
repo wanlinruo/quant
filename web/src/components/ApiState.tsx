@@ -14,7 +14,8 @@ type Props<T> = {
 export function ApiState<T>({ result, children, emptyWhen }: Props<T>) {
   const { data, error, loading } = result;
   if (error) {
-    if (error instanceof ApiError && error.status === 503) return <EmptyState kind="nodb" />;
+    // 只有后端明确说“未配置数据库”才提示；其它 503（如 Caddy 上游不可用）按普通错误显示
+    if (error instanceof ApiError && error.status === 503 && String(error.detail).startsWith("未配置数据库")) return <EmptyState kind="nodb" />;
     return <div className="error-box">请求失败：{error.message}</div>;
   }
   if (loading || data === null) return <div className="muted">加载中…</div>;
