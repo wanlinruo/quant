@@ -255,31 +255,10 @@ describe("MarketPage", () => {
     expect(screen.getByText("市值每天补 60 只，约 9 个交易日补齐")).toBeInTheDocument();
   });
 
-  it("intraday panel shows index and holdings with today's P&L during regular hours", async () => {
-    const q = (symbol: string, price: number, prev: number) => ({ symbol, price, prev_close: prev, change_pct: price / prev - 1, quote_time: "2026-11-02T15:00:00Z" });
-    const INTRA = { session: "regular", session_text: "盘中", as_of: "2026-11-02T15:00:00Z", stale: false, source: "Finnhub",
-      note: "Finnhub 盘中报价 · 仅供查看，交易用收盘日线", quotes: [q("SPY", 760, 755.72), q("QQQ", 700, 690.49), q("CRWD", 244.96, 250.4)],
-      positions: [{ symbol: "CRWD", qty: 391, price: 244.96, change_pct: -0.0217, day_pnl: 1037.69, traded_today: true },
-        { symbol: "MSFT", qty: 10, price: 410, change_pct: 0.025, day_pnl: 100, traded_today: false }],
-      day_pnl: 1137.69 };
-    const fetch = mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW], "/api/market/intraday": [200, INTRA] });
+  it("home page has no separate intraday panel", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW] });
     renderPage(<MarketPage />, "/");
-    const panel = await screen.findByTestId("intraday");
-    expect(within(panel).getByText("仅供查看", { exact: false })).toBeInTheDocument();
-    const crwd = within(panel).getByText("CRWD").closest("tr") as HTMLElement;
-    expect(crwd).toHaveTextContent("+$1,037.69");
-    expect(crwd).toHaveTextContent("今日成交");
-    expect(within(panel).getByTestId("intraday-total")).toHaveTextContent("+$1,137.69");
-    const url = fetch.mock.calls.map(([u]) => String(u)).find((u) => u.includes("/api/market/intraday"));
-    expect(url).toContain("mode=paper");
-  });
-
-  it("intraday panel outside regular hours only explains the session", async () => {
-    mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW],
-      "/api/market/intraday": [200, { session: "pre", session_text: "盘前", stale: false, source: "Finnhub", note: "盘前：扩展时段行情未接入，显示上一交易日收盘", quotes: [] }] });
-    renderPage(<MarketPage />, "/");
-    const panel = await screen.findByTestId("intraday");
-    expect(panel).toHaveTextContent("盘前：扩展时段行情未接入");
-    expect(panel.querySelector("table")).toBeNull();
+    await screen.findByTestId("ticker-strip");
+    expect(screen.queryByTestId("intraday")).toBeNull();
   });
 });
