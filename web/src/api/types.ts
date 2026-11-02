@@ -850,6 +850,115 @@ export interface SwingCheckOut {
   dist_exit: number | null;
 }
 
+export interface SysAttemptOut {
+  attempt: number;
+  started_at: string;
+  finished_at: string | null;
+  duration_s: number | null;
+  result: string;
+  error: string | null;
+}
+
+export interface SysBannerOut {
+  level: "ok" | "warn" | "error";
+  items?: SysItemOut[];
+}
+
+export interface SysCardOut {
+  key: string;
+  label: string;
+  value: string;
+  sub?: string;
+  level?: "ok" | "warn" | "error" | "info";
+}
+
+export interface SysCellOut {
+  date: string;
+  status: "success" | "retry_success" | "failed" | "running" | "missing" | "pending" | "blocked" | "na";
+  attempts?: number;
+  duration_s?: number | null;
+}
+
+export interface SysDayOut {
+  date: string;
+  weekday: string;
+  tags?: string[];
+}
+
+export interface SysEventOut {
+  time: string;
+  level: "info" | "warn" | "error";
+  text: string;
+}
+
+export interface SysGridOut {
+  dates: string[];
+  jobs: SysJobRowOut[];
+}
+
+export interface SysItemOut {
+  level: "ok" | "warn" | "error";
+  text: string;
+  command?: string | null;
+}
+
+export interface SysJobRowOut {
+  job: string;
+  cells: SysCellOut[];
+  success_rate: number | null;
+  avg_s: number | null;
+}
+
+export interface SysQueueOut {
+  queued?: number;
+  running?: number;
+  done?: number;
+  failed?: number;
+  current_id?: number | null;
+  current_strategy?: string | null;
+  current_started?: string | null;
+  last_finished?: string | null;
+}
+
+export interface SysRiskOut {
+  label: string;
+  used?: number | null;
+  limit?: number | null;
+  kind?: "pct" | "usd" | "int" | "text";
+  text?: string;
+}
+
+export interface SysSourceOut {
+  key: string;
+  label: string;
+  status: "ok" | "stale" | "pending" | "warn";
+  updated?: string | null;
+  detail?: string;
+  progress?: number | null;
+}
+
+export interface SysTodayOut {
+  job: string;
+  planned_at: string;
+  status: string;
+  duration_s?: number | null;
+  error?: string | null;
+}
+
+export interface SystemOverview {
+  mode: string;
+  today: string;
+  banner: SysBannerOut;
+  cards?: SysCardOut[];
+  grid?: SysGridOut | null;
+  timeline?: SysTodayOut[];
+  sources?: SysSourceOut[];
+  risk?: SysRiskOut[];
+  upcoming?: SysDayOut[];
+  events?: SysEventOut[];
+  queue?: SysQueueOut | null;
+}
+
 export interface TechnicalsOut {
   rsi14: number | null;
   atr14_pct: number | null;
