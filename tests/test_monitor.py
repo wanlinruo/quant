@@ -133,3 +133,28 @@ def test_save_and_prune(db_url: str) -> None:
         s.query(SystemMetric).delete()
         s.commit()
     eng.dispose()
+
+
+def test_skips_oneoff_containers(tmp_path: Path) -> None:
+    class OneOff(FakeDocker):
+        def get(self, path: str) -> Any:
+            if path.startswith("/containers/json"):
+                base = super().get(path)
+                run = dict(base[0], Id="c3", State="exited", Names=["/quant-scheduler-run-1"])
+                run["Labels"] = dict(base[0]["Labels"], **{"com.docker.compose.oneoff": "True"})
+                return [*base, run]
+            return super().get(path)
+
+    rows = monitor.Collector(OneOff(), _proc(tmp_path, STAT1), tmp_path).collect(NOW)
+    assert [r.name for r in rows if r.kind == "container"] == ["scheduler"]
+
+
+def test_malformed_docker_payload_keeps_host(tmp_path: Path) -> None:
+    class Weird(FakeDocker):
+        def get(self, path: str) -> Any:
+            if path.endswith("/json") and path != "/containers/json?all=1":
+                return ["not", "a", "dict"]
+            return super().get(path)
+
+    rows = monitor.Collector(Weird(), _proc(tmp_path, STAT1), tmp_path).collect(NOW)
+    assert any(r.kind == "host" for r in rows)

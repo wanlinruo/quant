@@ -86,18 +86,26 @@ services:
     # 执行中仍被停止时，重启后会先恢复券商订单状态再继续（engine/executor.py）
     stop_grace_period: 20m
 
-  # 只读的 Docker 查询代理（#63、#71）：只开放容器列表 / 状态（GET），POST 等写操作默认关闭；
-  # 只在内部网络 dockerproxy 上，只有 monitor 能访问
+  # 只读的 Docker 查询代理（#63、#71）：按路径白名单只放行 GET 容器列表、单个容器的
+  # inspect 与 stats；读取容器文件（archive / export）、日志、镜像、exec 等一律拒绝。
+  # 只在内部网络 dockerproxy 上（不映射端口），只有 monitor 能访问
   docker-proxy:
-    image: tecnativa/docker-socket-proxy:v0.4.2
+    image: wollomatic/socket-proxy:1.13.2
     profiles: ["scheduler"]
     restart: unless-stopped
-    environment:
-      CONTAINERS: 1
-      POST: 0
+    command:
+      - -loglevel=warn
+      - -listenip=0.0.0.0
+      - -allowfrom=0.0.0.0/0  # 网络 dockerproxy 为 internal，只有 monitor 接入
+      - -allowGET=^/(v[0-9.]+/)?containers/(json|[0-9a-f]{12,64}/(json|stats))$$
+    user: "0:0"  # 读 docker.sock 需要；已去掉全部 capability
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [dockerproxy]
+    mem_limit: 64m
 
   # 每 60 秒采集主机与容器资源写入 system_metrics（系统页资源卡、服务容器、趋势）
   monitor:

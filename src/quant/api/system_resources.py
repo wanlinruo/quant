@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -21,6 +22,7 @@ from quant.api.schemas import (
 from quant.db.models import SystemMetric
 from quant.engine.runner import code_version
 
+ET = ZoneInfo("America/New_York")
 STALE = timedelta(minutes=5)
 DAY = timedelta(days=1)
 GB = 1024**3
@@ -156,17 +158,22 @@ def resources(s: Session, now: datetime) -> SysResourcesOut:
                 )
             )
 
-    if latest is None:
+    # 不限时间窗：monitor 停了超过 7 天，表里仍有旧采样（只有 monitor 自己删旧数据）
+    last_h = s.scalar(select(func.max(SystemMetric.ts)).where(SystemMetric.kind == "host"))
+    if last_h is None:
         return out
-    out.sampled_at = latest.ts
+    out.sampled_at = last_h
     warn = out.items.append
-    if now - latest.ts > STALE:
+    if now - last_h > STALE:
+        et = last_h.astimezone(ET)
         warn(
             SysItemOut(
                 level="warn",
-                text=f"资源采集已停止：最近采样 {latest.ts:%m-%d %H:%M} UTC（检查 monitor 容器）",
+                text=f"资源采集已停止：最近采样 {et:%m-%d %H:%M} ET（检查 monitor 容器）",
             )
         )
+    if latest is None:
+        return out
     disk_pct = _value(latest, "disk")
     if disk_pct is not None and disk_pct >= LIMITS["disk"][0]:
         warn(SysItemOut(level="warn", text=f"磁盘已用 {disk_pct:.0f}%"))

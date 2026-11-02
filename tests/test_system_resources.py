@@ -117,3 +117,10 @@ def test_warnings_stale_disk_full(s: Session) -> None:
     assert "资源采集已停止" in texts and "磁盘" in texts
     assert all(c.stale for c in r.containers)
     assert {c.key: c for c in r.cards}["disk"].level in ("warn", "error")
+
+
+def test_monitor_stopped_longer_than_window(s: Session) -> None:
+    s.add(host(NOW - timedelta(days=10), 5.0, 50))
+    s.commit()
+    r = sr.resources(s, NOW)
+    assert any("资源采集已停止" in i.text for i in r.items)

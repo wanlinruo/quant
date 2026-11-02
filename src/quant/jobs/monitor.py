@@ -3,7 +3,7 @@
     python -m quant.jobs.monitor [--once] [--interval 60]
 
 - 主机 CPU / 内存读容器内的 /proc（即主机数据），磁盘取数据卷所在文件系统。
-- 容器状态经 docker-socket-proxy（只开放 GET 容器查询）读取：QUANT_DOCKER_URL，默认
+- 容器状态经只读代理（路径白名单：容器列表、inspect、stats）读取：QUANT_DOCKER_URL，默认
   http://docker-proxy:2375。只取 compose 项目 quant 的容器。
 - inspect 返回的 Env 含密钥：只取 RestartCount 与 StartedAt，不保存、不打印其它字段。
 - 采集失败只记日志；Docker 不可用时主机数据照常写入。每小时删除 8 天前的采样。
@@ -117,6 +117,8 @@ class Collector:
             labels = c.get("Labels") or {}
             if labels.get("com.docker.compose.project") != PROJECT:
                 continue
+            if labels.get("com.docker.compose.oneoff") == "True":
+                continue  # docker compose run 起的一次性容器（迁移、人工命令）
             name = labels.get("com.docker.compose.service") or c["Names"][0].lstrip("/")
             extra: dict[str, Any] = {"state": c.get("State"), "status": c.get("Status")}
             pct = used = limit = None
@@ -128,7 +130,7 @@ class Collector:
                 info = self.docker.get(f"/containers/{c['Id']}/json")
                 extra["started_at"] = (info.get("State") or {}).get("StartedAt")
                 extra["restarts"] = info.get("RestartCount")
-            except (httpx.HTTPError, ValueError) as e:
+            except Exception as e:  # 网络错误或返回结构异常；只记类型名，不打印内容
                 log.warning("容器 %s 状态读取失败：%s", name, type(e).__name__)
             out.append(
                 SystemMetric(
@@ -147,7 +149,7 @@ class Collector:
         rows = [self._host(now)]
         try:
             rows += self._containers(now)
-        except (httpx.HTTPError, ValueError) as e:
+        except Exception as e:  # 代理不可用时主机数据照常写入
             log.warning("Docker 代理不可用：%s", type(e).__name__)
         return rows
 
