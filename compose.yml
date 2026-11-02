@@ -86,6 +86,45 @@ services:
     # 执行中仍被停止时，重启后会先恢复券商订单状态再继续（engine/executor.py）
     stop_grace_period: 20m
 
+  # 只读的 Docker 查询代理（#63、#71）：只开放容器列表 / 状态（GET），POST 等写操作默认关闭；
+  # 只在内部网络 dockerproxy 上，只有 monitor 能访问
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.2
+    profiles: ["scheduler"]
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [dockerproxy]
+
+  # 每 60 秒采集主机与容器资源写入 system_metrics（系统页资源卡、服务容器、趋势）
+  monitor:
+    image: ${QUANT_IMAGE:-quant:local}
+    build: .
+    profiles: ["scheduler"]
+    restart: unless-stopped
+    command: ["python", "-m", "quant.jobs.monitor"]
+    environment:
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      QUANT_DATABASE_URL: postgresql+psycopg://quant:${POSTGRES_PASSWORD}@postgres:5432/quant
+      QUANT_DOCKER_URL: http://docker-proxy:2375
+    volumes:
+      - parquet:/data/parquet:ro
+    networks: [default, dockerproxy]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      docker-proxy:
+        condition: service_started
+    cpus: 0.2
+    mem_limit: 256m
+
+networks:
+  dockerproxy:
+    internal: true
+
 volumes:
   pgdata:
   parquet:
