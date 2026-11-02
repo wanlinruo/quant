@@ -13,7 +13,7 @@ import { Banner, Events, Pending, Queue, Risk, Sources, Timeline, Upcoming } fro
 
 const ROW4_H = 330;
 const ROW5_H = 300;
-const ROW6_H = 260;
+const ROW6_H = 220;
 const RESOURCES = ["CPU", "内存", "磁盘", "老虎接口延迟"];
 
 function card(c: SysCardOut) {
@@ -68,8 +68,8 @@ export function SystemPage() {
               </Cell>
             </Grid>
             <Grid>
-              <Cell span={9}><Panel title="资源趋势 · 7 天" height={200}><Pending /></Panel></Cell>
-              <Cell span={3}><Panel title="磁盘写满预测" height={200}><Pending /></Panel></Cell>
+              <Cell span={9}><Panel title="资源趋势 · 7 天" height={150}><Pending /></Panel></Cell>
+              <Cell span={3}><Panel title="磁盘写满预测" height={150}><Pending /></Panel></Cell>
             </Grid>
             {pick && <AttemptsDialog mode={account} pick={pick} onClose={() => setPick(null)} />}
           </>
