@@ -155,14 +155,16 @@ def _write_pair(tmp_path: Path) -> None:
         day["vwap"] = day["close"]
         store.write_day(d.date(), day, keep=set(day["symbol"]))
     daily = build_snapshot(store, GICS, IDX[-1].date(), stale=False)
-    snapshot_path(tmp_path).write_text(json.dumps(daily.to_json(), allow_nan=False), encoding="utf-8")
+    text = json.dumps(daily.to_json(), allow_nan=False)
+    snapshot_path(tmp_path).write_text(text, encoding="utf-8")
     prev = f["close"].iloc[-1]
     bar = pd.DataFrame({"open": prev, "high": prev, "low": prev, "close": prev * 1.01})
     from datetime import date
 
     intra = build_snapshot(store, GICS, date(2026, 11, 2), stale=False, today_bar=bar).to_json()
     intra["intraday_time"] = "2026-11-02T15:10:00+00:00"
-    intraday_snapshot_path(tmp_path).write_text(json.dumps(intra, allow_nan=False), encoding="utf-8")
+    text = json.dumps(intra, allow_nan=False)
+    intraday_snapshot_path(tmp_path).write_text(text, encoding="utf-8")
 
 
 def _at(monkeypatch: pytest.MonkeyPatch, iso: str) -> None:
