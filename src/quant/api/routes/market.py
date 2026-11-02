@@ -11,13 +11,16 @@ from typing import Any
 
 from fastapi import APIRouter
 from pydantic import ValidationError
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
 
-from quant.api import queries, stock
-from quant.api.deps import get_settings, get_store, get_universe_store
+from quant.api import intraday_view, queries, stock
+from quant.api.deps import get_engine, get_settings, get_store, get_universe_store
 from quant.api.portfolio import Stores
 from quant.api.schemas import (
     BarsOut,
     DataStatusRow,
+    IntradayOut,
     MarketCalendar,
     MarketNews,
     MarketOverview,
@@ -36,6 +39,19 @@ _status_cache: dict[tuple[str, date], tuple[float, list[DataStatusRow]]] = {}
 
 def _now() -> float:
     return time.monotonic()
+
+
+@router.get("/market/intraday")
+def market_intraday() -> IntradayOut:
+    """盘中行情（#93）：常规时段返回今天的最新报价；其它时段只返回所处时段与说明。"""
+    eng, cal = get_engine(), get_calendar()
+    if eng is None:
+        return intraday_view.intraday(None, cal)
+    try:
+        with Session(eng) as s:
+            return intraday_view.intraday(s, cal)
+    except OperationalError:  # 数据库连不上：只返回时段与说明，不影响首页其它区块
+        return intraday_view.intraday(None, cal)
 
 
 @router.get("/market/data-status")

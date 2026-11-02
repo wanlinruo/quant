@@ -66,9 +66,18 @@ def _news(rows: Any) -> list[NewsRaw]:
         if not url.startswith(("https://", "http://")):
             url = ""  # 只接受网页链接（防止 javascript: 等进入页面）
         related = tuple(s.strip() for s in str(r.get("related") or "").split(",") if s.strip())
-        out.append(NewsRaw(str(r.get("id", "")), t, headline, str(r.get("source") or ""),
-                           url, related))  # fmt: skip
+        out.append(
+            NewsRaw(str(r.get("id", "")), t, headline, str(r.get("source") or ""), url, related)
+        )
     return out
+
+
+@dataclass(frozen=True)
+class Quote:
+    price: float
+    prev_close: float | None
+    change_pct: float | None  # 小数，如 -0.0123
+    time: datetime  # 最新成交时间（UTC）
 
 
 class FinnhubClient:
@@ -107,8 +116,12 @@ class FinnhubClient:
         return _news(self._get("/news", "市场新闻", category="general"))
 
     def company_news(self, symbol: str, start: date, end: date) -> list[NewsRaw]:
-        body = self._get("/company-news", f"{symbol} 新闻", symbol=symbol,
-                         **{"from": start.isoformat(), "to": end.isoformat()})  # fmt: skip
+        body = self._get(
+            "/company-news",
+            f"{symbol} 新闻",
+            symbol=symbol,
+            **{"from": start.isoformat(), "to": end.isoformat()},
+        )
         return _news(body)
 
     def metrics(self, symbol: str, keys: Sequence[str]) -> dict[str, float | None]:
@@ -130,9 +143,31 @@ class FinnhubClient:
         out = []
         for r in rows if isinstance(rows, list) else []:
             try:
-                out.append(EarningsRaw(str(r["symbol"]), date.fromisoformat(r["date"]),
-                                       str(r.get("hour") or ""), _num(r.get("epsEstimate")),
-                                       _num(r.get("epsActual"))))  # fmt: skip
+                out.append(
+                    EarningsRaw(
+                        str(r["symbol"]),
+                        date.fromisoformat(r["date"]),
+                        str(r.get("hour") or ""),
+                        _num(r.get("epsEstimate")),
+                        _num(r.get("epsActual")),
+                    )
+                )
             except (KeyError, TypeError, ValueError):
                 continue
         return out
+
+    def quote(self, symbol: str) -> Quote | None:
+        """最新报价（免费档只覆盖常规时段，#93 实测）；没有数据时返回 None。"""
+        body = self._get("/quote", f"{symbol} 报价", symbol=symbol)
+        if not isinstance(body, dict):
+            return None
+        price, t = _num(body.get("c")), body.get("t")
+        if not price or not isinstance(t, (int, float)) or t <= 0:
+            return None
+        dp = _num(body.get("dp"))
+        return Quote(
+            price,
+            _num(body.get("pc")) or None,
+            dp / 100 if dp is not None else None,
+            datetime.fromtimestamp(t, UTC),
+        )

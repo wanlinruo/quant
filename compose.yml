@@ -129,6 +129,24 @@ services:
     cpus: 0.2
     mem_limit: 256m
 
+  # 盘中行情（#93）：常规时段每分钟取 Finnhub 报价写入 intraday_quotes，只供面板查看。
+  # 不挂老虎配置、不导入券商代码，与交易链路隔离
+  quotes:
+    image: ${QUANT_IMAGE:-quant:local}
+    build: .
+    profiles: ["scheduler"]
+    restart: unless-stopped
+    command: ["python", "-m", "quant.jobs.quotes"]
+    environment:
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      QUANT_DATABASE_URL: postgresql+psycopg://quant:${POSTGRES_PASSWORD}@postgres:5432/quant
+      QUANT_FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    cpus: 0.2
+    mem_limit: 256m
+
 networks:
   dockerproxy:
     internal: true
