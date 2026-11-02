@@ -261,4 +261,12 @@ describe("MarketPage", () => {
     await screen.findByTestId("ticker-strip");
     expect(screen.queryByTestId("intraday")).toBeNull();
   });
+
+  it("shows intraday time instead of close when the snapshot is intraday", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [200, { ...OVERVIEW, as_of: "2026-11-02", intraday: true, intraday_time: "2026-11-02T15:10:00Z" }] });
+    renderPage(<MarketPage />, "/");
+    expect(await screen.findByText(/盘中 · 截至 2026-11-02 10:10 ET/)).toBeInTheDocument();
+    expect(screen.getByText(/约每 10 分钟更新/)).toBeInTheDocument();
+    expect(screen.queryByText(/美东收盘/)).toBeNull();
+  });
 });

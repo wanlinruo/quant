@@ -1,7 +1,7 @@
 import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, HistogramSeries, LineSeries, type SeriesMarker, type Time } from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
 
-export type Candle = { date: string; open: number; high: number; low: number; close: number; volume: number | null };
+export type Candle = { date: string; open: number; high: number; low: number; close: number; volume?: number | null };
 
 const MA_COLORS = ["#f5a623", "#22d3ee", "#a855f7", "#e879f9"];
 const UP = "#22c55e";

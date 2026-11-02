@@ -135,3 +135,60 @@ def test_broken_files_are_pending(client: TestClient, tmp_path: Path) -> None:
     assert client.get("/api/market/calendar").json()["status"] == "pending"
     body = client.get("/api/market/overview").json()
     assert body["status"] == "ok" and body["macro"] == [] and body["movers"][0]["reason"] is None
+
+
+# ---- 盘中快照（#93）----
+
+
+def _write_pair(tmp_path: Path) -> None:
+    """日线快照截至 10-30；盘中快照为 11-02（周一）。"""
+    import pandas as pd
+
+    from quant.data.market_store import MarketStore, intraday_snapshot_path
+    from quant.market.board import build_snapshot
+
+    store = MarketStore(tmp_path)
+    f = frames()
+    for d in IDX:
+        day = pd.DataFrame({k: f[k].loc[d] for k in ("open", "high", "low", "close", "volume")})
+        day = day.rename_axis("symbol").reset_index()
+        day["vwap"] = day["close"]
+        store.write_day(d.date(), day, keep=set(day["symbol"]))
+    daily = build_snapshot(store, GICS, IDX[-1].date(), stale=False)
+    snapshot_path(tmp_path).write_text(json.dumps(daily.to_json(), allow_nan=False), encoding="utf-8")
+    prev = f["close"].iloc[-1]
+    bar = pd.DataFrame({"open": prev, "high": prev, "low": prev, "close": prev * 1.01})
+    from datetime import date
+
+    intra = build_snapshot(store, GICS, date(2026, 11, 2), stale=False, today_bar=bar).to_json()
+    intra["intraday_time"] = "2026-11-02T15:10:00+00:00"
+    intraday_snapshot_path(tmp_path).write_text(json.dumps(intra, allow_nan=False), encoding="utf-8")
+
+
+def _at(monkeypatch: pytest.MonkeyPatch, iso: str) -> None:
+    from datetime import datetime
+
+    import quant.api.intraday_view as iv
+
+    monkeypatch.setattr(iv, "_now", lambda: datetime.fromisoformat(iso))
+
+
+def test_overview_prefers_todays_intraday_snapshot(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_pair(tmp_path)
+    _at(monkeypatch, "2026-11-02T15:20:00+00:00")  # 周一盘中
+    o = client.get("/api/market/overview").json()
+    assert o["status"] == "ok" and o["intraday"] is True and o["as_of"] == "2026-11-02"
+    assert o["intraday_time"].startswith("2026-11-02T15:10")
+    _at(monkeypatch, "2026-11-02T23:00:00+00:00")  # 收盘后、夜间日线未生成：仍用今天的盘中快照
+    assert client.get("/api/market/overview").json()["intraday"] is True
+
+
+def test_overview_uses_daily_next_morning_or_when_daily_caught_up(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_pair(tmp_path)
+    _at(monkeypatch, "2026-11-03T13:00:00+00:00")  # 次日盘前：盘中快照是昨天的
+    o = client.get("/api/market/overview").json()
+    assert o["intraday"] is False and o["as_of"] == "2026-10-30"
