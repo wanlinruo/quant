@@ -33,5 +33,6 @@ ET = ZoneInfo("America/New_York")
         ((2026, 11, 27, 17, 0), "closed"),  # 半日市盘后到 17:00；次日周六
     ],
 )
-def test_us_session(when: tuple[int, ...], expected: str) -> None:
-    assert us_session(get_calendar(), datetime(*when, tzinfo=ET)) == expected
+def test_us_session(when: tuple[int, int, int, int, int], expected: str) -> None:
+    y, mo, d, h, mi = when
+    assert us_session(get_calendar(), datetime(y, mo, d, h, mi, tzinfo=ET)) == expected
