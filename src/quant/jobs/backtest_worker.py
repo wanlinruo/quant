@@ -20,11 +20,12 @@ from collections.abc import Callable
 from types import FrameType
 from typing import Protocol
 
+from pydantic import ValidationError
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from quant.core.calendar import get_calendar
-from quant.core.settings import ConfigError, Settings, load_settings
+from quant.core.settings import ConfigError, CostSettings, Settings, load_settings
 from quant.data.backtest_data import make_runner
 from quant.db.backtests import claim_next, fail_run, make_engine
 from quant.db.models import BacktestRun
@@ -60,6 +61,8 @@ def process_one(engine: Engine, settings: Settings, runner: Runner = run_spec) -
     try:
         with Session(engine) as session, session.begin():
             save_result(session, run_id, result)
+            if stored.get(ROBUST_KEY) and not is_child:
+                _spawn_in_savepoint(session, run_id, spec)
     except Exception as e:  # 写库出错：记为失败并写入真实原因，worker 不退出
         log.exception("回测 #%s 保存结果失败", run_id)
         detail = f"保存结果失败：{type(e).__name__}: {e}\n{traceback.format_exc(limit=5)}"
@@ -67,14 +70,17 @@ def process_one(engine: Engine, settings: Settings, runner: Runner = run_spec) -
             fail_run(session, run_id, detail)
         return run_id
     log.info("回测 #%s 完成：年化 %.2f%%", run_id, result.metrics.cagr * 100)
-    if stored.get(ROBUST_KEY) and not is_child:
-        try:
-            with Session(engine) as session, session.begin():
-                n = spawn_robustness(session, run_id, spec)
-            log.info("回测 #%s：已生成 %d 个稳健性检验子任务", run_id, n)
-        except Exception:  # 生成失败不影响父回测结果
-            log.exception("回测 #%s 生成稳健性检验子任务失败", run_id)
     return run_id
+
+
+def _spawn_in_savepoint(session: Session, run_id: int, spec: BacktestSpec) -> None:
+    """与保存结果在同一事务：worker 在两者之间崩溃也不会只剩父回测；生成失败只回滚子任务。"""
+    try:
+        with session.begin_nested():
+            n = spawn_robustness(session, run_id, spec)
+        log.info("回测 #%s：已生成 %d 个稳健性检验子任务", run_id, n)
+    except Exception:  # 生成失败不影响父回测结果
+        log.exception("回测 #%s 生成稳健性检验子任务失败", run_id)
 
 
 def spawn_robustness(session: Session, parent_id: int, spec: BacktestSpec) -> int:
@@ -82,8 +88,15 @@ def spawn_robustness(session: Session, parent_id: int, spec: BacktestSpec) -> in
     base = spec.stored_params()
     costs, cash = base[COSTS_KEY], base[CASH_KEY]
     variants = robustness.plan(spec.strategy, spec.params, spec.start, spec.end)
+    n = 0
     for v in variants:
         c = robustness.scale_costs(costs, v.cost_mult) if v.cost_mult is not None else costs
+        try:
+            CostSettings(**c)
+        except ValidationError:  # 放大后超出成本上限（如滑点 ≥ 10%）：跳过这一档
+            log.info("回测 #%s：%s 超出成本上限，跳过", parent_id, v.label)
+            continue
+        n += 1
         session.add(
             BacktestRun(
                 strategy=spec.strategy,
@@ -102,7 +115,7 @@ def spawn_robustness(session: Session, parent_id: int, spec: BacktestSpec) -> in
                 },
             )
         )
-    return len(variants)
+    return n
 
 
 STALE_RUNNING_ERROR = (

@@ -99,6 +99,7 @@ class RbRowOut(BaseModel):
     metrics: RbMetricsOut | None = None
     passed: bool | None = None  # 只有组合策略的相邻设置判定
     base: bool = False  # 本次（父回测）
+    error: str | None = None  # 失败原因第一行
 
 
 class RbCellOut(BaseModel):
@@ -109,6 +110,7 @@ class RbCellOut(BaseModel):
     status: str  # done / queued / running / failed / skipped（参数越界未跑）
     metrics: RbMetricsOut | None = None
     center: bool = False
+    error: str | None = None  # 失败原因第一行
 
 
 class RbGridOut(BaseModel):

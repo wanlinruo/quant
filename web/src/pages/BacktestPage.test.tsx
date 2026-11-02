@@ -6,6 +6,7 @@ import { ShellContext } from "../shell";
 import { currentLocation, mkMeta, mockApi, renderAt, renderPage } from "../test/utils";
 import { BacktestPage } from "./BacktestPage";
 import { ANALYSIS, POSITIONS, TRADES } from "./backtest/analysisFixture";
+import { ROBUST_REFRESH_MS } from "./backtest/robustRefresh";
 
 const run = (id: number, status = "done") => ({
   id, strategy: "combo", status, start: "2016-10-28", end: "2026-10-29", params: {}, costs: null,
@@ -400,7 +401,7 @@ describe("BacktestPage", () => {
       status: "pending", note: "", progress: { total: 17, done: 15, failed: 1, queued: 1, running: 0 },
       grid: { x_label: "动量仓比例", y_label: "择时波动阈值", x_values: ["30%", "40%", "50%"], y_values: ["25%", "30%", "35%"], cells },
       neighbors: [{ label: "动量仓比例 30% · 择时波动阈值 30%", run_id: 203, status: "done", metrics: m(0.1, 0.9, -0.2), passed: false, base: false },
-        { label: "动量只数 5", run_id: 210, status: "failed", metrics: null, passed: null, base: false }],
+        { label: "动量只数 5", run_id: 210, status: "failed", metrics: null, passed: null, base: false, error: "ValueError: 数据不足" }],
       neighbors_verdict: null, neighbors_note: "不完整：1 项未完成或失败",
       walk_forward: { train_years: 3, note: "每年用前 3 年夏普最高的参数", segments: [{ year: 2019, chosen: "c001", test_return: 0.12, base_return: 0.1 }],
         strategy: m(0.11, 1.0, -0.2), base: m(0.1, 1.1, -0.18) },
@@ -421,6 +422,7 @@ describe("BacktestPage", () => {
     expect(screen.getByText("2019").closest("tr")).toHaveTextContent("c001");
     expect(screen.getByText("成本 ×1（本次）")).toBeInTheDocument();
     expect(screen.getByText("起点 2017-01-28").closest("tr")).toHaveTextContent("排队");
+    expect(screen.getByTitle("ValueError: 数据不足")).toHaveTextContent("失败");
   });
 
   it("drawer can request robustness and list shows progress", async () => {
@@ -441,5 +443,18 @@ describe("BacktestPage", () => {
     await user.click(await screen.findByLabelText("对比 #128"));
     expect(await screen.findByText(/勾选回测查看/)).toBeInTheDocument();
     expect(screen.queryByText(/还没有回测记录/)).toBeNull();
+  });
+
+  it("list shows pending generation instead of 0/0 and robust tab refreshes while pending", async () => {
+    const parent = { ...run(150, "queued"), robust: { total: 0, done: 0, failed: 0, queued: 0, running: 0 } };
+    const fetch = mockApi({ "/api/backtests": [200, [parent]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/150/analysis": [200, ANALYSIS],
+      "/api/backtests/150/robustness": [200, { status: "pending", note: "等待本次回测完成后生成子回测", progress: { total: 0, done: 0, failed: 0, queued: 0, running: 0 } }] });
+    renderPage(<BacktestPage />, "/backtest?tab=robust");
+    expect(await screen.findByText(/稳健 待生成/)).toBeInTheDocument();
+    expect(await screen.findByText(/等待本次回测完成后生成子回测/)).toBeInTheDocument();
+    const calls = () => fetch.mock.calls.filter(([u]) => String(u).includes("/robustness")).length;
+    const first = calls();
+    await new Promise((r) => setTimeout(r, ROBUST_REFRESH_MS + 100));
+    expect(calls()).toBeGreaterThan(first);
   });
 });
