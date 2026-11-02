@@ -931,3 +931,115 @@ class ParamField(BaseModel):
     group: str | None  # combo 的子仓参数组：momentum / swing
     type: Literal["int", "float", "str", "bool", "list"]
     default: Any
+
+
+# ---- 系统页（#71 A 批）----
+
+
+class SysItemOut(BaseModel):
+    level: Literal["ok", "warn", "error"]
+    text: str
+    command: str | None = None
+
+
+class SysBannerOut(BaseModel):
+    level: Literal["ok", "warn", "error"]
+    items: list[SysItemOut] = []
+
+
+class SysCardOut(BaseModel):
+    key: str
+    label: str
+    value: str
+    sub: str = ""
+    level: Literal["ok", "warn", "error", "info"] = "info"
+
+
+class SysCellOut(BaseModel):
+    date: date
+    status: Literal["success", "retry_success", "failed", "running", "missing", "pending", "na"]
+    attempts: int = 0
+    duration_s: float | None = None
+
+
+class SysJobRowOut(BaseModel):
+    job: str
+    cells: list[SysCellOut]
+    success_rate: float | None
+    avg_s: float | None
+
+
+class SysGridOut(BaseModel):
+    dates: list[date]
+    jobs: list[SysJobRowOut]
+
+
+class SysTodayOut(BaseModel):
+    job: str
+    planned_at: datetime
+    status: str
+    duration_s: float | None = None
+    error: str | None = None
+
+
+class SysSourceOut(BaseModel):
+    key: str
+    label: str
+    status: Literal["ok", "stale", "pending", "warn"]
+    updated: datetime | None = None
+    detail: str = ""
+    progress: float | None = None
+
+
+class SysRiskOut(BaseModel):
+    label: str
+    used: float | None = None
+    limit: float | None = None
+    kind: Literal["pct", "usd", "int", "text"] = "pct"
+    text: str = ""
+
+
+class SysDayOut(BaseModel):
+    date: date
+    weekday: str
+    tags: list[str] = []
+
+
+class SysEventOut(BaseModel):
+    time: datetime
+    level: Literal["info", "warn", "error"]
+    text: str
+
+
+class SysQueueOut(BaseModel):
+    queued: int = 0
+    running: int = 0
+    done: int = 0
+    failed: int = 0
+    current_id: int | None = None
+    current_strategy: str | None = None
+    current_started: datetime | None = None
+    last_finished: datetime | None = None
+
+
+class SystemOverview(BaseModel):
+    mode: str
+    today: date
+    banner: SysBannerOut
+    cards: list[SysCardOut] = []
+    grid: SysGridOut | None = None
+    timeline: list[SysTodayOut] = []
+    sources: list[SysSourceOut] = []
+    risk: list[SysRiskOut] = []
+    upcoming: list[SysDayOut] = []
+    events: list[SysEventOut] = []
+    queue: SysQueueOut | None = None
+
+
+class SysAttemptOut(BaseModel):
+    attempt: int
+    started_at: datetime
+    finished_at: datetime | None
+    duration_s: float | None
+    result: str
+    error: str | None
