@@ -879,10 +879,30 @@ export interface SysCellOut {
   duration_s?: number | null;
 }
 
+export interface SysContainerOut {
+  name: string;
+  state?: string | null;
+  status?: string | null;
+  cpu_pct?: number | null;
+  mem_bytes?: number | null;
+  mem_limit?: number | null;
+  started_at?: string | null;
+  restarts?: number | null;
+  stale?: boolean;
+}
+
 export interface SysDayOut {
   date: string;
   weekday: string;
   tags?: string[];
+}
+
+export interface SysDiskOut {
+  used?: number | null;
+  total?: number | null;
+  per_day?: number | null;
+  days_left?: number | null;
+  note?: string;
 }
 
 export interface SysEventOut {
@@ -920,6 +940,25 @@ export interface SysQueueOut {
   last_finished?: string | null;
 }
 
+export interface SysResourceOut {
+  key: string;
+  label: string;
+  value?: number | null;
+  text?: string;
+  level?: "ok" | "warn" | "error" | "info";
+  series?: (number | null)[];
+}
+
+export interface SysResourcesOut {
+  sampled_at?: string | null;
+  version?: string | null;
+  cards?: SysResourceOut[];
+  containers?: SysContainerOut[];
+  trends?: SysTrendOut;
+  disk?: SysDiskOut;
+  items?: SysItemOut[];
+}
+
 export interface SysRiskOut {
   label: string;
   used?: number | null;
@@ -945,6 +984,13 @@ export interface SysTodayOut {
   error?: string | null;
 }
 
+export interface SysTrendOut {
+  times?: string[];
+  cpu?: (number | null)[];
+  mem?: (number | null)[];
+  disk?: (number | null)[];
+}
+
 export interface SystemOverview {
   mode: string;
   today: string;
@@ -957,6 +1003,7 @@ export interface SystemOverview {
   upcoming?: SysDayOut[];
   events?: SysEventOut[];
   queue?: SysQueueOut | null;
+  resources?: SysResourcesOut | null;
 }
 
 export interface TechnicalsOut {

@@ -80,7 +80,7 @@ def test_collect_host_and_containers(tmp_path: Path) -> None:
     c = monitor.Collector(FakeDocker(), _proc(tmp_path, STAT1), tmp_path)
     rows = c.collect(NOW)
     host = next(r for r in rows if r.kind == "host")
-    assert host.cpu_pct is None and host.mem_bytes == 3000000 * 1024 and host.disk_total > 0
+    assert host.cpu_pct is None and host.mem_bytes == 3000000 * 1024 and (host.disk_total or 0) > 0
     (tmp_path / "stat").write_text(STAT2)
     rows = c.collect(NOW)
     host = next(r for r in rows if r.kind == "host")
