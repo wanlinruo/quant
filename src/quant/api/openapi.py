@@ -59,9 +59,7 @@ def render_ts_schemas(schemas: Mapping[str, Mapping[str, Any]]) -> str:
     out = []
     split = [n for n in schemas if n.endswith(("-Input", "-Output"))]
     if split:
-        raise ValueError(
-            f"模型被拆成输入 / 输出两份：{split}（同一模型请勿既作请求又作响应）"
-        )
+        raise ValueError(f"模型被拆成输入 / 输出两份：{split}（同一模型请勿既作请求又作响应）")
     for name in sorted(schemas):
         sch = schemas[name]
         if "properties" not in sch:
