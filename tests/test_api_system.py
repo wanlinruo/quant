@@ -290,3 +290,28 @@ def test_timeline_and_risk_follow_mode(client: TestClient) -> None:
     assert t["daily_data"]["status"] == "failed" and t["daily_signal"]["status"] == "na"
     risk = {r["label"]: r for r in live["risk"]}
     assert risk["近 30 天被拒订单"]["used"] == 0
+
+
+@needs_db
+def test_overview_includes_resources(client: TestClient, db_url: str) -> None:
+    from quant.db.models import SystemMetric
+
+    eng = create_engine(db_url)
+    with Session(eng) as s, s.begin():
+        s.add(
+            SystemMetric(
+                ts=NOW - timedelta(hours=1),
+                kind="host",
+                name="host",
+                cpu_pct=3.0,
+                mem_bytes=1,
+                mem_limit=2,
+                disk_used=1,
+                disk_total=10,
+                extra={},
+            )
+        )
+    eng.dispose()
+    d = ov(client)
+    assert d["resources"]["sampled_at"] is not None
+    assert any("资源采集已停止" in x["text"] for x in d["banner"]["items"])

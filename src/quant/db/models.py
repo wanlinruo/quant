@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Date,
     DateTime,
@@ -305,3 +306,21 @@ class SystemFlag(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class SystemMetric(Base):
+    """资源采样（monitor 每 60 秒一次，保留 8 天；设计 5.5、7.2）。kind：host / container。"""
+
+    __tablename__ = "system_metrics"
+    __table_args__ = (Index("ix_system_metrics_kind_name_ts", "kind", "name", "ts"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(64))
+    cpu_pct: Mapped[float | None] = mapped_column(Float)
+    mem_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    mem_limit: Mapped[int | None] = mapped_column(BigInteger)
+    disk_used: Mapped[int | None] = mapped_column(BigInteger)
+    disk_total: Mapped[int | None] = mapped_column(BigInteger)
+    extra: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
