@@ -141,6 +141,7 @@ services:
       TRADING_MODE: ${TRADING_MODE:-paper}
       QUANT_DATABASE_URL: postgresql+psycopg://quant:${POSTGRES_PASSWORD}@postgres:5432/quant
       QUANT_FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
+      QUANT_FRED_API_KEY: ${FRED_API_KEY:-}  # 盘中新闻/财经日历，与报价顺序调度
     volumes:
       - parquet:/data/parquet  # 读日线与成分表，写 market/snapshot_intraday.json
     depends_on:

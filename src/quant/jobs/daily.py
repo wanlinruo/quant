@@ -527,7 +527,9 @@ def market_extras(ctx: JobContext, d: date) -> str:
         cal=ctx.calendar,
         holdings=_all_holdings(ctx) or set(),
         fred=FredClient(fred_key) if fred_key else None,
-        finnhub=FinnhubClient(fh_key) if fh_key else None,
+        finnhub=FinnhubClient(fh_key, rate_limit_path=ctx.settings.data_dir / ".finnhub-rate")
+        if fh_key
+        else None,
     )
 
 
@@ -539,8 +541,13 @@ def stock_data(ctx: JobContext, d: date) -> str:
     from quant.data.providers.finnhub import FinnhubClient
     from quant.market.stock_job import run_stock_data
 
-    return run_stock_data(data_dir=ctx.settings.data_dir, today=d, now=ctx.now(),
-                          holdings=_all_holdings(ctx), finnhub=FinnhubClient(key))  # fmt: skip
+    return run_stock_data(
+        data_dir=ctx.settings.data_dir,
+        today=d,
+        now=ctx.now(),
+        holdings=_all_holdings(ctx),
+        finnhub=FinnhubClient(key, rate_limit_path=ctx.settings.data_dir / ".finnhub-rate"),
+    )
 
 
 JOB_FUNCS: dict[str, Callable[[JobContext, date], str]] = {

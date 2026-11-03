@@ -2,11 +2,12 @@
 
     python -m quant.jobs.quotes [--once] [--interval 60]
 
-- 只在常规交易时段（XNYS，含半日市）运行，每 60 秒取一轮 Finnhub `/quote`
-  （免费档只覆盖常规时段；60 次/分钟，每轮最多 MAX_SYMBOLS 个）。
+- 只在常规交易时段（XNYS，含半日市）轮询 Finnhub `/quote`，每轮间隔最少 60 秒。
+  免费档只覆盖常规时段；全市场一轮约 10–15 分钟，共享请求节流，每轮最多 MAX_SYMBOLS 个。
 - 标的：首页 ETF + 各账户最新持仓 + 标普 500 成分股 + quotes.watchlist
   （约 540 只，一轮约 10 分钟）。
   每只只保留最新一条；每轮结束用盘中价格拼当日 K 线，重算首页快照写入 snapshot_intraday.json。
+- 每 50 只报价落库，ETF 与持仓优先；资讯约每 15 分钟在轮次之间刷新，实际约 15–25 分钟。
 - 与交易链路隔离：不加载老虎配置，不导入 tigeropen / broker / 执行器。
 - 失败只记日志（限流时本轮停止），不退出、不发交易告警。
 """
@@ -40,9 +41,12 @@ from quant.data.market_store import (
 )
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.finnhub import FinnhubAuthError, FinnhubClient, Quote
+from quant.data.providers.fred import FredClient
 from quant.data.quota import atomic_write_text
 from quant.db.models import IntradayQuote, PositionSnapshot
 from quant.market.board import build_snapshot
+from quant.market.extras_job import run_market_extras
+from quant.market.refresh_metrics import record_refresh
 from quant.market.session import ET, us_session
 
 log = logging.getLogger("quant.quotes")
@@ -51,6 +55,7 @@ MAX_SYMBOLS = 700
 MIN_COVERAGE = 0.9  # 今天有报价的标的比例低于此值时不更新盘中快照
 SOURCE = "finnhub"
 AUTH_BACKOFF = timedelta(minutes=30)
+EXTRAS_INTERVAL = timedelta(minutes=15)
 
 
 class QuoteSource(Protocol):
@@ -87,6 +92,15 @@ def should_poll(cal: TradingCalendar, now: datetime) -> bool:
     return us_session(cal, now) == "regular"
 
 
+def extras_due(
+    cal: TradingCalendar,
+    now: datetime,
+    next_at: datetime | None,
+    stopped: bool,
+) -> bool:
+    return not stopped and should_poll(cal, now) and (next_at is None or now >= next_at)
+
+
 def poll_once(
     engine: Engine,
     source: QuoteSource,
@@ -95,6 +109,7 @@ def poll_once(
     data_dir: Path,
     stop: Callable[[], bool] = lambda: False,
     cache: dict[str, Quote] | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> int:
     """取一轮报价写入 intraday_quotes，并重算盘中首页快照；返回写入条数。
 
@@ -105,6 +120,8 @@ def poll_once(
         held = _held(s)
     symbols = pick_symbols(held, watchlist, gics.members if gics else ())
     got: dict[str, Quote] = {}
+    pending: dict[str, Quote] = {}
+    fetched: dict[str, datetime] = {}
     for sym in symbols:
         if stop():
             break
@@ -117,6 +134,23 @@ def poll_once(
             break
         if q is not None:
             got[sym] = q
+            pending[sym] = q
+            fetched[sym] = clock() if clock else now
+        # ETF 与持仓优先取到后及时落库，不等全市场十多分钟全部完成。
+        if len(pending) >= 50:
+            _save_quotes(engine, pending, fetched)
+            pending.clear()
+    _save_quotes(engine, pending, fetched)
+    if gics is not None:
+        merged = cache if cache is not None else {}
+        merged.update(got)
+        _write_snapshot(data_dir, gics, held, merged, clock() if clock else now, symbols)
+    return len(got)
+
+
+def _save_quotes(engine: Engine, got: dict[str, Quote], fetched: dict[str, datetime]) -> None:
+    if not got:
+        return
     with Session(engine) as s, s.begin():
         for sym, q in got.items():
             s.merge(
@@ -126,16 +160,32 @@ def poll_once(
                     prev_close=q.prev_close,
                     change_pct=q.change_pct,
                     quote_time=q.time,
-                    fetched_at=now,
+                    fetched_at=fetched[sym],
                     source=SOURCE,
                 )
             )
-    if gics is not None:
-        # 跨轮缓存今天的报价：被限流或打断的一轮，缺的标的用上一轮的价格补
-        merged = cache if cache is not None else {}
-        merged.update(got)
-        _write_snapshot(data_dir, gics, held, merged, now, symbols)
-    return len(got)
+
+
+def refresh_extras(
+    engine: Engine,
+    client: FinnhubClient,
+    fred: FredClient | None,
+    data_dir: Path,
+    now: datetime,
+    cal: TradingCalendar,
+) -> str:
+    """在报价轮次之间执行，共用同一个 Finnhub 客户端的限速器，不访问交易接口。"""
+    with Session(engine) as s:
+        held = _held(s)
+    return run_market_extras(
+        data_dir=data_dir,
+        now=now,
+        today=now.astimezone(ET).date(),
+        cal=cal,
+        holdings=held,
+        fred=fred,
+        finnhub=client,
+    )
 
 
 def _write_snapshot(
@@ -152,7 +202,11 @@ def _write_snapshot(
     （否则“1 日”实为多日涨跌）；当日日线已入库。
     """
     today = now.astimezone(ET).date()
-    for s in [s for s, q in quotes.items() if q.time.astimezone(ET).date() != today]:
+    for s in [
+        s
+        for s, q in quotes.items()
+        if q.time.astimezone(ET).date() != today or now - q.time > timedelta(minutes=20)
+    ]:
         del quotes[s]  # 只留今天的
     fresh = {s: quotes[s] for s in symbols if s in quotes}
     if not symbols or len(fresh) / len(symbols) < MIN_COVERAGE:
@@ -176,6 +230,7 @@ def _write_snapshot(
         return
     doc = snap.to_json()
     doc["intraday_time"] = max(q.time for q in fresh.values()).isoformat()
+    doc["intraday_time_start"] = min(q.time for q in fresh.values()).isoformat()
     text = json.dumps(doc, ensure_ascii=False, allow_nan=False)
     atomic_write_text(intraday_snapshot_path(data_dir), text)
 
@@ -205,14 +260,25 @@ def main(argv: list[str] | None = None) -> int:
     if key is None or not key.get_secret_value().strip():
         log.warning("未配置 QUANT_FINNHUB_API_KEY，盘中行情不采集")
     engine = create_engine(settings.database_url.get_secret_value(), pool_pre_ping=True)
-    client = FinnhubClient(key) if key is not None and key.get_secret_value().strip() else None
     cal = get_calendar()
     stop = _Stop()
+    client = (
+        FinnhubClient(
+            key,
+            rate_limit_path=settings.data_dir / ".finnhub-rate",
+            stop=lambda: stop.requested or not should_poll(cal, datetime.now(UTC)),
+        )
+        if key is not None and key.get_secret_value().strip()
+        else None
+    )
+    fred_key = settings.fred_api_key
+    fred = FredClient(fred_key) if fred_key and fred_key.get_secret_value().strip() else None
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     paused_until: datetime | None = None
     cache: dict[str, Quote] = {}
-    log.info("quotes 启动：常规时段每 %.0f 秒采集一次", args.interval)
+    next_extras: datetime | None = None
+    log.info("quotes 启动：常规时段轮询，最小轮次间隔 %.0f 秒，全市场约 10–15 分钟", args.interval)
     while not stop.requested:
         started = time.monotonic()
         now = datetime.now(UTC)
@@ -222,6 +288,8 @@ def main(argv: list[str] | None = None) -> int:
             and (paused_until is None or now >= paused_until)
         ):
             try:
+                cpu_start = time.process_time()
+                requests_before, limits_before = client.request_count, client.rate_limit_count
                 n = poll_once(
                     engine,
                     client,
@@ -230,8 +298,47 @@ def main(argv: list[str] | None = None) -> int:
                     settings.data_dir,
                     stop=lambda: stop.requested,
                     cache=cache,
+                    clock=lambda: datetime.now(UTC),
+                )
+                record_refresh(
+                    settings.data_dir,
+                    "quotes",
+                    started,
+                    cpu_start,
+                    n,
+                    client.request_count - requests_before,
+                    client.rate_limit_count - limits_before,
                 )
                 log.info("盘中行情 %d 只", n)
+                # 半日市收盘后和停止期间不启动额外请求；夜间任务仍由 scheduler 执行。
+                finished = datetime.now(UTC)
+                if extras_due(cal, finished, next_extras, stop.requested):
+                    next_extras = finished + EXTRAS_INTERVAL
+                    extras_start, extras_cpu = time.monotonic(), time.process_time()
+                    requests_before, limits_before = client.request_count, client.rate_limit_count
+                    try:
+                        log.info(
+                            "盘中资讯：%s",
+                            refresh_extras(
+                                engine,
+                                client,
+                                fred,
+                                settings.data_dir,
+                                finished,
+                                cal,
+                            ),
+                        )
+                    except Exception:
+                        log.exception("盘中资讯刷新失败，沿用已有文件")
+                    record_refresh(
+                        settings.data_dir,
+                        "extras",
+                        extras_start,
+                        extras_cpu,
+                        0,
+                        client.request_count - requests_before,
+                        client.rate_limit_count - limits_before,
+                    )
             except FinnhubAuthError as e:
                 log.error("%s；%d 分钟后再试", e, AUTH_BACKOFF.seconds // 60)
                 paused_until = now + AUTH_BACKOFF

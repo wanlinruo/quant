@@ -273,3 +273,43 @@ def test_fred_single_series_error_does_not_stop_others(tmp_path: Path) -> None:
     assert "VIXCLS" in summary
     symbols = [i["symbol"] for i in read(tmp_path, "macro.json")["items"]]
     assert "VIX" not in symbols and "US10Y" in symbols
+
+
+def test_failed_refresh_preserves_previous_news_and_calendar_timestamps(tmp_path: Path) -> None:
+    write_snapshot(tmp_path)
+    run(tmp_path, fred=FakeFred(), finnhub=FakeFinnhub())
+    news_before = (ms.news_path(tmp_path)).read_text()
+    calendar_before = ms.calendar_path(tmp_path).read_text()
+    with pytest.raises(FinnhubAuthError):
+        run_market_extras(
+            data_dir=tmp_path,
+            now=NOW + timedelta(minutes=20),
+            today=DAY,
+            cal=CAL,
+            holdings={"S1"},
+            fred=FakeFred(fail={"VIXCLS"}),
+            finnhub=FakeFinnhub(auth=True),
+            fetch=make_fetch(),
+        )
+    assert ms.news_path(tmp_path).read_text() == news_before
+    assert ms.calendar_path(tmp_path).read_text() == calendar_before
+
+
+def test_intraday_news_reasons_follow_todays_movers(tmp_path: Path) -> None:
+    write_snapshot(tmp_path)
+    p = ms.snapshot_path(tmp_path)
+    old = json.loads(p.read_text())
+    old["as_of"] = CAL.previous_trading_day(DAY).isoformat()
+    p.write_text(json.dumps(old))
+    intra = {
+        "intraday": True,
+        "as_of": DAY.isoformat(),
+        "movers": [
+            {"symbol": "FRESH", "name": "Fresh Inc.", "change_pct": 0.15},
+        ],
+    }
+    ms.intraday_snapshot_path(tmp_path).write_text(json.dumps(intra))
+    run(tmp_path, finnhub=FakeFinnhub(), fred=FakeFred(), holdings=set())
+    news = read(tmp_path, "news.json")
+    assert news["as_of"] == DAY.isoformat() and "FRESH" in news["reasons"]
+    assert "S0" not in news["reasons"]

@@ -20,6 +20,7 @@ from quant.data.market_store import (
     MarketStore,
     calendar_path,
     ff_events_path,
+    intraday_snapshot_path,
     load_gics,
     macro_path,
     news_path,
@@ -121,6 +122,14 @@ def run_market_extras(
 
     # ---- 新闻与异动原因 ----
     snap = _read(snapshot_path(data_dir))
+    intra = _read(intraday_snapshot_path(data_dir))
+    if (
+        isinstance(intra, dict)
+        and intra.get("intraday")
+        and intra.get("as_of") == today.isoformat()
+        and (not isinstance(snap, dict) or (snap.get("as_of") or "") < today.isoformat())
+    ):
+        snap = intra  # 盘中新闻原因对应本轮异动，不能继续关联昨天的日线异动
     as_of = (
         date.fromisoformat(snap["as_of"]) if isinstance(snap, dict) and snap.get("as_of") else None
     )
@@ -129,6 +138,7 @@ def run_market_extras(
         notes.append("未配置 Finnhub key，新闻与财报跳过")
     else:
         try:
+            news_notes = len(notes)
             market = finnhub.market_news()
             top = sorted(movers, key=lambda m: -abs(m.get("change_pct") or 0))[:REASON_TOP]
             gics = load_gics(data_dir)
@@ -158,7 +168,8 @@ def run_market_extras(
                         reasons[sym] = asdict(r)
             feed_since = datetime.combine(prev_day, time(0), ET)
             feed = build_feed(market, company, holdings, feed_since, names=names)
-            _write(news_path(data_dir), {"generated_at": stamp,
+            if len(notes) == news_notes or not news_path(data_dir).exists():
+                _write(news_path(data_dir), {"generated_at": stamp,
                                          "as_of": as_of.isoformat() if as_of else None,
                                          "items": [asdict(i) for i in feed],
                                          "reasons": reasons})  # fmt: skip
@@ -167,6 +178,7 @@ def run_market_extras(
             fail("Finnhub 新闻", e)
 
     # ---- 财经日历 ----
+    calendar_notes = len(notes)
     stored = _read(ff_events_path(data_dir))
     ff = stored if isinstance(stored, list) else []
     try:
@@ -214,7 +226,8 @@ def run_market_extras(
     big = {s for s, c in caps.items() if c.market_cap and c.market_cap >= BIG_CAP}
     released, upcoming = build_calendar(ff, actuals, earnings, load_fomc_dates(), holdings, big,
                                         gen, prev_day)  # fmt: skip
-    _write(calendar_path(data_dir), {"generated_at": stamp,
+    if (len(notes) == calendar_notes and not fred_down) or not calendar_path(data_dir).exists():
+        _write(calendar_path(data_dir), {"generated_at": stamp,
                                      "released": [asdict(i) for i in released],
                                      "upcoming": [asdict(i) for i in upcoming]})  # fmt: skip
     summary.append(f"日历 已公布 {len(released)} / 接下来 {len(upcoming)}")

@@ -200,3 +200,47 @@ def test_skip_when_daily_history_is_behind(db_url: str, tmp_path: Path) -> None:
     quotes.poll_once(eng, fh, (), later, tmp_path)
     assert not intraday_snapshot_path(tmp_path).exists()
     eng.dispose()
+
+
+def test_extras_schedule_respects_half_days_and_shutdown() -> None:
+    from quant.core.calendar import get_calendar
+
+    cal = get_calendar()
+    assert quotes.extras_due(cal, NOW, None, False)
+    assert not quotes.extras_due(cal, NOW, NOW + timedelta(minutes=15), False)
+    assert not quotes.extras_due(cal, NOW, None, True)
+    # 黑五半日市，13:00 ET 后不能启动资讯任务
+    assert not quotes.extras_due(cal, datetime(2026, 11, 27, 18, 1, tzinfo=UTC), None, False)
+
+
+@needs_db
+def test_quote_fetched_time_is_measured_per_request(db_url: str, tmp_path: Path) -> None:
+    eng = create_engine(db_url)
+    fh = FakeFinnhub()
+    quotes.poll_once(
+        eng, fh, (), NOW, tmp_path, clock=lambda: NOW + timedelta(seconds=len(fh.calls))
+    )
+    with Session(eng) as s:
+        first = s.get(IntradayQuote, "SPY")
+        last = s.get(IntradayQuote, list(ETF_SET)[-1])
+        assert first and last and first.fetched_at < last.fetched_at
+    eng.dispose()
+
+
+@needs_db
+def test_priority_quotes_are_saved_before_entire_market_finishes(
+    db_url: str, tmp_path: Path
+) -> None:
+    eng = create_engine(db_url)
+    checked: list[bool] = []
+
+    class Streaming(FakeFinnhub):
+        def quote(self, symbol: str) -> Quote | None:
+            if len(self.calls) == 50:
+                with Session(eng) as s:
+                    checked.append(s.get(IntradayQuote, "SPY") is not None)
+            return super().quote(symbol)
+
+    quotes.poll_once(eng, Streaming(), tuple(f"M{i}" for i in range(55)), NOW, tmp_path)
+    assert checked == [True]
+    eng.dispose()

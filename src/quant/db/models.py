@@ -332,7 +332,7 @@ class SystemMetric(Base):
 
 
 class IntradayQuote(Base):
-    """盘中最新报价（#93，只供面板查看；交易只用日线）。每只标的一行，quotes 服务每分钟覆盖。"""
+    """盘中最新报价（#93，只供面板查看；交易只用日线）。每股一行，quotes 分批覆盖。"""
 
     __tablename__ = "intraday_quotes"
 

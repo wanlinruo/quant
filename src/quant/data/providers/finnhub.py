@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
@@ -18,6 +19,7 @@ from pydantic import SecretStr
 
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.http import Fetch, http_fetch
+from quant.data.rate_limit import request_slot
 
 BASE_URL = "https://finnhub.io/api/v1"
 
@@ -92,18 +94,35 @@ class FinnhubClient:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         min_interval: float = 1.1,
+        rate_limit_path: Path | None = None,
+        stop: Callable[[], bool] = lambda: False,
     ) -> None:
         self._key, self._fetch = api_key, fetch
         self._sleep, self._clock, self._min = sleep, clock, min_interval
         self._last: float | None = None
+        self._rate_limit_path = rate_limit_path
+        self._stop = stop
+        self.request_count = 0
+        self.rate_limit_count = 0
 
     def _get(self, path: str, what: str, **params: str) -> Any:
+        if self._stop():
+            raise DataUnavailableError("Finnhub 采集已停止")
+        if self._rate_limit_path is not None:
+            with request_slot(self._rate_limit_path, self._min):
+                return self._request(path, what, **params)
+        return self._request(path, what, **params)
+
+    def _request(self, path: str, what: str, **params: str) -> Any:
+        if self._stop():
+            raise DataUnavailableError("Finnhub 采集已停止")
         if self._last is not None:
             wait = self._min - (self._clock() - self._last)
             if wait > 0:
                 self._sleep(wait)
         headers = {"X-Finnhub-Token": self._key.get_secret_value()}
         try:
+            self.request_count += 1
             status, body = self._fetch(f"{BASE_URL}{path}?{urlencode(params, safe='.,')}", headers)
         except Exception as e:
             raise DataUnavailableError(f"Finnhub {what} 请求失败（{type(e).__name__}）") from None
@@ -111,6 +130,8 @@ class FinnhubClient:
             self._last = self._clock()
         if status == 401:
             raise FinnhubAuthError("Finnhub 拒绝访问（401），请检查 FINNHUB_API_KEY")
+        if status == 429:
+            self.rate_limit_count += 1
         if status != 200:
             raise DataUnavailableError(f"Finnhub {what} 返回 {status}")
         return body

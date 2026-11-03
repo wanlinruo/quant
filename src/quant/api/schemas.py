@@ -643,6 +643,9 @@ class MarketOverview(BaseModel):
     # 盘中快照（#93）：最后一天为盘中价格，约每 10 分钟更新；成交量相关指标收盘后更新
     intraday: bool = False
     intraday_time: datetime | None = None
+    intraday_time_start: datetime | None = None
+    session: Literal["pre", "regular", "post", "overnight", "closed"] = "closed"
+    quote_delayed: bool = False
 
 
 class NewsItemOut(BaseModel):
@@ -1181,7 +1184,9 @@ class IntradayQuoteOut(BaseModel):
 class IntradayPositionOut(BaseModel):
     symbol: str
     qty: int
-    price: float
+    price: float | None
+    quote_time: datetime | None = None
+    stale: bool = False
     change_pct: float | None = None
     day_pnl: float | None = None  # 隔夜持有部分按昨收、今天成交部分按成交价
     traded_today: bool = False
@@ -1199,3 +1204,8 @@ class IntradayOut(BaseModel):
     quotes: list[IntradayQuoteOut] = []
     positions: list[IntradayPositionOut] = []  # 给定 mode 时：该账户持仓的当日盈亏
     day_pnl: float | None = None
+    snapshot_date: date | None = None
+    complete: bool = False
+    missing_symbols: list[str] = []
+    stale_symbols: list[str] = []
+    market_value: float | None = None

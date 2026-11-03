@@ -17,6 +17,7 @@ import { CalendarPanel } from "../components/CalendarPanel";
 import { EmptyState } from "../components/EmptyState";
 import { Cell, Grid } from "../components/Grid";
 import { NewsPanel } from "../components/NewsPanel";
+import { MarketFreshness } from "../components/MarketFreshness";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
 import { Tabs } from "../components/Tabs";
@@ -25,7 +26,7 @@ import { CandleChart } from "../charts/CandleChart";
 import { LineChart } from "../charts/LineChart";
 import { useApi } from "../hooks/useApi";
 import { compact, money, num, pct, signedMoney, signedPct } from "../lib/format";
-import { etParts, formatDateTimeET } from "../lib/time";
+import { etParts } from "../lib/time";
 import { useShell } from "../shell";
 
 // 行情条 10 项的固定顺序：ETF 代理来自 market_data 快照，宏观项来自 market_extras（FRED / Coinbase）
@@ -60,7 +61,7 @@ const ROW_H = 360;
 function StripItem({ t, asOf }: { t: TickerItemOut; asOf: string | null | undefined }) {
   const bp = t.unit === "yield";
   const chg = bp ? (t.change == null ? "—" : `${t.change >= 0 ? "+" : ""}${Math.round(t.change * 100)}bp`) : signedPct(t.change_pct);
-  const stale = t.as_of && asOf && t.as_of !== asOf ? `截至 ${t.as_of.slice(5)}` : null;
+  const stale = t.as_of && (MACRO_KEYS.has(t.symbol) || (asOf && t.as_of !== asOf)) ? `截至 ${t.as_of.slice(5)}` : null;
   return (
     <>
       <div className="muted sm">
@@ -110,7 +111,7 @@ function filterMovers(all: MoverOut[], f: FilterKey, mine: Set<string>): MoverOu
   }
 }
 
-type Full = Required<Omit<MarketOverview, "breadth" | "as_of" | "generated_at" | "coverage" | "intraday_time">> &
+type Full = Required<Omit<MarketOverview, "breadth" | "as_of" | "generated_at" | "coverage" | "intraday_time" | "intraday_time_start" | "session" | "quote_delayed">> &
   Pick<MarketOverview, "breadth" | "as_of" | "generated_at" | "coverage" | "intraday_time">;
 
 /** 快照有数据时补齐可选字段；pending 或未加载时为 null。 */
@@ -172,16 +173,10 @@ export function MarketPage() {
       {m && (
         <div className="sm highlights">
           <span>{m.highlights}</span>
-          {m.intraday && m.intraday_time ? (
-            <span className="muted">
-              盘中 · 截至 {formatDateTimeET(m.intraday_time)} ET · 约每 10 分钟更新（Finnhub，仅供查看）· 成交量相关指标收盘后更新
-            </span>
-          ) : (
-            <span className="muted">数据截至 {m.as_of}（美东收盘）</span>
-          )}
           {m.stale && <span className="pill warn">今日数据尚未发布，显示上一交易日</span>}
         </div>
       )}
+      {market.data?.status === "ok" && <MarketFreshness market={market.data} />}
       <Grid>
         <Cell span={9}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
