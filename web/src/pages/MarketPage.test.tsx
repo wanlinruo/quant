@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { currentLocation, mkMeta, mockApi, renderPage } from "../test/utils";
 import { MarketPage } from "./MarketPage";
@@ -164,7 +164,7 @@ describe("MarketPage", () => {
     const panel = await screen.findByTestId("news");
     expect(await within(panel).findAllByRole("link")).toHaveLength(3);
     expect(within(panel).getByText("10-29")).toBeInTheDocument();
-    expect(within(panel).getByText("16:10")).toBeInTheDocument();
+    expect(within(panel).getAllByText("10-30")).toHaveLength(2);
     await user.click(within(panel.closest("section")!).getByRole("button", { name: "宏观" }));
     expect(within(panel).getAllByRole("link")).toHaveLength(1);
     await user.click(within(panel.closest("section")!).getByRole("button", { name: "持仓" }));
@@ -178,7 +178,7 @@ describe("MarketPage", () => {
     mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW], "/api/market/news": [200, { ...NEWS, generated_at: "2026-10-28T21:00:00-04:00" }] });
     renderPage(<MarketPage />, "/");
     const panel = await screen.findByTestId("news");
-    expect(await within(panel).findByText("更新于 10-28 21:00 ET")).toBeInTheDocument();
+    expect(await within(panel).findByText(/资讯更新于 2026-10-28 21:00 ET/)).toBeInTheDocument();
   });
 
   it("calendar released and upcoming", async () => {
@@ -191,7 +191,7 @@ describe("MarketPage", () => {
     expect(within(panel).getByText(/时间未定/)).toBeInTheDocument();
     const dots = panel.querySelectorAll("[data-upcoming] .dots");
     expect([...dots].map((d) => d.querySelectorAll("[data-on]").length)).toEqual([2, 3]);
-    expect(within(panel).getByText("经济数据每周一更新")).toBeInTheDocument();
+    expect(within(panel).getByText(/宏观实际值来自 FRED/)).toBeInTheDocument();
   });
 
   it("mover reason column", async () => {
@@ -263,10 +263,10 @@ describe("MarketPage", () => {
   });
 
   it("shows intraday time instead of close when the snapshot is intraday", async () => {
-    mockApi({ ...BASE, "/api/market/overview": [200, { ...OVERVIEW, as_of: "2026-11-02", intraday: true, intraday_time: "2026-11-02T15:10:00Z" }] });
+    mockApi({ ...BASE, "/api/market/overview": [200, { ...OVERVIEW, as_of: "2026-11-02", intraday: true, session: "regular", intraday_time: "2026-11-02T15:10:00Z" }] });
     renderPage(<MarketPage />, "/");
-    expect(await screen.findByText(/盘中 · 截至 2026-11-02 10:10 ET/)).toBeInTheDocument();
-    expect(screen.getByText(/约每 10 分钟更新/)).toBeInTheDocument();
+    expect(await screen.findByText(/盘中轮询 · 报价 2026-11-02 10:10/)).toBeInTheDocument();
+    expect(screen.getByText(/约每 10–15 分钟一轮/)).toBeInTheDocument();
     expect(screen.queryByText(/美东收盘/)).toBeNull();
   });
 
@@ -276,7 +276,7 @@ describe("MarketPage", () => {
     await screen.findByTestId("ticker-strip");
     const calls = () => fetch.mock.calls.filter(([u]) => new URL(String(u), "http://x").pathname === "/api/market/overview").length;
     const first = calls();
-    await new Promise((r) => setTimeout(r, 500));
+    await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
     expect(calls()).toBeGreaterThan(first);
   });
 });

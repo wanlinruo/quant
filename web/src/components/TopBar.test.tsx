@@ -28,7 +28,7 @@ describe("TopBar", () => {
     const meta = mkMeta({ data_as_of: "2026-10-31T00:15:00Z" });
     renderAt("/", <TopBar meta={meta} account="paper" onAccountChange={vi.fn()} />);
     expect(
-      screen.getByText("2026-10-30 周五 · 数据截至 20:15 ET（北京 08:15）"),
+      screen.getByText("2026-10-30 周五 · 最近任务完成 20:15 ET（北京 08:15）"),
     ).toBeInTheDocument();
   });
 

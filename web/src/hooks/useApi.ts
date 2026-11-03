@@ -11,7 +11,7 @@ export type ApiResult<T> = {
 };
 
 /** GET 接口；path 或 params 变化时重新请求。path 为 null 时不请求。 */
-export function useApi<T>(path: string | null, params?: Params): ApiResult<T> {
+export function useApi<T>(path: string | null, params?: Params, refreshMs = 0): ApiResult<T> {
   const key = path === null ? null : `${path}?${JSON.stringify(params ?? {})}`;
   const [state, setState] = useState<{ key: string | null; data: T | null; error: ApiError | Error | null }>(
     { key: null, data: null, error: null },
@@ -36,6 +36,13 @@ export function useApi<T>(path: string | null, params?: Params): ApiResult<T> {
   }, [key, tick]); // key 已包含 path 与 params
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
+  useEffect(() => {
+    if (!refreshMs || path === null) return;
+    const timer = setInterval(reload, refreshMs);
+    const wake = () => { if (document.visibilityState === "visible") reload(); };
+    document.addEventListener("visibilitychange", wake);
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", wake); };
+  }, [refreshMs, path, reload]);
   const current = state.key === key;
   return {
     data: current ? state.data : null,

@@ -51,8 +51,7 @@ export function TopBar({ meta, account, onAccountChange }: Props) {
         }}
       />
       <span className="spacer" />
-      <span className="fresh">
-        <span className="dot" />
+      <span className="fresh" title="最近一次成功后台任务的完成时间；各区块的数据时间见区块内标注">
         {formatFreshness(meta.data_as_of)}
       </span>
       <AccountSwitch meta={meta} value={account} onChange={onAccountChange} />

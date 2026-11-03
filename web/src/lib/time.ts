@@ -17,13 +17,13 @@ function parts(d: Date, timeZone: string) {
   return { date: `${p.year}-${p.month}-${p.day}`, time: `${hour}:${p.minute}`, week: WEEK[wd] };
 }
 
-/** “2026-10-30 周五 · 数据截至 20:15 ET（北京 08:15）”；业务时间按美东。 */
+/** 最近后台任务完成时间，不代表任何行情或账户数据的截止时间。 */
 export function formatFreshness(iso: string | null | undefined): string {
   if (!iso) return "暂无数据";
   const d = new Date(iso);
   const et = parts(d, "America/New_York");
   const bj = parts(d, "Asia/Shanghai");
-  return `${et.date} ${et.week} · 数据截至 ${et.time} ET（北京 ${bj.time}）`;
+  return `${et.date} ${et.week} · 最近任务完成 ${et.time} ET（北京 ${bj.time}）`;
 }
 
 export function formatDateTimeET(iso: string | null | undefined): string {
