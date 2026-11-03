@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from quant.data.quota import atomic_write_text
+from quant.market.session import ET
 
 
 def record_refresh(
@@ -36,17 +37,26 @@ def record_refresh(
         doc = {}
     if not isinstance(doc, dict):
         doc = {}
+    elapsed = time.monotonic() - started
+    today = datetime.now(UTC).astimezone(ET).date().isoformat()
+    updated = bool(
+        snap.exists()
+        and snap.stat().st_mtime >= time.time() - elapsed
+        and doc.get("as_of") == today
+    )
     rows.append(
         {
             "time": datetime.now(UTC).isoformat(),
             "kind": kind,
-            "elapsed_s": round(time.monotonic() - started, 3),
+            "elapsed_s": round(elapsed, 3),
             "cpu_s": round(time.process_time() - cpu_start, 3),
             "peak_rss_bytes": rss if sys.platform == "darwin" else rss * 1024,
             "quote_upserts": writes,
             "requests": requests,
             "rate_limits": rate_limits,
-            "coverage": doc.get("coverage"),
+            "snapshot_as_of": doc.get("as_of"),
+            "snapshot_updated": updated,
+            "coverage": doc.get("coverage") if updated else None,
             "quote_oldest": doc.get("intraday_time_start"),
             "quote_latest": doc.get("intraday_time"),
             "snapshot_bytes": snap.stat().st_size if snap.exists() else 0,

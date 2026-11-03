@@ -506,8 +506,15 @@ def market_data(ctx: JobContext, d: date) -> str:
 
     holdings = _all_holdings(ctx) or set()
     now_day = ctx.calendar.last_completed_trading_day(ctx.now())
-    return run_market_data(MassiveClient(key), ctx.settings.data_dir, d, ctx.calendar,
-                           ctx.settings.board, holdings, now_day=now_day)  # fmt: skip
+    return run_market_data(
+        MassiveClient(key, rate_limit_path=ctx.settings.data_dir / ".massive-rate"),
+        ctx.settings.data_dir,
+        d,
+        ctx.calendar,
+        ctx.settings.board,
+        holdings,
+        now_day=now_day,
+    )
 
 
 def market_extras(ctx: JobContext, d: date) -> str:

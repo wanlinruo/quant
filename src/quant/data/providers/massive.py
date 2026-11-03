@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -19,6 +20,7 @@ from pydantic import SecretStr
 
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.http import Fetch, http_fetch
+from quant.data.rate_limit import request_slot
 
 BASE_URL = "https://api.massive.com"
 COLUMNS = {"T": "symbol", "o": "open", "h": "high", "l": "low", "c": "close", "v": "volume",
@@ -62,12 +64,26 @@ class MassiveClient:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         min_interval: float = 12.5,
+        rate_limit_path: Path | None = None,
+        stop: Callable[[], bool] = lambda: False,
     ) -> None:
         self._key, self._fetch = api_key, fetch
         self._sleep, self._clock, self._min = sleep, clock, min_interval
         self._last: float | None = None
+        self._rate_limit_path = rate_limit_path
+        self._stop = stop
 
     def _get(self, path: str) -> tuple[int, Any]:
+        if self._stop():
+            raise DataUnavailableError("Massive 采集已停止")
+        if self._rate_limit_path is not None:
+            with request_slot(self._rate_limit_path, self._min):
+                return self._request(path)
+        return self._request(path)
+
+    def _request(self, path: str) -> tuple[int, Any]:
+        if self._stop():
+            raise DataUnavailableError("Massive 采集已停止")
         if self._last is not None:
             wait = self._min - (self._clock() - self._last)
             if wait > 0:
