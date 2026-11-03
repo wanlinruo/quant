@@ -1,7 +1,8 @@
 import { createContext, useContext } from "react";
-import type { Meta, Mode } from "./api/types";
+import type { MarketOverview, Meta, Mode } from "./api/types";
+import type { ApiResult } from "./hooks/useApi";
 
-export type Shell = { meta: Meta; account: Mode };
+export type Shell = { meta: Meta; account: Mode; market?: ApiResult<MarketOverview> };
 
 export const ShellContext = createContext<Shell | null>(null);
 

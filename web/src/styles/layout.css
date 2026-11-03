@@ -8,17 +8,54 @@ a { color: inherit; text-decoration: none; }
 .sm { font-size: 11px; }
 
 /* 顶栏 */
-.topbar { position: relative; display: flex; align-items: center; gap: 22px; height: 44px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.topbar { position: relative; display: flex; align-items: center; gap: 18px; height: 44px; z-index: 40; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
 .topbar .logo { font-weight: 800; color: var(--text-strong); font-size: 15px; letter-spacing: 1.5px; display: flex; align-items: center; gap: 7px; }
 .topbar .logo i { width: 16px; height: 16px; border-radius: 4px; background: linear-gradient(135deg, var(--primary), var(--up)); display: inline-block; }
-.topbar nav { display: flex; height: 100%; }
+.topbar nav { display: flex; height: 100%; flex: none; }
 .topbar nav a { padding: 0 12px; display: flex; align-items: center; color: #9aa0ab; border-bottom: 2px solid transparent; }
 .topbar nav a.active { color: var(--text-strong); border-bottom-color: var(--primary); }
-.topbar input[type="search"] { background: #1a1e29; border: 1px solid #2a2e39; border-radius: 6px; color: var(--text); padding: 4px 10px; width: 200px; font-size: 11px; }
-.topbar .spacer { flex: 1; }
+.topbar input[type="search"] { background: #1a1e29; border: 1px solid #2a2e39; border-radius: 6px; color: var(--text); padding: 4px 10px; width: 180px; flex: none; font-size: 11px; }
+.topbar .logo, .topbar .acct { flex: none; }
+.topbar-data { display: flex; align-items: center; flex: none; padding-left: 14px; border-left: 1px solid #29303c; }
+.topbar-data .market-freshness { gap: 10px; }
 .topbar .fresh { color: #9aa0ab; font-size: 11px; display: flex; align-items: center; gap: 6px; }
 .topbar .fresh .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--up); }
 .live-stripe { position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--live); }
+
+
+/* 顶栏市场速览：仅超出可用宽度时滚动，保留暂停与减少动态效果的控制。 */
+.market-ticker { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; font-size: 11px; }
+.market-ticker-label { flex: none; color: #8b9ab2; font-size: 10px; white-space: nowrap; }
+.market-ticker-viewport { flex: 1; min-width: 0; overflow: hidden; color: #b4bfd1; }
+.market-ticker-track { display: flex; align-items: center; gap: 40px; width: max-content; }
+.market-ticker-text, .market-ticker-copy { flex: none; white-space: nowrap; }
+.market-ticker.is-overflowing .market-ticker-viewport { mask-image: linear-gradient(to right, transparent, #000 5px, #000 calc(100% - 12px), transparent); }
+.market-ticker.is-overflowing .market-ticker-track { animation: market-ticker-scroll var(--ticker-duration) linear 2s infinite; will-change: transform; }
+.market-ticker:hover .market-ticker-track, .market-ticker-viewport:focus .market-ticker-track, .market-ticker.is-paused .market-ticker-track { animation-play-state: paused; }
+.market-ticker-control { flex: none; display: grid; place-items: center; width: 20px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #77849a; cursor: pointer; }
+.market-ticker-control:hover, .market-ticker-control[aria-pressed="true"] { background: #1b2231; color: #c3d1ed; }
+.market-ticker-control:focus-visible, .market-ticker-viewport:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+@keyframes market-ticker-scroll { to { transform: translateX(var(--ticker-distance)); } }
+@media (max-width: 1350px) {
+  .topbar { gap: 14px; }
+  .topbar input[type="search"] { width: 160px; }
+  .topbar-data { padding-left: 12px; }
+  .market-ticker { gap: 8px; }
+}
+@media (max-width: 1100px) {
+  .topbar { gap: 10px; padding: 0 12px; }
+  .topbar nav a { padding: 0 9px; }
+  .topbar input[type="search"] { width: 140px; }
+  .market-ticker-label { display: none; }
+  .topbar .market-info-button > span { display: none; }
+  .topbar-data .market-freshness { gap: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .market-ticker.is-overflowing .market-ticker-track { animation: none; width: 100%; will-change: auto; }
+  .market-ticker.is-overflowing .market-ticker-viewport { mask-image: none; }
+  .market-ticker-text { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .market-ticker-copy, .market-ticker-control { display: none; }
+}
 
 /* 账户切换 */
 .acct { display: flex; border: 1px solid #2a2e39; border-radius: 7px; overflow: hidden; }
@@ -130,7 +167,32 @@ table.dt tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
 .strip-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; color: inherit; text-decoration: none; white-space: nowrap; overflow: hidden; }
 .strip-item .etf { font-size: 10px; color: #5d6370; }
 .strip-v { font-size: 15px; color: #fff; font-weight: 600; }
-.highlights { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 0 2px; }
+.market-freshness { position: relative; display: flex; align-items: center; gap: 12px; flex: none; font-size: 11px; white-space: nowrap; }
+.market-status { display: inline-flex; align-items: center; gap: 6px; color: #a3abb9; }
+.market-status::before { content: ""; width: 5px; height: 5px; background: #7d8798; border-radius: 50%; }
+.market-status.is-live { color: #77d8a0; } .market-status.is-live::before { background: #4bca82; }
+.market-status.is-delayed { color: #e4b964; } .market-status.is-delayed::before { background: #e4b964; }
+.market-status.is-collecting { color: #8caeff; } .market-status.is-collecting::before { background: #7b9dfa; }
+.market-quote-time { color: #858e9f; }
+.market-info-button { display: inline-flex; align-items: center; gap: 5px; border: 0; padding: 5px 6px; border-radius: 5px; background: transparent; color: #8b95a7; font: inherit; cursor: pointer; }
+.market-info-button:hover, .market-info-button[aria-expanded="true"] { background: #1b2231; color: #c3d1ed; }
+.market-info-button:focus-visible, .market-info-close:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.market-info-popover { position: absolute; top: calc(100% + 10px); right: 0; width: 370px; max-width: calc(100vw - 28px); padding: 16px; z-index: 30; background: #151a24; border: 1px solid #30394a; border-radius: 10px; box-shadow: 0 16px 48px #0008, 0 2px 8px #0004; white-space: normal; line-height: 1.65; }
+.market-info-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.market-info-header h2 { margin: 0 0 2px; color: #e8edf6; font-size: 13px; font-weight: 600; }
+.market-info-header span { color: #7e899d; font-size: 10px; }
+.market-info-close { display: grid; place-items: center; flex: none; width: 22px; height: 22px; margin: -3px -4px 0 0; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #8994a8; font-size: 20px; cursor: pointer; line-height: 1; }
+.market-info-close:hover { color: #fff; background: #252e3e; }
+.market-info-times { margin: 12px 0; padding: 8px 0; border-top: 1px solid #293140; border-bottom: 1px solid #293140; }
+.market-info-times > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 3px 0; }
+.market-info-times dt { color: #8d98ac; flex: none; } .market-info-times dd { margin: 0; color: #c3cddd; font-variant-numeric: tabular-nums; text-align: right; }
+.market-info-notice { margin: 0 0 12px; padding: 7px 9px; border-radius: 5px; background: #1d2533; color: #a1b0c9; }
+.market-info-notice.is-delayed { color: #e4b964; background: #30291c; }
+.market-info-scope { display: grid; gap: 10px; }
+.market-info-scope b { color: #bec8d9; font-size: 11px; font-weight: 500; }
+.market-info-scope p { margin: 2px 0 0; color: #8895a9; font-size: 11px; }
+.market-info-popover footer { margin-top: 12px; padding-top: 10px; border-top: 1px solid #293140; color: #6f7c92; font-size: 10px; }
+
 .treemap { overflow: hidden; border-radius: 4px; }
 .tm-group { font-size: 10px; color: #9aa0ab; padding: 1px 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; box-sizing: border-box; }
 .tm-cell { box-sizing: border-box; border: 1px solid #0f1117; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 10px; text-decoration: none; overflow: hidden; white-space: nowrap; }

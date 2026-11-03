@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router";
-import type { Meta, Mode } from "../api/types";
+import type { MarketOverview, Meta, Mode } from "../api/types";
 import { formatFreshness } from "../lib/time";
 import { AccountSwitch } from "./AccountSwitch";
+import { MarketFreshness } from "./MarketFreshness";
+import { MarketTicker } from "./MarketTicker";
 
 const NAV = [
   { to: "/", label: "市场", end: true },
@@ -12,9 +14,9 @@ const NAV = [
 ];
 const BASE_TITLE = "QUANT";
 
-type Props = { meta: Meta; account: Mode; onAccountChange: (m: Mode) => void };
+type Props = { meta: Meta; account: Mode; onAccountChange: (m: Mode) => void; market?: MarketOverview | null };
 
-export function TopBar({ meta, account, onAccountChange }: Props) {
+export function TopBar({ meta, account, onAccountChange, market }: Props) {
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const live = account === "live";
@@ -50,10 +52,14 @@ export function TopBar({ meta, account, onAccountChange }: Props) {
           }
         }}
       />
-      <span className="spacer" />
-      <span className="fresh" title="最近一次成功后台任务的完成时间；各区块的数据时间见区块内标注">
-        {formatFreshness(meta.data_as_of)}
-      </span>
+      <MarketTicker text={market?.highlights ?? ""} />
+      <div className="topbar-data">
+        {market?.status === "ok" ? <MarketFreshness market={market} lastJobFinished={meta.data_as_of} /> : (
+          <span className="fresh" title="最近一次成功后台任务的完成时间；行情信息暂不可用">
+            {formatFreshness(meta.data_as_of)}
+          </span>
+        )}
+      </div>
       <AccountSwitch meta={meta} value={account} onChange={onAccountChange} />
     </header>
   );

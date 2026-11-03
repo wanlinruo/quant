@@ -93,17 +93,12 @@ describe("MarketPage", () => {
     expect(within(strip).getAllByText("数据接入中")).toHaveLength(5);
   });
 
-  it("highlights text shown", async () => {
+  it("leaves market summary and data status to the top navigation", async () => {
     mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW] });
     renderPage(<MarketPage />, "/");
-    expect(await screen.findByText(/信息技术领涨、能源领跌/)).toBeInTheDocument();
-    expect(screen.getByText(/数据截至 2026-10-30/)).toBeInTheDocument();
-  });
-
-  it("shows stale warning", async () => {
-    mockApi({ ...BASE, "/api/market/overview": [200, { ...OVERVIEW, stale: true }] });
-    renderPage(<MarketPage />, "/");
-    expect(await screen.findByText(/今日数据尚未发布/)).toBeInTheDocument();
+    await screen.findByTestId("ticker-strip");
+    expect(screen.queryByTestId("market-freshness")).toBeNull();
+    expect(screen.queryByText(/信息技术领涨、能源领跌/)).toBeNull();
   });
 
   it("movers filter by signal", async () => {
@@ -262,12 +257,11 @@ describe("MarketPage", () => {
     expect(screen.queryByTestId("intraday")).toBeNull();
   });
 
-  it("shows intraday time instead of close when the snapshot is intraday", async () => {
+  it("renders intraday prices without duplicating navigation metadata", async () => {
     mockApi({ ...BASE, "/api/market/overview": [200, { ...OVERVIEW, as_of: "2026-11-02", intraday: true, session: "regular", intraday_time: "2026-11-02T15:10:00Z" }] });
     renderPage(<MarketPage />, "/");
-    expect(await screen.findByText(/盘中轮询 · 报价 2026-11-02 10:10/)).toBeInTheDocument();
-    expect(screen.getByText(/约每 10–15 分钟一轮/)).toBeInTheDocument();
-    expect(screen.queryByText(/美东收盘/)).toBeNull();
+    expect(await screen.findByText("755.72")).toBeInTheDocument();
+    expect(screen.queryByTestId("market-freshness")).toBeNull();
   });
 
   it("reloads the overview periodically so intraday data refreshes on an open page", async () => {
