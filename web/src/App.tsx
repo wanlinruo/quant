@@ -42,13 +42,17 @@ export function App({ initialPath }: { initialPath?: string }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api
+    let active = true;
+    const load = () => api
       .get<Meta>("/api/meta")
-      .then(setMeta)
-      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : String(e)));
+      .then((m) => { if (active) { setMeta(m); setError(null); } })
+      .catch((e: unknown) => { if (active) setError(e instanceof ApiError ? e.message : String(e)); });
+    void load();
+    const timer = setInterval(() => { void load(); }, 3 * 60_000);
+    return () => { active = false; clearInterval(timer); };
   }, []);
 
-  if (error) {
+  if (error && !meta) {
     return (
       <div className="page">
         <div className="error-box">面板加载失败：{error}</div>

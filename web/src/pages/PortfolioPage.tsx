@@ -7,6 +7,7 @@ import type {
   ContributionRow,
   FillOut,
   HoldingRow,
+  IntradayOut,
   OrderOut,
   PerformanceOut,
   PortfolioOverview,
@@ -65,14 +66,18 @@ export function PortfolioPage() {
   const { account } = useShell();
   const live = account === "live";
   const base = `/api/portfolio/${account}`;
-  const overview = useApi<PortfolioOverview>(`${base}/overview`);
+  const overview = useApi<PortfolioOverview>(`${base}/overview`, undefined, 3 * 60_000);
   const perf = useApi<PerformanceOut>(`${base}/performance`);
-  const holdings = useApi<HoldingRow[]>(`${base}/holdings`);
+  const holdings = useApi<HoldingRow[]>(`${base}/holdings`, undefined, 3 * 60_000);
   const preview = useApi<RebalancePreview>(`${base}/rebalance-preview`);
   const o = overview.data;
+  const intraday = useApi<IntradayOut>("/api/market/intraday", { mode: account }, 60_000);
 
   return (
     <div className="page">
+      <div className="muted sm" style={{ marginBottom: 12 }}>
+        账户快照截至 {o?.as_of ?? "—"} · 净值、绩效、仓位与信号按账户快照及日线显示；持仓盘中估算见持仓表
+      </div>
       <Grid>
         <StatCards o={o} live={live} />
       </Grid>
@@ -86,7 +91,7 @@ export function PortfolioPage() {
       </Grid>
       <Grid>
         <Cell span={12}>
-          <HoldingsPanel holdings={holdings} account={account} live={live} />
+          <HoldingsPanel holdings={holdings} account={account} live={live} intraday={intraday.data} />
         </Cell>
       </Grid>
       <Grid>
@@ -235,14 +240,27 @@ function AllocationPanel({ o, live }: { o: PortfolioOverview | null; live: boole
   );
 }
 
-function HoldingsPanel({ holdings, account, live }: { holdings: ReturnType<typeof useApi<HoldingRow[]>>; account: string; live: boolean }) {
+function HoldingsPanel({ holdings, account, live, intraday: intra }: { holdings: ReturnType<typeof useApi<HoldingRow[]>>; account: string; live: boolean; intraday: IntradayOut | null }) {
   const [filter, setFilter] = useState<"all" | "swing" | "momentum">("all");
+  const bySymbol = new Map((intra?.positions ?? []).map((p) => [p.symbol, p]));
+  const regular = intra?.session === "regular";
   return (
     <Panel
       title={`持仓${holdings.data ? ` · ${holdings.data.length} 只` : ""}`}
       live={live}
       right={<Tabs tabs={[{ key: "all", label: "全部" }, { key: "swing", label: "波段仓" }, { key: "momentum", label: "动量仓" }]} value={filter} onChange={setFilter} />}
     >
+      <div className="muted sm" style={{ marginBottom: 10, lineHeight: 1.8 }} data-testid="portfolio-freshness">
+        <div>{intra?.note ?? "盘中估算暂不可用，显示账户快照"}</div>
+        {regular && <div>
+          {intra?.complete ? `盘中持仓市值 ${money(intra.market_value)} · 当日盈亏（费前，含当日已卖出）${signedMoney(intra.day_pnl)}` : "盘中数据不完整，暂不汇总市值与当日盈亏"}
+          {intra?.as_of && ` · 最近报价 ${formatDateTimeET(intra.as_of)} ET`}
+        </div>}
+        <div>快照价、市值、仓位和浮动盈亏以账户快照为准；盘中价格约 10–15 分钟一轮，各股时间可能不同</div>
+        {regular && (intra?.positions ?? []).filter((p) => p.qty === 0).map((p) => (
+          <div key={p.symbol}>{p.symbol} 今日已卖出 · 费前盈亏 {p.day_pnl == null ? "—" : signedMoney(p.day_pnl)}</div>
+        ))}
+      </div>
       <ApiState result={holdings}>
         {(rows) => (
           <DataTable<HoldingRow>
@@ -254,9 +272,17 @@ function HoldingsPanel({ holdings, account, live }: { holdings: ReturnType<typeo
               { key: "sleeve", label: "所属仓", render: (r) => sleeveText(r.sleeve) },
               { key: "qty", label: "数量", align: "right", render: (r) => num(r.qty, 0) },
               { key: "avg_cost", label: "成本", align: "right", render: (r) => num(r.avg_cost) },
-              { key: "price", label: "现价", align: "right", render: (r) => (r.price == null ? "—" : num(r.price)) },
-              { key: "change_pct", label: "今日", align: "right", render: (r) => <span className={tone(r.change_pct)}>{r.change_pct == null ? "—" : signedPct(r.change_pct)}</span> },
-              { key: "market_value", label: "市值", align: "right", render: (r) => money(r.market_value) },
+              { key: "price", label: "快照价", align: "right", render: (r) => (r.price == null ? "—" : num(r.price)) },
+              { key: "intraday_price", label: "盘中价 · 报价时间 ET", align: "right", render: (r) => {
+                const p = regular ? bySymbol.get(r.symbol) : null;
+                return p?.price != null ? <span className={p.stale ? "warn" : ""}>{num(p.price)} · {formatDateTimeET(p.quote_time)}{p.stale ? "（延迟）" : ""}</span> : "—";
+              } },
+              { key: "intraday_pnl", label: "盘中当日盈亏（费前）", align: "right", render: (r) => {
+                const p = regular ? bySymbol.get(r.symbol) : null;
+                return p?.day_pnl != null ? <span className={tone(p.day_pnl)}>{signedMoney(p.day_pnl)}</span> : "—";
+              } },
+              { key: "change_pct", label: "快照日涨跌", align: "right", render: (r) => <span className={tone(r.change_pct)}>{r.change_pct == null ? "—" : signedPct(r.change_pct)}</span> },
+              { key: "market_value", label: "快照市值", align: "right", render: (r) => money(r.market_value) },
               { key: "weight", label: "实际 / 目标", align: "right", render: (r) => `${pct(r.weight, 1)} / ${pct(r.target_weight, 1)}` },
               { key: "deviation", label: "偏差", render: (r) => <DeviationBar value={r.deviation ?? null} /> },
               { key: "unrealized_pnl", label: "浮动盈亏", align: "right", render: (r) => <span className={tone(r.unrealized_pnl)}>{r.unrealized_pnl == null ? "—" : signedMoney(r.unrealized_pnl)}</span> },

@@ -9,13 +9,13 @@ from sqlalchemy.orm import Session
 
 from quant.api.schemas import IntradayOut, IntradayPositionOut, IntradayQuoteOut
 from quant.core.calendar import TradingCalendar
-from quant.db.models import Fill, IntradayQuote, PositionSnapshot
+from quant.db.models import Fill, IntradayQuote, JobRun, PositionSnapshot
 from quant.market.session import ET, SESSION_TEXT, us_session
 
-STALE = timedelta(minutes=5)
-FIRST_ROUND = timedelta(minutes=3)
+STALE = timedelta(minutes=20)  # 全市场一轮约 12 分钟，额外预留新闻与日历请求
+FIRST_ROUND = timedelta(minutes=15)
 VIEW_ONLY = "Finnhub 盘中报价 · 仅供查看，交易用收盘日线"
-EXTENDED = "扩展时段行情未接入，显示上一交易日收盘"
+EXTENDED = "扩展时段行情未接入，盘中估算已暂停；账户数据见快照日期"
 NO_DB = "未配置数据库，盘中行情不可用"
 
 
@@ -24,48 +24,102 @@ def _now() -> datetime:
 
 
 def _positions(
-    s: Session, mode: str, quotes: dict[str, IntradayQuote], since: datetime
-) -> list[IntradayPositionOut]:
-    """当日盈亏 = 现持股 × 现价 − 隔夜股数 × 昨收 − 今日买入金额 + 今日卖出金额。
+    s: Session,
+    mode: str,
+    quotes: dict[str, IntradayQuote],
+    since: datetime,
+    now: datetime,
+    cal: TradingCalendar,
+    out: IntradayOut,
+) -> None:
+    """盘中费前估算；包含完全卖出部分。当天快照须经过对账，旧快照只接受上一交易日。
 
-    隔夜股数 = 现持股 − 今日买入股数 + 今日卖出股数（调仓日新买入的从成交价算起）。
+    当日盈亏 = 现持股 × 现价 − 隔夜股数 × 昨收 − 今日买入金额 + 今日卖出金额。
     """
     snap_day = s.scalar(
         select(func.max(PositionSnapshot.snapshot_date)).where(PositionSnapshot.mode == mode)
     )
+    out.snapshot_date = snap_day
     if snap_day is None:
-        return []
-    held = s.scalars(
-        select(PositionSnapshot).where(
-            PositionSnapshot.mode == mode, PositionSnapshot.snapshot_date == snap_day
+        out.note += "；暂无持仓基础，无法估算（空仓账户以账户快照为准）"
+        return
+    today = now.astimezone(ET).date()
+    if snap_day not in (today, cal.previous_trading_day(today)):
+        out.note += "；持仓快照过旧，无法估算"
+        return
+    jobs = {
+        r.job_name: r.status
+        for r in s.scalars(
+            select(JobRun).where(
+                JobRun.mode == mode,
+                JobRun.trade_date == today,
+                JobRun.job_name.in_(("daily_execute", "daily_report")),
+            )
         )
-    ).all()
-    traded: dict[str, list[tuple[int, float]]] = {}  # 买为正股数
-    for f in s.scalars(select(Fill).where(Fill.mode == mode, Fill.filled_at >= since)):
+    }
+    if any(status in ("running", "failed") for status in jobs.values()) or (
+        snap_day == today and jobs.get("daily_report") != "success"
+    ):
+        out.note += "；交易或持仓对账尚未完成，暂不估算"
+        return
+    held = {
+        p.symbol: p.qty
+        for p in s.scalars(
+            select(PositionSnapshot).where(
+                PositionSnapshot.mode == mode,
+                PositionSnapshot.snapshot_date == snap_day,
+            )
+        )
+    }
+    traded: dict[str, list[tuple[int, float]]] = {}
+    for f in s.scalars(
+        select(Fill).where(
+            Fill.mode == mode,
+            Fill.filled_at >= since,
+            Fill.filled_at <= now,
+        )
+    ):
         sign = 1 if f.side.upper() == "BUY" else -1
         traded.setdefault(f.symbol, []).append((sign * f.qty, float(f.price)))
-    out = []
-    for p in sorted(held, key=lambda x: x.symbol):
-        q = quotes.get(p.symbol)
-        if q is None or p.qty == 0:
+    for sym in sorted(held.keys() | traded.keys()):
+        fills = traded.get(sym, [])
+        delta = sum(n for n, _ in fills)
+        qty = held.get(sym, 0) if snap_day == today else held.get(sym, 0) + delta
+        carried = qty - delta
+        if qty < 0 or carried < 0:
+            out.note += "；持仓与成交不一致，无法估算"
+            out.positions = []
+            return
+        if qty == 0 and not fills:
             continue
-        fills = traded.get(p.symbol, [])
-        carried = p.qty - sum(n for n, _ in fills)
+        q = quotes.get(sym)
+        stale = q is not None and now - q.quote_time > STALE
+        if q is None:
+            out.missing_symbols.append(sym)
+        elif stale:
+            out.stale_symbols.append(sym)
         pnl = None
-        if q.prev_close is not None or carried == 0:
+        if q is not None and not stale and (q.prev_close is not None or carried == 0):
             base = carried * (q.prev_close or 0.0) + sum(n * px for n, px in fills)
-            pnl = p.qty * q.price - base
-        out.append(
+            pnl = qty * q.price - base
+        out.positions.append(
             IntradayPositionOut(
-                symbol=p.symbol,
-                qty=p.qty,
-                price=q.price,
-                change_pct=q.change_pct,
+                symbol=sym,
+                qty=qty,
+                price=q.price if q else None,
+                quote_time=q.quote_time if q else None,
+                stale=stale,
+                change_pct=q.change_pct if q else None,
                 day_pnl=pnl,
                 traded_today=bool(fills),
             )
         )
-    return out
+    out.complete = bool(out.positions) and all(p.day_pnl is not None for p in out.positions)
+    if out.complete:
+        out.day_pnl = sum(p.day_pnl or 0.0 for p in out.positions)
+        out.market_value = sum(p.qty * (p.price or 0.0) for p in out.positions)
+    elif out.positions:
+        out.note += "；行情缺失或延迟，暂不汇总"
 
 
 def intraday(s: Session | None, cal: TradingCalendar, mode: str | None = None) -> IntradayOut:
@@ -74,7 +128,9 @@ def intraday(s: Session | None, cal: TradingCalendar, mode: str | None = None) -
     out = IntradayOut(session=session, session_text=SESSION_TEXT[session])
     if session != "regular":
         out.note = (
-            "休市，显示上一交易日收盘" if session == "closed" else f"{out.session_text}：{EXTENDED}"
+            "休市，盘中估算已暂停；账户数据见快照日期"
+            if session == "closed"
+            else f"{out.session_text}：{EXTENDED}"
         )
         return out
     if s is None:
@@ -108,7 +164,5 @@ def intraday(s: Session | None, cal: TradingCalendar, mode: str | None = None) -
         out.stale = True
     out.note = VIEW_ONLY + ("；行情延迟，采集可能中断" if out.stale else "")
     if mode is not None:
-        out.positions = _positions(s, mode, {r.symbol: r for r in rows}, opened)
-        pnls = [p.day_pnl for p in out.positions if p.day_pnl is not None]
-        out.day_pnl = sum(pnls) if pnls else None
+        _positions(s, mode, {r.symbol: r for r in rows}, opened, now, cal, out)
     return out

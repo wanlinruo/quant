@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +36,7 @@ from quant.data.market_store import (
     news_path,
     snapshot_path,
 )
-from quant.market.session import ET
+from quant.market.session import ET, us_session
 
 router = APIRouter()
 log = logging.getLogger("quant.api.market")
@@ -137,7 +137,22 @@ def overview() -> MarketOverview:
         return MarketOverview(status="pending", macro=macro)
     reasons = _reasons(data_dir, out.as_of)
     movers = [m.model_copy(update={"reason": reasons.get(m.symbol)}) for m in out.movers]
-    return out.model_copy(update={"macro": macro, "movers": movers})
+    now = intraday_view._now()
+    session = us_session(get_calendar(), now)
+    oldest = out.intraday_time_start or out.intraday_time
+    delayed = bool(
+        out.intraday
+        and session == "regular"
+        and (oldest is None or now - oldest > timedelta(minutes=20))
+    )
+    return out.model_copy(
+        update={
+            "macro": macro,
+            "movers": movers,
+            "session": session,
+            "quote_delayed": delayed,
+        }
+    )
 
 
 @router.get("/market/news")

@@ -513,12 +513,19 @@ export interface IntradayOut {
   quotes?: IntradayQuoteOut[];
   positions?: IntradayPositionOut[];
   day_pnl?: number | null;
+  snapshot_date?: string | null;
+  complete?: boolean;
+  missing_symbols?: string[];
+  stale_symbols?: string[];
+  market_value?: number | null;
 }
 
 export interface IntradayPositionOut {
   symbol: string;
   qty: number;
-  price: number;
+  price: number | null;
+  quote_time?: string | null;
+  stale?: boolean;
   change_pct?: number | null;
   day_pnl?: number | null;
   traded_today?: boolean;
@@ -584,6 +591,9 @@ export interface MarketOverview {
   sector_periods?: Record<string, Record<string, number | null>>;
   intraday?: boolean;
   intraday_time?: string | null;
+  intraday_time_start?: string | null;
+  session?: "pre" | "regular" | "post" | "overnight" | "closed";
+  quote_delayed?: boolean;
 }
 
 export interface Meta {

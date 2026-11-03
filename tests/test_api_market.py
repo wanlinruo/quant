@@ -206,3 +206,24 @@ def test_overview_prefers_daily_once_it_catches_up(
     p.write_text(json.dumps(doc), encoding="utf-8")
     _at(monkeypatch, "2026-11-03T02:00:00+00:00")  # 11-02 晚上 21:00 ET
     assert client.get("/api/market/overview").json()["intraday"] is False
+
+
+def test_intraday_time_range_and_session_are_independent_of_job_time(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from quant.data.market_store import intraday_snapshot_path
+
+    _write_pair(tmp_path)
+    p = intraday_snapshot_path(tmp_path)
+    doc = json.loads(p.read_text())
+    doc["intraday_time_start"] = "2026-11-02T15:00:00+00:00"
+    p.write_text(json.dumps(doc))
+    _at(monkeypatch, "2026-11-02T15:15:00+00:00")
+    d = client.get("/api/market/overview").json()
+    assert d["session"] == "regular" and not d["quote_delayed"]
+    assert d["intraday_time_start"].startswith("2026-11-02T15:00")
+    _at(monkeypatch, "2026-11-02T15:25:00+00:00")
+    assert client.get("/api/market/overview").json()["quote_delayed"]
+    _at(monkeypatch, "2026-11-02T22:00:00+00:00")
+    d = client.get("/api/market/overview").json()
+    assert d["session"] == "post" and not d["quote_delayed"]  # 停止采集不误报故障

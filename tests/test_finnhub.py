@@ -92,3 +92,39 @@ def test_quote() -> None:
 @pytest.mark.parametrize("body", [{"c": 0, "pc": 0, "t": 0}, {"c": None, "t": 1}, "oops"])
 def test_quote_missing_returns_none(body: object) -> None:
     assert client(FakeFetch((200, body))).quote("ZZZZ") is None
+
+
+def test_shared_limiter_applies_across_client_instances(
+    tmp_path: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time
+    from pathlib import Path
+
+    clock = [1000.0]
+    waits: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        waits.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    monkeypatch.setattr(time, "sleep", sleep)
+    path = Path(str(tmp_path)) / ".finnhub-rate"
+    first = FinnhubClient(
+        SecretStr("secret-never-persisted"), FakeFetch((200, [])), rate_limit_path=path
+    )
+    second = FinnhubClient(
+        SecretStr("secret-never-persisted"), FakeFetch((200, [])), rate_limit_path=path
+    )
+    first.market_news()
+    second.market_news()
+    assert len(waits) == 1 and waits[0] == pytest.approx(1.1)
+    assert "secret" not in path.read_text()
+
+
+def test_stop_request_prevents_network_access() -> None:
+    fetch = FakeFetch((200, []))
+    fh = FinnhubClient(SecretStr("k"), fetch, stop=lambda: True)
+    with pytest.raises(DataUnavailableError, match="采集已停止"):
+        fh.market_news()
+    assert not fetch.calls and fh.request_count == 0

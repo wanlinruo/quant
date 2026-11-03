@@ -130,3 +130,42 @@ describe("PortfolioPage", () => {
     expect(screen.getAllByText("数据接入中").length).toBeGreaterThan(0);
   });
 });
+
+const INTRA = {
+  session: "regular", session_text: "盘中", as_of: "2026-11-02T15:00:00Z",
+  note: "Finnhub 盘中报价 · 仅供查看，交易用收盘日线", complete: true,
+  market_value: 99000, day_pnl: 500,
+  positions: [{ symbol: "NVDA", qty: 300, price: 201, day_pnl: 300, quote_time: "2026-11-02T14:58:00Z" }],
+};
+
+describe("portfolio intraday estimates", () => {
+  it("shows estimates separately from the official NAV", async () => {
+    mockApi({ ...ROUTES, "/api/market/intraday": [200, INTRA] });
+    renderPage(<PortfolioPage />, "/portfolio");
+    expect(await screen.findByText(/盘中持仓市值 \$99,000.00/)).toBeInTheDocument();
+    expect(screen.getByText("$101,000.00")).toBeInTheDocument();
+    expect(screen.getByText(/201.00 · 2026-11-02 09:58/)).toBeInTheDocument();
+    expect(screen.getByText(/账户快照截至 2026-10-28/)).toBeInTheDocument();
+  });
+  it("withholds incomplete totals and keeps available per-position data", async () => {
+    mockApi({ ...ROUTES, "/api/market/intraday": [200, { ...INTRA, complete: false, market_value: null, day_pnl: null }] });
+    renderPage(<PortfolioPage />, "/portfolio");
+    expect(await screen.findByText(/盘中数据不完整，暂不汇总/)).toBeInTheDocument();
+    expect(screen.queryByText(/盘中持仓市值/)).toBeNull();
+    expect(await screen.findByText(/201.00 · 2026-11-02 09:58/)).toBeInTheDocument();
+  });
+  it("does not display intraday estimates after close", async () => {
+    mockApi({ ...ROUTES, "/api/market/intraday": [200, { ...INTRA, session: "post", positions: [] }] });
+    renderPage(<PortfolioPage />, "/portfolio");
+    await screen.findByText("$101,000.00");
+    expect(screen.queryByText(/盘中持仓市值/)).toBeNull();
+    expect(screen.queryByText(/201.00 ·/)).toBeNull();
+  });
+  it("requests quotes for the selected account", async () => {
+    const fetch = mockApi({ ...withMode("live"), "/api/market/intraday": [200, INTRA] });
+    renderPage(<PortfolioPage />, "/portfolio?account=live", mkMeta({ has: { live: true } }), "live");
+    await screen.findByText(/盘中持仓市值/);
+    const url = fetch.mock.calls.map(([u]) => new URL(String(u), "http://x")).find((u) => u.pathname === "/api/market/intraday");
+    expect(url?.searchParams.get("mode")).toBe("live");
+  });
+});
