@@ -16,6 +16,7 @@ from api_fixtures import needs_db
 from quant.data.market_store import ETF_SET, MarketStore, gics_path, intraday_snapshot_path
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.finnhub import Quote
+from quant.data.providers.massive import Split
 from quant.db.models import IntradayQuote, PositionSnapshot
 from quant.jobs import quotes
 
@@ -243,4 +244,105 @@ def test_priority_quotes_are_saved_before_entire_market_finishes(
 
     quotes.poll_once(eng, Streaming(), tuple(f"M{i}" for i in range(55)), NOW, tmp_path)
     assert checked == [True]
+    eng.dispose()
+
+
+class PreviousDaily:
+    """只支持最近交易日日线，市值请求会使测试失败。"""
+
+    def __init__(self, unavailable: bool = False, partial: bool = False) -> None:
+        self.unavailable = unavailable
+        self.partial = partial
+        self.days: list[date] = []
+
+    def grouped_daily(self, day: date) -> pd.DataFrame:
+        self.days.append(day)
+        if self.unavailable:
+            raise DataUnavailableError("source not ready")
+        syms = [*ETF_SET, "AAPL"] + ([] if self.partial else ["MSFT"])
+        return pd.DataFrame(
+            {
+                "symbol": syms,
+                "open": 100.0,
+                "high": 102.0,
+                "low": 99.0,
+                "close": 101.0,
+                "volume": 1000.0,
+                "vwap": 101.0,
+            }
+        )
+
+    def splits(self, day: date) -> list[Split]:
+        return []
+
+    def ticker_details(self, symbol: str) -> None:
+        raise AssertionError("盘中追补不刷新市值")
+
+
+@needs_db
+def test_recovery_unblocks_intraday_and_does_not_refetch_complete_day(
+    db_url: str, tmp_path: Path
+) -> None:
+    from quant.core.calendar import get_calendar
+
+    _market(tmp_path)
+    MarketStore(tmp_path)._day_path(date(2026, 10, 30)).unlink()
+    eng = create_engine(db_url)
+    source = PreviousDaily()
+    assert quotes.recover_previous_daily(eng, source, tmp_path, NOW, get_calendar())
+    assert source.days == [date(2026, 10, 30)]
+    assert quotes.recover_previous_daily(eng, source, tmp_path, NOW, get_calendar())
+    assert len(source.days) == 1
+    quotes.poll_once(eng, FakeFinnhub(), (), NOW, tmp_path)
+    doc = json.loads(intraday_snapshot_path(tmp_path).read_text())
+    assert doc["as_of"] == "2026-11-02" and doc["intraday"]
+    eng.dispose()
+
+
+@needs_db
+def test_recovery_waits_for_source_then_retries_without_bypassing_guard(
+    db_url: str, tmp_path: Path
+) -> None:
+    from quant.core.calendar import get_calendar
+
+    _market(tmp_path)
+    MarketStore(tmp_path)._day_path(date(2026, 10, 30)).unlink()
+    eng = create_engine(db_url)
+    source = PreviousDaily(unavailable=True)
+    assert not quotes.recover_previous_daily(eng, source, tmp_path, NOW, get_calendar())
+    quotes.poll_once(eng, FakeFinnhub(), (), NOW, tmp_path)
+    assert not intraday_snapshot_path(tmp_path).exists()
+    source.unavailable = False
+    assert quotes.recover_previous_daily(eng, source, tmp_path, NOW, get_calendar())
+    assert source.days == [date(2026, 10, 30)] * 2
+    eng.dispose()
+
+
+@needs_db
+def test_partial_previous_day_is_not_accepted_as_ready(db_url: str, tmp_path: Path) -> None:
+    from quant.core.calendar import get_calendar
+
+    _market(tmp_path)
+    MarketStore(tmp_path)._day_path(date(2026, 10, 30)).unlink()
+    eng = create_engine(db_url)
+    assert not quotes.recover_previous_daily(
+        eng, PreviousDaily(partial=True), tmp_path, NOW, get_calendar()
+    )
+    quotes.poll_once(eng, FakeFinnhub(), (), NOW, tmp_path)
+    assert not intraday_snapshot_path(tmp_path).exists()
+    eng.dispose()
+
+
+def test_recovery_does_not_access_source_outside_session_or_after_stop(tmp_path: Path) -> None:
+    from quant.core.calendar import get_calendar
+
+    eng = create_engine("sqlite://")
+    source = PreviousDaily()
+    assert not quotes.recover_previous_daily(
+        eng, source, tmp_path, NOW - timedelta(hours=3), get_calendar()
+    )
+    assert not quotes.recover_previous_daily(
+        eng, source, tmp_path, NOW, get_calendar(), stop=lambda: True
+    )
+    assert not source.days
     eng.dispose()

@@ -132,3 +132,33 @@ def test_splits() -> None:
     )
     assert len(got) == 1 and got[0].symbol == "NVDA" and got[0].factor == pytest.approx(0.1)
     assert client(FakeFetch((200, {"results": []}))).splits(date(2026, 10, 29)) == []
+
+
+def test_shared_request_limit_across_instances(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time
+
+    clock = [1000.0]
+    waits: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        waits.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    monkeypatch.setattr(time, "sleep", sleep)
+    path = tmp_path / ".massive-rate"
+    for _ in range(2):
+        MassiveClient(KEY, FakeFetch((200, {"results": []})), rate_limit_path=path).grouped_daily(
+            date(2026, 11, 2)
+        )
+    assert waits == [pytest.approx(12.5)]
+    assert KEY.get_secret_value() not in path.read_text()
+
+
+def test_stop_prevents_massive_requests() -> None:
+    fetch = FakeFetch((200, {"results": []}))
+    with pytest.raises(DataUnavailableError, match="采集已停止"):
+        MassiveClient(KEY, fetch, stop=lambda: True).grouped_daily(date(2026, 11, 2))
+    assert not fetch.calls
