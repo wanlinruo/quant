@@ -46,3 +46,26 @@ describe("TopBar", () => {
     expect(currentLocation()).toBe("/stock/NVDA?account=live");
   });
 });
+
+const MARKET = {
+  status: "ok" as const, highlights: "标普 500上涨，科技股领涨", as_of: "2026-11-02",
+  intraday: true, session: "post" as const, intraday_time: "2026-11-02T21:00:00Z",
+};
+
+describe("TopBar market information", () => {
+  it("places the summary and quote status in the navigation, keeping job time in the popover", async () => {
+    const meta = mkMeta({ data_as_of: "2026-11-03T02:29:00Z" });
+    const { user } = renderAt("/", <TopBar meta={meta} market={MARKET} account="paper" onAccountChange={vi.fn()} />);
+    expect(screen.getByRole("region", { name: "市场速览" })).toHaveTextContent(MARKET.highlights);
+    expect(screen.getByRole("status")).toHaveTextContent("已收盘");
+    expect(screen.getByText("行情 11-02 16:00 ET")).toBeInTheDocument();
+    expect(screen.queryByText(/最近任务完成/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "查看数据说明" }));
+    expect(screen.getByText("最近任务")).toBeInTheDocument();
+    expect(screen.getByText("2026-11-02 21:29 ET")).toBeInTheDocument();
+  });
+  it("keeps the delayed status visible in the navigation", () => {
+    renderAt("/", <TopBar meta={mkMeta()} market={{ ...MARKET, quote_delayed: true }} account="paper" onAccountChange={vi.fn()} />);
+    expect(screen.getByRole("status")).toHaveTextContent("更新延迟");
+  });
+});

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import type {
   AccountPoint,
@@ -17,7 +17,6 @@ import { CalendarPanel } from "../components/CalendarPanel";
 import { EmptyState } from "../components/EmptyState";
 import { Cell, Grid } from "../components/Grid";
 import { NewsPanel } from "../components/NewsPanel";
-import { MarketFreshness } from "../components/MarketFreshness";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
 import { Tabs } from "../components/Tabs";
@@ -130,14 +129,9 @@ function full(m: MarketOverview | null): Full | null {
 const OVERVIEW_REFRESH_MS = import.meta.env.MODE === "test" ? 200 : 3 * 60_000;
 
 export function MarketPage() {
-  const { account } = useShell();
-  const market = useApi<MarketOverview>("/api/market/overview");
-  // 盘中快照约每 10 分钟更新（#93）：打开着的页面定时重新读取（读的是预计算文件，开销很小）
-  const { reload: reloadMarket } = market;
-  useEffect(() => {
-    const t = setInterval(reloadMarket, OVERVIEW_REFRESH_MS);
-    return () => clearInterval(t);
-  }, [reloadMarket]);
+  const { account, market: sharedMarket } = useShell();
+  const fallback = useApi<MarketOverview>(sharedMarket ? null : "/api/market/overview", undefined, OVERVIEW_REFRESH_MS);
+  const market = sharedMarket ?? fallback;
   const holdings = useApi<HoldingRow[]>(`/api/portfolio/${account}/holdings`);
   const m = useMemo(() => full(market.data), [market.data]);
   const mine = useMemo(() => new Set((holdings.data ?? []).map((h) => h.symbol)), [holdings.data]);
@@ -170,13 +164,6 @@ export function MarketPage() {
           </section>
         </Cell>
       </Grid>
-      {m && (
-        <div className="sm highlights">
-          <span>{m.highlights}</span>
-          {m.stale && <span className="pill warn">今日数据尚未发布，显示上一交易日</span>}
-        </div>
-      )}
-      {market.data?.status === "ok" && <MarketFreshness market={market.data} />}
       <Grid>
         <Cell span={9}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
