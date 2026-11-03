@@ -31,7 +31,7 @@ from sqlalchemy import Engine, create_engine, func, select
 from sqlalchemy.orm import Session
 
 from quant.core.calendar import TradingCalendar, get_calendar
-from quant.core.settings import ConfigError, load_settings
+from quant.core.settings import BoardSettings, ConfigError, load_settings
 from quant.data.market_store import (
     ETF_SET,
     GicsTable,
@@ -42,10 +42,14 @@ from quant.data.market_store import (
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.finnhub import FinnhubAuthError, FinnhubClient, Quote
 from quant.data.providers.fred import FredClient
+from quant.data.providers.massive import MassiveClient
 from quant.data.quota import atomic_write_text
 from quant.db.models import IntradayQuote, PositionSnapshot
 from quant.market.board import build_snapshot
 from quant.market.extras_job import run_market_extras
+from quant.market.job import MIN_COVERAGE as DAILY_COVERAGE
+from quant.market.job import Client as MarketClient
+from quant.market.job import run_market_data
 from quant.market.refresh_metrics import record_refresh
 from quant.market.session import ET, us_session
 
@@ -56,6 +60,7 @@ MIN_COVERAGE = 0.9  # 今天有报价的标的比例低于此值时不更新盘�
 SOURCE = "finnhub"
 AUTH_BACKOFF = timedelta(minutes=30)
 EXTRAS_INTERVAL = timedelta(minutes=15)
+RECOVERY_INTERVAL = timedelta(minutes=15)
 
 
 class QuoteSource(Protocol):
@@ -99,6 +104,57 @@ def extras_due(
     stopped: bool,
 ) -> bool:
     return not stopped and should_poll(cal, now) and (next_at is None or now >= next_at)
+
+
+def recover_previous_daily(
+    engine: Engine,
+    client: MarketClient | None,
+    data_dir: Path,
+    now: datetime,
+    cal: TradingCalendar,
+    stop: Callable[[], bool] = lambda: False,
+) -> bool:
+    """夜间数据未发布时，在下一常规时段追补市场展示日线；不接触交易数据。
+
+    复用标准市场数据任务的拆股核对、成分表、覆盖率与原子写入。
+    只补最近缺失日，不补长历史或市值，避免占满盘中额度。
+    """
+    if stop() or not should_poll(cal, now):
+        return False
+    previous = cal.previous_trading_day(now.astimezone(ET).date())
+    store = MarketStore(data_dir)
+    gics = load_gics(data_dir)
+    if (
+        gics is not None
+        and store.has_day(previous)
+        and store.coverage(previous, gics.members) >= DAILY_COVERAGE
+    ):
+        return True
+    if client is None:
+        log.warning(
+            "市场日线截至 %s，缺少 %s 且未配置 Massive key，首页暂不能盘中更新",
+            store.days()[-1] if store.days() else None,
+            previous,
+        )
+        return False
+    with Session(engine) as s:
+        held = _held(s)
+    result = run_market_data(
+        client,
+        data_dir,
+        previous,
+        cal,
+        BoardSettings(history_per_run=0, caps_per_run=0),
+        held,
+        now_day=previous,
+    )
+    log.info("盘中基准日线追补：%s", result)
+    gics = load_gics(data_dir)
+    return bool(
+        gics
+        and store.has_day(previous)
+        and store.coverage(previous, gics.members) >= DAILY_COVERAGE
+    )
 
 
 def poll_once(
@@ -217,6 +273,9 @@ def _write_snapshot(
     if not days or days[-1] != get_calendar().previous_trading_day(today):
         log.warning("盘中快照未更新：已存日线截至 %s，不是上一交易日", days[-1] if days else None)
         return
+    if store.coverage(days[-1], gics.members) < DAILY_COVERAGE:
+        log.warning("盘中快照未更新：上一交易日成分股覆盖不足")
+        return
     bar = pd.DataFrame(
         {
             "open": {s: q.open or q.price for s, q in fresh.items()},
@@ -273,11 +332,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     fred_key = settings.fred_api_key
     fred = FredClient(fred_key) if fred_key and fred_key.get_secret_value().strip() else None
+    massive_key = settings.massive_api_key
+    massive = (
+        MassiveClient(
+            massive_key,
+            rate_limit_path=settings.data_dir / ".massive-rate",
+            stop=lambda: stop.requested or not should_poll(cal, datetime.now(UTC)),
+        )
+        if massive_key and massive_key.get_secret_value().strip()
+        else None
+    )
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     paused_until: datetime | None = None
     cache: dict[str, Quote] = {}
     next_extras: datetime | None = None
+    next_recovery: datetime | None = None
     log.info("quotes 启动：常规时段轮询，最小轮次间隔 %.0f 秒，全市场约 10–15 分钟", args.interval)
     while not stop.requested:
         started = time.monotonic()
@@ -288,6 +358,21 @@ def main(argv: list[str] | None = None) -> int:
             and (paused_until is None or now >= paused_until)
         ):
             try:
+                if extras_due(cal, now, next_recovery, stop.requested):
+                    next_recovery = now + RECOVERY_INTERVAL
+                    try:
+                        recover_previous_daily(
+                            engine,
+                            massive,
+                            settings.data_dir,
+                            now,
+                            cal,
+                            stop=lambda: stop.requested,
+                        )
+                    except Exception:
+                        log.exception("市场基准日线追补失败，继续采集报价，稍后再试")
+                if stop.requested or not should_poll(cal, datetime.now(UTC)):
+                    continue
                 cpu_start = time.process_time()
                 requests_before, limits_before = client.request_count, client.rate_limit_count
                 n = poll_once(
