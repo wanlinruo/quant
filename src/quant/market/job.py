@@ -155,6 +155,6 @@ def run_market_data(
     summary = (f"快照截至 {snap.as_of}；历史 {have}/{settings.history_days} 天"
                f"（本次补 {fetched}）；市值 {refreshed} 只")  # fmt: skip
     detail = "；".join([summary, *notes])
-    if require_current and (stale or snap.as_of != today.isoformat()):
+    if require_current and (stale or snap.as_of < today.isoformat()):
         raise MarketDataPending(f"目标日 {today} 未就绪；{detail}；保留展示缓存，等待重试")
     return detail
