@@ -347,6 +347,16 @@ def test_current_day_ready_but_optional_history_limited_still_succeeds(tmp_path:
     assert snapshot(tmp_path)["stale"] is False
 
 
+def test_required_past_day_rerun_accepts_newer_snapshot(tmp_path: Path) -> None:
+    run(tmp_path, FakeClient())
+    previous = CAL.previous_trading_day(TODAY)
+    run_market_data(FakeClient(), tmp_path, previous, CAL, SETTINGS, set(),
+                    fetch_text=lambda url: GICS_CSV, now_day=TODAY,
+                    require_current=True)  # fmt: skip
+    assert snapshot(tmp_path)["as_of"] == TODAY.isoformat()
+    assert snapshot(tmp_path)["stale"] is False
+
+
 @pytest.mark.parametrize("auth", [False, True])
 def test_nightly_job_enforces_current_day_and_classifies_errors(
     tmp_path: Path,
