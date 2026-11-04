@@ -2,7 +2,7 @@
 
 个人美股量化交易系统：老虎证券 OpenAPI 下单，日频 ETF 轮动起步。完整设计见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)，开发约定见 [`CLAUDE.md`](CLAUDE.md)。
 
-> 当前阶段：Phase 1 项目骨架。Phase 0 可行性验证结果见 [`scripts/phase0/REPORT.md`](scripts/phase0/REPORT.md)。
+> 当前阶段：Phase 4 模拟盘稳定性验收。交易主链、回测和面板已上线；[连续运行验收 #34](https://github.com/wanlinruo/quant/issues/34) 与 [完整交易日容量验收 #100](https://github.com/wanlinruo/quant/issues/100) 进行中，尚未切换实盘。最近运行证据见 [`docs/operations/2026-11-04-acceptance-status.md`](docs/operations/2026-11-04-acceptance-status.md)。
 
 ## 快速开始
 

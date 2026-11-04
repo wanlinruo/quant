@@ -2,7 +2,7 @@
 
 - 同一账户（mode）、同一任务、同一交易日只有一行 job_runs；已成功的不再执行。
 - 每次实际执行另记一行 job_attempts（含重跑），用于系统页的“重试后成功”与运行详情。
-- 失败的默认不自动重跑（避免反复告警），人工确认后用 quant job ... --rerun-failed 重跑。
+- 失败的默认不自动重跑；人工用 --rerun-failed，或由调用者提供锁内检查的有限重试策略。
 - 停留在 running 的记录说明上次进程中途退出，允许重跑（执行任务会先恢复券商订单状态）。
 - 用 PostgreSQL advisory lock 防止同一任务被两个进程同时执行。
 """
@@ -74,8 +74,9 @@ def run_job(
     mode: str,
     rerun_failed: bool = False,
     quiet: Quiet = (JobStopped,),
+    retry_failed: Callable[[Session, JobRun], bool] | None = None,
 ) -> str:
-    """返回 success / failed / skipped / locked。fn 返回的字符串作为日志摘要。"""
+    """返回 success / failed / skipped / locked；重试策略在任务锁内重新检查数据库记录。"""
     tag = f"job={name} trade_date={day} mode={mode}"
     with job_lock(engine, name, day, mode) as got:
         if not got:
@@ -86,7 +87,8 @@ def run_job(
             if row is not None and row.status == "success":
                 log.info("%s 已成功，跳过", tag)
                 return "skipped"
-            if row is not None and row.status == "failed" and not rerun_failed:
+            if (row is not None and row.status == "failed" and not rerun_failed
+                    and not (retry_failed and retry_failed(s, row))):  # fmt: skip
                 log.info("%s 已失败，需人工确认后重跑", tag)
                 return "skipped"
             now = datetime.now(UTC)

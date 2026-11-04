@@ -1,7 +1,7 @@
 """每日任务 market_data（#69 第 1 批 Task 4）。假 Massive 客户端，合成数据。"""
 
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +19,7 @@ from quant.data.providers.massive import (
     Split,
     TickerDetails,
 )
-from quant.market.job import run_market_data
+from quant.market.job import MarketDataPending, run_market_data
 
 CAL = get_calendar()
 TODAY = date(2026, 10, 30)
@@ -304,3 +304,91 @@ def test_past_date_rerun_checks_splits_up_to_real_day_first(tmp_path: Path) -> N
     first_day = next(i for i, x in enumerate(order) if x.startswith("day "))
     assert order.index(f"split {nxt}") < first_day
     assert ms.MarketStore(tmp_path).splits_checked() == nxt
+
+
+@pytest.mark.parametrize("failure", ["empty", "unavailable", "coverage", "splits"])
+def test_required_current_day_pending_keeps_readable_snapshot(tmp_path: Path, failure: str) -> None:
+    prev = CAL.previous_trading_day(TODAY)
+    run(tmp_path, FakeClient(), today=prev)
+
+    class PendingClient(FakeClient):
+        def grouped_daily(self, day: date) -> pd.DataFrame:
+            df = super().grouped_daily(day)
+            if failure == "unavailable":
+                raise DataUnavailableError("temporary")
+            if failure == "coverage":
+                return df[df["symbol"].isin([f"S{i}" for i in range(225)])]
+            return df
+
+        def splits(self, day: date) -> list[Split]:
+            if failure == "splits":
+                raise DataUnavailableError("temporary split check")
+            return []
+
+    client = PendingClient(empty={TODAY} if failure == "empty" else set())
+    with pytest.raises(MarketDataPending, match=f"目标日 {TODAY} 未就绪"):
+        run_market_data(client, tmp_path, TODAY, CAL, SETTINGS, set(),
+                        fetch_text=lambda url: GICS_CSV, require_current=True)  # fmt: skip
+    snap = snapshot(tmp_path)
+    assert snap["stale"] is True
+    assert snap["as_of"] == (TODAY if failure == "coverage" else prev).isoformat()
+    assert not client.details and all(d == TODAY for d in client.days)
+    # 下一次来源恢复后能成功，原先的失败不损坏数据或拆股检查进度。
+    run_market_data(FakeClient(), tmp_path, TODAY, CAL, SETTINGS, set(),
+                    fetch_text=lambda url: GICS_CSV, require_current=True)  # fmt: skip
+    assert snapshot(tmp_path)["as_of"] == TODAY.isoformat()
+    assert snapshot(tmp_path)["stale"] is False
+
+
+def test_current_day_ready_but_optional_history_limited_still_succeeds(tmp_path: Path) -> None:
+    summary = run_market_data(FakeClient(limit_after=1), tmp_path, TODAY, CAL, SETTINGS, set(),
+                              fetch_text=lambda url: GICS_CSV, require_current=True)  # fmt: skip
+    assert "限流" in summary
+    assert snapshot(tmp_path)["stale"] is False
+
+
+def test_required_past_day_rerun_accepts_newer_snapshot(tmp_path: Path) -> None:
+    run(tmp_path, FakeClient())
+    previous = CAL.previous_trading_day(TODAY)
+    run_market_data(FakeClient(), tmp_path, previous, CAL, SETTINGS, set(),
+                    fetch_text=lambda url: GICS_CSV, now_day=TODAY,
+                    require_current=True)  # fmt: skip
+    assert snapshot(tmp_path)["as_of"] == TODAY.isoformat()
+    assert snapshot(tmp_path)["stale"] is False
+
+
+@pytest.mark.parametrize("auth", [False, True])
+def test_nightly_job_enforces_current_day_and_classifies_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    auth: bool,
+) -> None:
+    from types import SimpleNamespace
+
+    from pydantic import SecretStr
+
+    from quant.core.settings import Settings
+    from quant.jobs import daily
+    from quant.market import job
+
+    seen: list[bool] = []
+
+    def unavailable(*args: object, require_current: bool = False, **kw: object) -> str:
+        seen.append(require_current)
+        raise MassiveAuthError("invalid key") if auth else DataUnavailableError("GICS unavailable")
+
+    monkeypatch.setattr(job, "run_market_data", unavailable)
+    monkeypatch.setattr(daily, "_all_holdings", lambda ctx: set())
+    ctx = SimpleNamespace(
+        settings=Settings(
+            broker="sim",
+            TRADING_MODE="sim",
+            data_dir=tmp_path,
+            massive_api_key=SecretStr("test-only"),
+        ),
+        calendar=CAL,
+        now=lambda: datetime(2026, 10, 31, tzinfo=UTC),
+    )
+    with pytest.raises(MassiveAuthError if auth else MarketDataPending):
+        daily.market_data(ctx, TODAY)  # type: ignore[arg-type]
+    assert seen == [True]
