@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from quant.core.settings import ConfigError, load_settings
 from quant.db.backtests import make_engine
 from quant.db.models import SystemMetric
+from quant.jobs import refresh_capacity
 
 log = logging.getLogger("quant.monitor")
 
@@ -124,9 +125,14 @@ class Collector:
             pct = used = limit = None
             try:
                 if c.get("State") == "running":
-                    pct, used, limit = _container_stats(
-                        self.docker.get(f"/containers/{c['Id']}/stats?stream=false")
-                    )
+                    stats = self.docker.get(f"/containers/{c['Id']}/stats?stream=false")
+                    pct, used, limit = _container_stats(stats)
+                    io = (stats.get("blkio_stats") or {}).get("io_service_bytes_recursive")
+                    if isinstance(io, list) and io:
+                        for op in ("Read", "Write"):
+                            extra[f"io_{op.lower()}_bytes"] = sum(
+                                r.get("value", 0) for r in io if r.get("op") == op
+                            )
                 info = self.docker.get(f"/containers/{c['Id']}/json")
                 extra["started_at"] = (info.get("State") or {}).get("StartedAt")
                 extra["restarts"] = info.get("RestartCount")
@@ -190,12 +196,18 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, stop)
     log.info("monitor 启动，每 %.0f 秒采集一次", args.interval)
     last_prune: datetime | None = None
+    last_capacity: datetime | None = None
     while not stop.requested:
         now = datetime.now(UTC)
         try:
             rows = collector.collect(now)
+            capacity_due = last_capacity is None or now - last_capacity >= refresh_capacity.INTERVAL
+            if capacity_due:
+                rows.append(refresh_capacity.sample(engine, settings.data_dir, now))
             prune = last_prune is None or now - last_prune >= timedelta(hours=1)
             save(engine, rows, now, prune)
+            if capacity_due:
+                last_capacity = now
             if prune:
                 last_prune = now
         except Exception:  # 采集失败不退出，下次再试

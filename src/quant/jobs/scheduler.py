@@ -10,7 +10,8 @@
 - daily_data / daily_signal 按配置时间（默认 16:30 / 17:00）；半日市按提前收盘的时长整体提前
   （13:00 收盘 → 13:30 / 14:00）。
 - daily_signal 只在当日 daily_data 成功后运行。
-- 进程内每个任务每天最多尝试一次；跨重启由 job_runs 保证幂等（jobs/runner.py）。
+- 每个任务每天最多尝试一次，market_data 暂时未就绪除外：间隔 15 分钟，最多重试 3 次；
+  次数与间隔从 job_attempts 恢复，在任务锁内再次检查；其他失败仍需人工确认。
 - 收到 SIGTERM / SIGINT 后，当前任务完成再退出。
 """
 
@@ -31,14 +32,41 @@ from sqlalchemy.orm import Session
 
 from quant.core.calendar import TradingCalendar
 from quant.core.settings import ConfigError, ScheduleSettings, load_settings
-from quant.db.models import Signal
+from quant.db.models import JobAttempt, JobRun, Signal
 from quant.engine.executor import ET
 from quant.jobs.daily import JOB_FUNCS, QUIET, JobContext
 from quant.jobs.runner import job_status, run_job
+from quant.market.job import MarketDataPending
 from quant.notify.base import Level
 
 log = logging.getLogger("quant.scheduler")
 TICK_SECONDS = 30
+MARKET_RETRY_INTERVAL = timedelta(minutes=15)
+MARKET_MAX_ATTEMPTS = 4  # 首次 + 3 次重试
+
+
+def market_retry_due(s: Session, row: JobRun, now: datetime) -> bool:
+    """只重试本交易日的市场展示暂时故障；不重跑交易任务或认证/未知错误。"""
+    if (
+        row.job_name != "market_data"
+        or row.status != "failed"
+        or row.trade_date != now.astimezone(ET).date()
+        or not (row.error or "").startswith(f"{MarketDataPending.__name__}:")
+    ):
+        return False
+    last = s.scalar(
+        select(JobAttempt).where(
+            JobAttempt.mode == row.mode, JobAttempt.job_name == row.job_name,
+            JobAttempt.trade_date == row.trade_date,
+        ).order_by(JobAttempt.attempt.desc()).limit(1)
+    )  # fmt: skip
+    return bool(
+        last is not None
+        and last.result == "failed"
+        and last.attempt < MARKET_MAX_ATTEMPTS
+        and last.finished_at is not None
+        and now >= last.finished_at + MARKET_RETRY_INTERVAL
+    )
 
 
 def _at(d: date, hhmm: str) -> datetime:
@@ -113,7 +141,20 @@ class Scheduler:
         d = now.astimezone(ET).date()
         results = []
         for name, at in day_plan(d, self.ctx.settings.schedule, self.ctx.calendar):
-            if self.stop_requested or now < at or (name, d) in self._attempted:
+            if self.stop_requested or now < at:
+                continue
+            retry = False
+            if name == "market_data":
+                with Session(self.ctx.engine) as s:
+                    row = s.scalar(select(JobRun).where(
+                        JobRun.mode == self.ctx.mode, JobRun.job_name == name,
+                        JobRun.trade_date == d,
+                    ))  # fmt: skip
+                    if row is not None and row.status == "failed":
+                        retry = market_retry_due(s, row, now)
+                        if not retry:
+                            continue
+            if (name, d) in self._attempted and not retry:
                 continue
             if not self._ready(name, d):
                 continue
@@ -131,6 +172,9 @@ class Scheduler:
                 self.ctx.notifier,
                 mode=self.ctx.mode,
                 quiet=QUIET,
+                retry_failed=(lambda s, row: market_retry_due(s, row, self._now()))
+                if retry
+                else None,
             )
             results.append((name, result))
             now = self._now()

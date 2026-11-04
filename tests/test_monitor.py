@@ -1,5 +1,6 @@
 """资源采集（#71 B 批）：主机 /proc、磁盘、容器状态 → system_metrics。"""
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from api_fixtures import needs_db
 from quant.db.models import SystemMetric
 from quant.jobs import monitor
+from quant.jobs.refresh_capacity import sample
 
 STAT1 = "cpu  100 0 100 800 0 0 0 0 0 0\ncpu0 1 1 1 1\n"
 STAT2 = "cpu  150 0 150 900 0 0 0 0 0 0\n"
@@ -179,3 +181,80 @@ def test_http_docker_reads_json(monkeypatch: pytest.MonkeyPatch) -> None:
         {"Id": "x"}
     ]
     assert seen == ["http://docker-proxy:2375/containers/json?all=1"]
+
+
+def test_capacity_sample_partial_inputs_bounded_and_redacted(tmp_path: Path) -> None:
+    market = tmp_path / "market"
+    market.mkdir()
+    (market / "snapshot.json").write_text(
+        json.dumps(
+            {
+                "as_of": "2026-11-02",
+                "stale": True,
+                "secret": "must-not-store",
+            }
+        )
+    )
+    (market / "news.json").write_text("{broken")
+    (market / "calendar.json").write_text("x" * (1024 * 1024 + 1))
+    (market / "refresh_metrics.json").write_text(
+        json.dumps(
+            [
+                {"kind": "quotes", "time": "older", "requests": 100},
+                {"kind": "quotes", "time": "newest", "requests": 525, "secret": "must-not-store"},
+                {"kind": "extras", "requests": 44},
+                {"kind": "unknown", "secret": "must-not-store"},
+            ]
+        )
+    )
+    eng = create_engine("sqlite://")  # PostgreSQL 不可用也必须保留文件摘要与其他监控
+    row = sample(eng, tmp_path, NOW)
+    eng.dispose()
+    assert row.kind == "capacity" and row.ts == NOW
+    assert row.extra["database"]["unavailable"] == "OperationalError"
+    assert row.extra["snapshot"]["stale"] is True
+    assert row.extra["news"]["unavailable"] == "JSONDecodeError"
+    assert row.extra["calendar"]["unavailable"] == "ValueError"
+    assert row.extra["snapshot_intraday"]["unavailable"] == "FileNotFoundError"
+    assert row.extra["refresh"]["quotes"]["time"] == "newest"
+    assert row.extra["refresh"]["extras"]["requests"] == 44
+    assert "must-not-store" not in json.dumps(row.extra)
+
+
+@needs_db
+def test_capacity_sample_database_and_retention(db_url: str, tmp_path: Path) -> None:
+    eng = create_engine(db_url)
+    row = sample(eng, tmp_path, NOW)
+    assert row.extra["database"]["db_bytes"] > 0
+    assert "wal_stats_reset" in row.extra["database"]
+    assert "quote_dead_tuples" in row.extra["database"]
+    with Session(eng) as s, s.begin():
+        s.add(SystemMetric(ts=NOW - timedelta(days=9), kind="capacity", name="refresh", extra={}))
+    monitor.save(eng, [row], NOW, prune=True)
+    with Session(eng) as s:
+        capacity = s.scalars(select(SystemMetric).where(SystemMetric.kind == "capacity")).all()
+        assert [r.ts for r in capacity] == [NOW]
+        assert capacity[0].extra["database"]["db_bytes"] > 0
+    eng.dispose()
+
+
+def test_monitor_records_block_io_without_dumping_docker_payload(tmp_path: Path) -> None:
+    class IoDocker(FakeDocker):
+        def get(self, path: str) -> Any:
+            doc = super().get(path)
+            if path.endswith("/stats?stream=false"):
+                doc["blkio_stats"] = {
+                    "io_service_bytes_recursive": [
+                        {"op": "Read", "value": 10},
+                        {"op": "Read", "value": 20},
+                        {"op": "Write", "value": 40},
+                        {"op": "Total", "value": 70},
+                    ]
+                }
+                doc["secret"] = "must-not-store"
+            return doc
+
+    rows = monitor.Collector(IoDocker(), _proc(tmp_path, STAT1), tmp_path).collect(NOW)
+    extra = next(r.extra for r in rows if r.kind == "container")
+    assert extra["io_read_bytes"] == 30 and extra["io_write_bytes"] == 40
+    assert "must-not-store" not in json.dumps(extra)

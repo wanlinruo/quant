@@ -501,20 +501,26 @@ def market_data(ctx: JobContext, d: date) -> str:
     key = _key(ctx.settings.massive_api_key)
     if key is None:
         return "未配置 Massive key（QUANT_MASSIVE_API_KEY），跳过"
-    from quant.data.providers.massive import MassiveClient
-    from quant.market.job import run_market_data
+    from quant.data.providers.massive import MassiveAuthError, MassiveClient
+    from quant.market.job import MarketDataPending, run_market_data
 
     holdings = _all_holdings(ctx) or set()
     now_day = ctx.calendar.last_completed_trading_day(ctx.now())
-    return run_market_data(
-        MassiveClient(key, rate_limit_path=ctx.settings.data_dir / ".massive-rate"),
-        ctx.settings.data_dir,
-        d,
-        ctx.calendar,
-        ctx.settings.board,
-        holdings,
-        now_day=now_day,
-    )
+    try:
+        return run_market_data(
+            MassiveClient(key, rate_limit_path=ctx.settings.data_dir / ".massive-rate"),
+            ctx.settings.data_dir,
+            d,
+            ctx.calendar,
+            ctx.settings.board,
+            holdings,
+            now_day=now_day,
+            require_current=True,
+        )
+    except MassiveAuthError:
+        raise  # 认证失败需要人工处理，不自动重试
+    except DataUnavailableError as e:
+        raise MarketDataPending(str(e)) from None
 
 
 def market_extras(ctx: JobContext, d: date) -> str:

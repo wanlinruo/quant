@@ -3,7 +3,8 @@
 顺序：同步成分表 → 取当日全市场日线 → 补历史 → 刷新市值 → 生成快照。
 
 Massive 免费档每分钟 5 次（客户端已限速），一次任务约 2 + history_per_run + caps_per_run 次请求。
-限流或临时故障时停止剩余请求、保留已取数据，照常生成快照；key 无效时抛出（任务失败告警）。
+限流或临时故障时停止剩余请求、保留已取数据；夜间 require_current 未达标时记失败并告警。
+盘中追补可以先保留降级快照，等待下一轮；key 无效时始终抛出。
 """
 
 from __future__ import annotations
@@ -31,6 +32,10 @@ MIN_COVERAGE = 0.95  # 当日成分覆盖率低于此值时重取一次
 SPLIT_DAYS_PER_RUN = 10  # 停跑多日后分几次追上，避免一次占满额度
 
 
+class MarketDataPending(DataUnavailableError):
+    """目标日市场数据尚未就绪；可保留快照，但不能把夜间任务记为成功。"""
+
+
 class Client(Protocol):
     def grouped_daily(self, day: date) -> pd.DataFrame: ...
     def splits(self, day: date) -> list[Split]: ...
@@ -46,6 +51,8 @@ def run_market_data(
     holdings: set[str],
     fetch_text: Callable[[str], str] = http_get_text,
     now_day: date | None = None,
+    *,
+    require_current: bool = False,
 ) -> str:
     """now_day：按真实时间的最近一个已收盘交易日（补跑过去日期时晚于 today）。"""
     gics = sync_gics(data_dir, today, fetch_text)
@@ -103,9 +110,12 @@ def run_market_data(
     low = store.has_day(today) and store.coverage(today, members) < MIN_COVERAGE
     if (not store.has_day(today) or low) and not stopped and (today == upto or splits_done):
         fetch_day(today)
-    stale = not store.has_day(today)
+    coverage = store.coverage(today, members)
+    stale = not store.has_day(today) or coverage < MIN_COVERAGE or not splits_done
     if stale:
-        notes.append(f"{today} 当日数据未取到，沿用上一交易日")
+        notes.append(f"{today} 日线未就绪（成分覆盖 {coverage:.1%}，拆股核对 {splits_done}）")
+        if require_current:
+            stopped = True  # 重试先取目标日，不把额度花在历史和市值上
     # 补历史：最近 history_days 个交易日中缺的，由近及远
     start = today - timedelta(days=int(settings.history_days * 1.6) + 10)
     window = cal.trading_days(start, today)[-settings.history_days :]
@@ -144,4 +154,7 @@ def run_market_data(
     have = len(store.days())
     summary = (f"快照截至 {snap.as_of}；历史 {have}/{settings.history_days} 天"
                f"（本次补 {fetched}）；市值 {refreshed} 只")  # fmt: skip
-    return "；".join([summary, *notes])
+    detail = "；".join([summary, *notes])
+    if require_current and (stale or snap.as_of != today.isoformat()):
+        raise MarketDataPending(f"目标日 {today} 未就绪；{detail}；保留展示缓存，等待重试")
+    return detail

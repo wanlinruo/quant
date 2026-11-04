@@ -2,7 +2,7 @@
 
 import os
 from collections.abc import Iterator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from decimal import Decimal
 from pathlib import Path
 
@@ -33,6 +33,7 @@ from quant.jobs import daily
 from quant.jobs.daily import JobContext, daily_data, daily_report, daily_signal
 from quant.jobs.runner import JobStopped, job_lock, job_status, run_job
 from quant.jobs.scheduler import Scheduler, day_plan
+from quant.market.job import MarketDataPending
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_URL = os.environ.get("QUANT_TEST_DATABASE_URL")
@@ -322,6 +323,160 @@ def test_missed_execution_window(engine: Engine, tmp_path: Path) -> None:
     assert broker.placed == [] and status(engine, "daily_execute", NEXT) is None
     title, _, _ = ctx.notifier.sent[-1]  # type: ignore[attr-defined]
     assert "错过执行" in title
+
+
+@pytest.fixture
+def market_clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
+    """数据库任务时间也使用同一时钟，覆盖跨重启的持久化重试间隔。"""
+    from quant.jobs import runner
+
+    clock = Clock(et(DAY, 20, 30).astimezone(UTC))
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> "FixedDatetime":
+            return cls.fromtimestamp(clock.now().timestamp(), tz)
+
+    monkeypatch.setattr(runner, "datetime", FixedDatetime)
+    # 只测试调度，不触发任何数据源、券商、策略或真实通知。
+    for name in daily.JOB_FUNCS:
+        monkeypatch.setitem(daily.JOB_FUNCS, name, lambda ctx, d: "test-only")
+    return clock
+
+
+@pytest.mark.db
+@needs_db
+def test_market_retry_survives_restart_and_recovers(
+    engine: Engine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    market_clock: Clock,
+) -> None:
+    ctx = make_ctx(engine, tmp_path, clock=market_clock)
+    calls: list[date] = []
+
+    def market(ctx: JobContext, d: date) -> str:
+        calls.append(d)
+        if len(calls) == 1:
+            raise MarketDataPending("目标日日线未发布，保留旧快照")
+        return "目标日与覆盖率已达标"
+
+    monkeypatch.setitem(daily.JOB_FUNCS, "market_data", market)
+    sched = Scheduler(ctx)
+    assert ("market_data", "failed") in sched.tick()
+    assert "MarketDataPending" in ctx.notifier.sent[-1][1]  # type: ignore[attr-defined]
+    market_clock.t += timedelta(minutes=15, seconds=-1)
+    assert not any(n == "market_data" for n, _ in Scheduler(ctx).tick())
+    market_clock.t += timedelta(seconds=1)
+    assert ("market_data", "success") in Scheduler(ctx).tick()
+    assert len(calls) == 2
+    assert ("market_data", "skipped") in Scheduler(ctx).tick()
+    with Session(engine) as s:
+        attempts = s.scalars(select(JobAttempt).where(JobAttempt.job_name == "market_data")
+                            .order_by(JobAttempt.attempt)).all()  # fmt: skip
+        assert [a.result for a in attempts] == ["failed", "success"]
+        assert job_status(s, "market_data", DAY, ctx.mode) == "success"
+
+
+@pytest.mark.db
+@needs_db
+def test_market_retries_bounded_without_blocking_other_jobs(
+    engine: Engine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    market_clock: Clock,
+) -> None:
+    ctx = make_ctx(engine, tmp_path, clock=market_clock)
+    extras: list[date] = []
+
+    def pending(ctx: JobContext, d: date) -> str:
+        raise MarketDataPending("暂未就绪")
+
+    def extra(ctx: JobContext, d: date) -> str:
+        extras.append(d)
+        return "ok"
+
+    monkeypatch.setitem(daily.JOB_FUNCS, "market_data", pending)
+    monkeypatch.setitem(daily.JOB_FUNCS, "market_extras", extra)
+    sched = Scheduler(ctx)
+    for i in range(4):
+        market_clock.t = et(DAY, 20, 30).astimezone(UTC) + timedelta(minutes=15 * i)
+        assert ("market_data", "failed") in sched.tick()
+    assert extras == [DAY]  # 21:00 的其他任务未被等待重试阻塞
+    market_clock.t += timedelta(minutes=15)
+    assert not any(n == "market_data" for n, _ in Scheduler(ctx).tick())
+    with Session(engine) as s:
+        assert (
+            len(s.scalars(select(JobAttempt).where(JobAttempt.job_name == "market_data")).all())
+            == 4
+        )
+    assert len(ctx.notifier.sent) == 4  # type: ignore[attr-defined]
+
+
+@pytest.mark.db
+@needs_db
+@pytest.mark.parametrize("kind", ["auth", "unexpected", "trade", "next_day", "race"])
+def test_market_retry_does_not_retry_other_failures(
+    engine: Engine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    market_clock: Clock,
+    kind: str,
+) -> None:
+    from quant.data.providers.massive import MassiveAuthError
+    from quant.jobs.scheduler import market_retry_due
+
+    ctx = make_ctx(engine, tmp_path, clock=market_clock)
+    name = "daily_execute" if kind == "trade" else "market_data"
+
+    def failed() -> str:
+        if kind == "auth":
+            raise MassiveAuthError("invalid key")
+        if kind == "unexpected":
+            raise OSError("disk full")
+        raise MarketDataPending("暂未就绪")
+
+    run_job(engine, name, DAY, failed, ctx.notifier, mode=ctx.mode)
+    market_clock.t += timedelta(minutes=15 if kind != "race" else 14)
+    if kind == "next_day":
+        market_clock.t += timedelta(days=1)
+    # 在任务锁内复核：即使调度器此前认为可重试，最新次数/完成时间仍能阻止重复运行。
+    assert (
+        run_job(
+            engine,
+            name,
+            DAY,
+            lambda: pytest.fail("must not retry"),
+            ctx.notifier,
+            mode=ctx.mode,
+            retry_failed=lambda s, row: market_retry_due(s, row, market_clock.now()),
+        )
+        == "skipped"
+    )
+
+
+@pytest.mark.db
+@needs_db
+def test_market_retry_respects_half_day_and_weekend(
+    engine: Engine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    market_clock: Clock,
+) -> None:
+    ctx = make_ctx(engine, tmp_path, clock=market_clock)
+    half = date(2026, 11, 27)
+    market_clock.t = et(half, 17, 30).astimezone(UTC)
+
+    def pending(ctx: JobContext, d: date) -> str:
+        raise MarketDataPending("暂未就绪")
+
+    monkeypatch.setitem(daily.JOB_FUNCS, "market_data", pending)
+    sched = Scheduler(ctx)
+    assert ("market_data", "failed") in sched.tick()
+    market_clock.t += timedelta(minutes=15)
+    assert ("market_data", "failed") in Scheduler(ctx).tick()
+    market_clock.t = et(date(2026, 11, 28), 17, 45).astimezone(UTC)
+    assert Scheduler(ctx).tick() == []
 
 
 # ---- 组合策略接入（#47 第二份计划任务 5） ----
