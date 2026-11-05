@@ -4,13 +4,14 @@
 
 没有用 APScheduler 的 cron 触发器：交易日、半日市都要查日历，cron 表达不了。
 改为每 30 秒检查一次当天（美东日期）的计划：
-- 非交易日没有任务。
+- 交易主链只在交易日运行；market_data 在目标交易日的次一自然日 00:10 ET 执行，
+  因此周六/假期也可能仅运行上一交易日市场日线任务。
 - daily_execute 在 schedule.daily_execute（默认 09:50）运行，完成后立即运行 daily_report；
   启动时已过当日执行时段（收盘前 stop_before_close_minutes）则不再执行，有待执行信号时提醒。
 - daily_data / daily_signal 按配置时间（默认 16:30 / 17:00）；半日市按提前收盘的时长整体提前
   （13:00 收盘 → 13:30 / 14:00）。
 - daily_signal 只在当日 daily_data 成功后运行。
-- 每个任务每天最多尝试一次，market_data 暂时未就绪除外：间隔 15 分钟，最多重试 3 次；
+- 每个数据日最多尝试一次，market_data 在跨日窗口暂时未就绪除外：间隔 15 分钟，最多重试 3 次；
   次数与间隔从 job_attempts 恢复，在任务锁内再次检查；其他失败仍需人工确认。
 - 收到 SIGTERM / SIGINT 后，当前任务完成再退出。
 """
@@ -27,10 +28,10 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from types import FrameType
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from quant.core.calendar import TradingCalendar
+from quant.core.calendar import TradingCalendar, get_calendar
 from quant.core.settings import ConfigError, ScheduleSettings, load_settings
 from quant.db.models import JobAttempt, JobRun, Signal
 from quant.engine.executor import ET
@@ -45,25 +46,42 @@ MARKET_RETRY_INTERVAL = timedelta(minutes=15)
 MARKET_MAX_ATTEMPTS = 4  # 首次 + 3 次重试
 
 
-def market_retry_due(s: Session, row: JobRun, now: datetime) -> bool:
-    """只重试本交易日的市场展示暂时故障；不重跑交易任务或认证/未知错误。"""
+def market_retry_due(
+    s: Session,
+    row: JobRun,
+    now: datetime,
+    *,
+    schedule: ScheduleSettings | None = None,
+    cal: TradingCalendar | None = None,
+) -> bool:
+    """仅重试次一自然日的市场数据；旧版本跨日前失败不消耗新窗口预算。"""
     if (
         row.job_name != "market_data"
         or row.status != "failed"
-        or row.trade_date != now.astimezone(ET).date()
+        or row.trade_date + timedelta(days=1) != now.astimezone(ET).date()
         or not (row.error or "").startswith(f"{MarketDataPending.__name__}:")
     ):
         return False
+    cal = cal or get_calendar()
+    if not cal.is_trading_day(row.trade_date):
+        return False
+    at = dict(day_plan(row.trade_date, schedule or ScheduleSettings(), cal))["market_data"]
+    if now < at or now >= market_deadline(row.trade_date, cal):
+        return False
+    where = (
+        JobAttempt.mode == row.mode,
+        JobAttempt.job_name == row.job_name,
+        JobAttempt.trade_date == row.trade_date,
+        JobAttempt.started_at >= at,
+    )
+    count = s.scalar(select(func.count()).select_from(JobAttempt).where(*where)) or 0
+    if count >= MARKET_MAX_ATTEMPTS:
+        return False
     last = s.scalar(
-        select(JobAttempt).where(
-            JobAttempt.mode == row.mode, JobAttempt.job_name == row.job_name,
-            JobAttempt.trade_date == row.trade_date,
-        ).order_by(JobAttempt.attempt.desc()).limit(1)
+        select(JobAttempt).where(*where).order_by(JobAttempt.attempt.desc()).limit(1)
     )  # fmt: skip
-    return bool(
-        last is not None
-        and last.result == "failed"
-        and last.attempt < MARKET_MAX_ATTEMPTS
+    return last is None or bool(
+        last.result == "failed"
         and last.finished_at is not None
         and now >= last.finished_at + MARKET_RETRY_INTERVAL
     )
@@ -77,7 +95,7 @@ def _at(d: date, hhmm: str) -> datetime:
 def day_plan(
     d: date, schedule: ScheduleSettings, cal: TradingCalendar
 ) -> list[tuple[str, datetime]]:
-    """当天的任务与计划时间（美东），按时间排序；daily_report 紧随 daily_execute。"""
+    """按数据交易日归属的计划；market_data 在次一自然日，半日市也不提前它。"""
     if not cal.is_trading_day(d):
         return []
     early = _at(d, "16:00") - cal.session_close(d)  # 半日市提前的时长
@@ -87,11 +105,32 @@ def day_plan(
         ("daily_report", execute),
         ("daily_data", _at(d, schedule.daily_data) - early),
         ("daily_signal", _at(d, schedule.daily_signal) - early),
-        ("market_data", _at(d, schedule.market_data) - early),
+        ("market_data", _at(d + timedelta(days=1), schedule.market_data)),
         ("market_extras", _at(d, schedule.market_extras) - early),
         ("stock_data", _at(d, schedule.stock_data) - early),
     ]
     return sorted(plan, key=lambda x: x[1])
+
+
+def execution_plan(
+    day: date,
+    schedule: ScheduleSettings,
+    cal: TradingCalendar,
+) -> list[tuple[str, date, datetime]]:
+    """自然日执行清单：(任务、数据交易日、计划时间)，周六也可补周五日线。"""
+    out = [(name, day, at) for name, at in day_plan(day, schedule, cal) if name != "market_data"]
+    previous = day - timedelta(days=1)
+    out.extend(
+        (name, previous, at)
+        for name, at in day_plan(previous, schedule, cal)
+        if name == "market_data"
+    )
+    return sorted(out, key=lambda item: item[2])
+
+
+def market_deadline(day: date, cal: TradingCalendar) -> datetime:
+    """临近下一个交易时段不再启动夜间补数，留给独立 quotes 的盘中兜底。"""
+    return cal.session_open(cal.next_trading_day(day)) - timedelta(hours=2)
 
 
 class Scheduler:
@@ -140,18 +179,32 @@ class Scheduler:
         now = self._now()
         d = now.astimezone(ET).date()
         results = []
-        for name, at in day_plan(d, self.ctx.settings.schedule, self.ctx.calendar):
+        plan = execution_plan(d, self.ctx.settings.schedule, self.ctx.calendar)
+        # 重启后先处理已到点的交易主链，过期的市场展示补数不能排在执行任务前。
+        for name, trade_day, at in sorted(
+            plan, key=lambda item: (item[0] == "market_data", item[2])
+        ):
             if self.stop_requested or now < at:
                 continue
+            d = trade_day
             retry = False
             if name == "market_data":
+                key = self.ctx.settings.massive_api_key
+                if (
+                    key is None
+                    or not key.get_secret_value().strip()
+                    or now >= market_deadline(d, self.ctx.calendar)
+                ):
+                    continue
                 with Session(self.ctx.engine) as s:
                     row = s.scalar(select(JobRun).where(
                         JobRun.mode == self.ctx.mode, JobRun.job_name == name,
                         JobRun.trade_date == d,
                     ))  # fmt: skip
                     if row is not None and row.status == "failed":
-                        retry = market_retry_due(s, row, now)
+                        retry = market_retry_due(
+                            s, row, now, schedule=self.ctx.settings.schedule, cal=self.ctx.calendar
+                        )
                         if not retry:
                             continue
             if (name, d) in self._attempted and not retry:
@@ -168,11 +221,19 @@ class Scheduler:
                 self.ctx.engine,
                 name,
                 d,
-                lambda fn=fn: fn(self.ctx, d),  # type: ignore[misc]
+                lambda fn=fn, day=d: fn(self.ctx, day),  # type: ignore[misc]
                 self.ctx.notifier,
                 mode=self.ctx.mode,
                 quiet=QUIET,
-                retry_failed=(lambda s, row: market_retry_due(s, row, self._now()))
+                retry_failed=(
+                    lambda s, row: market_retry_due(
+                        s,
+                        row,
+                        self._now(),
+                        schedule=self.ctx.settings.schedule,
+                        cal=self.ctx.calendar,
+                    )
+                )
                 if retry
                 else None,
             )

@@ -101,9 +101,8 @@ class MassiveClient:
             raise MassiveAuthError("Massive 拒绝访问（401），请检查 MASSIVE_API_KEY")
         if status == 403:
             # 免费档请求超出套餐的时间范围（如当日数据尚未就绪、2 年以前）时返回 403，不是 key 无效
-            msg = body.get("message") if isinstance(body, dict) else None
             raise DataUnavailableError(
-                f"Massive 403：{str(msg)[:120] if msg else '套餐不含该数据'}"
+                "Massive HTTP 403：套餐不含请求的时间范围；Basic 当日日线需美东跨日后读取"
             )
         return status, body
 

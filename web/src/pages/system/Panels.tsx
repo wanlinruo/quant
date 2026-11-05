@@ -32,6 +32,7 @@ export function Timeline({ rows }: { rows: SysTodayOut[] }) {
           <span className="num t">{etParts(r.planned_at).time}</span>
           <div>
             <b>{r.job}</b> <span className="muted">{STATUS_TEXT[r.status] ?? r.status}{r.duration_s != null ? ` · ${duration(r.duration_s)}` : ""}</span>
+            {r.trade_date && r.trade_date !== etParts(r.planned_at).date && <span className="muted sm"> · 数据日 {r.trade_date}</span>}
             {r.error && <div className="err-line">{r.error}</div>}
           </div>
         </li>
