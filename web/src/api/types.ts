@@ -1093,6 +1093,7 @@ export interface SysSourceOut {
 export interface SysTodayOut {
   job: string;
   planned_at: string;
+  trade_date?: string | null;
   status: string;
   duration_s?: number | null;
   error?: string | null;

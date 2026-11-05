@@ -104,7 +104,7 @@ def test_job_stops_backfill_on_rate_limit(tmp_path: Path) -> None:
     c = FakeClient(limit_after=2)
     summary = run(tmp_path, c)
     assert len(c.days) == 2 and c.details == []
-    assert "限流" in summary
+    assert "429" in summary
     assert snapshot(tmp_path)["as_of"] == TODAY.isoformat()
 
 
@@ -158,7 +158,7 @@ def test_scheduler_includes_market_data() -> None:
     from quant.jobs.scheduler import day_plan
 
     plan = dict(day_plan(TODAY, ScheduleSettings(), CAL))
-    assert plan["market_data"] == datetime(2026, 10, 30, 20, 30, tzinfo=ET)
+    assert plan["market_data"] == datetime(2026, 10, 31, 0, 10, tzinfo=ET)
     assert "market_data" in JOBS and "market_data" in JOB_FUNCS
 
 
@@ -343,7 +343,7 @@ def test_required_current_day_pending_keeps_readable_snapshot(tmp_path: Path, fa
 def test_current_day_ready_but_optional_history_limited_still_succeeds(tmp_path: Path) -> None:
     summary = run_market_data(FakeClient(limit_after=1), tmp_path, TODAY, CAL, SETTINGS, set(),
                               fetch_text=lambda url: GICS_CSV, require_current=True)  # fmt: skip
-    assert "限流" in summary
+    assert "429" in summary
     assert snapshot(tmp_path)["stale"] is False
 
 

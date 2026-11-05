@@ -32,7 +32,7 @@ from quant.engine.executor import ET
 from quant.jobs import daily
 from quant.jobs.daily import JobContext, daily_data, daily_report, daily_signal
 from quant.jobs.runner import JobStopped, job_lock, job_status, run_job
-from quant.jobs.scheduler import Scheduler, day_plan
+from quant.jobs.scheduler import Scheduler, day_plan, execution_plan
 from quant.market.job import MarketDataPending
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -58,7 +58,7 @@ def test_day_plan_regular() -> None:
         "daily_report": et(DAY, 9, 50),
         "daily_data": et(DAY, 16, 30),
         "daily_signal": et(DAY, 17, 0),
-        "market_data": et(DAY, 20, 30),
+        "market_data": et(NEXT, 0, 10),
         "market_extras": et(DAY, 21, 0),
         "stock_data": et(DAY, 21, 15),
     }
@@ -80,6 +80,25 @@ def test_day_plan_half_day_and_holiday() -> None:
 def test_day_plan_execute_not_before_open() -> None:
     plan = dict(day_plan(DAY, ScheduleSettings(daily_execute="09:00"), get_calendar()))
     assert plan["daily_execute"] == et(DAY, 9, 30)
+
+
+@pytest.mark.parametrize("target", [date(2026, 10, 28), date(2026, 11, 25), date(2026, 11, 27)])
+def test_market_execution_next_calendar_day_even_on_holiday_or_saturday(target: date) -> None:
+    following = target + timedelta(days=1)
+    cal = get_calendar()
+    plan = execution_plan(following, ScheduleSettings(), cal)
+    market = [(name, day, at) for name, day, at in plan if name == "market_data"]
+    assert market == [("market_data", target, et(following, 0, 10))]
+    assert dict(day_plan(target, ScheduleSettings(), cal))["market_data"] == et(following, 0, 10)
+    if not cal.is_trading_day(following):
+        assert len(plan) == 1  # 周六/假期只补上一交易日日线，不重跑交易任务
+
+
+def test_market_midnight_follows_dst() -> None:
+    cal = get_calendar()
+    for day, utc_hour in [(date(2026, 10, 28), 4), (date(2026, 11, 4), 5)]:
+        at = dict(day_plan(day, ScheduleSettings(), cal))["market_data"]
+        assert at.astimezone(UTC).hour == utc_hour
 
 
 # ---- 需要数据库 ----
@@ -330,7 +349,8 @@ def market_clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
     """数据库任务时间也使用同一时钟，覆盖跨重启的持久化重试间隔。"""
     from quant.jobs import runner
 
-    clock = Clock(et(DAY, 20, 30).astimezone(UTC))
+    clock = Clock(et(NEXT, 0, 10).astimezone(UTC))
+    monkeypatch.setenv("QUANT_MASSIVE_API_KEY", "test-only")
 
     class FixedDatetime(datetime):
         @classmethod
@@ -387,6 +407,9 @@ def test_market_retries_bounded_without_blocking_other_jobs(
     market_clock: Clock,
 ) -> None:
     ctx = make_ctx(engine, tmp_path, clock=market_clock)
+    ctx.settings = ctx.settings.model_copy(
+        update={"schedule": ctx.settings.schedule.model_copy(update={"market_extras": "00:30"})}
+    )
     extras: list[date] = []
 
     def pending(ctx: JobContext, d: date) -> str:
@@ -400,9 +423,9 @@ def test_market_retries_bounded_without_blocking_other_jobs(
     monkeypatch.setitem(daily.JOB_FUNCS, "market_extras", extra)
     sched = Scheduler(ctx)
     for i in range(4):
-        market_clock.t = et(DAY, 20, 30).astimezone(UTC) + timedelta(minutes=15 * i)
+        market_clock.t = et(NEXT, 0, 10).astimezone(UTC) + timedelta(minutes=15 * i)
         assert ("market_data", "failed") in sched.tick()
-    assert extras == [DAY]  # 21:00 的其他任务未被等待重试阻塞
+    assert extras == [NEXT]  # 其他到点任务未被等待重试阻塞
     market_clock.t += timedelta(minutes=15)
     assert not any(n == "market_data" for n, _ in Scheduler(ctx).tick())
     with Session(engine) as s:
@@ -465,7 +488,7 @@ def test_market_retry_respects_half_day_and_weekend(
 ) -> None:
     ctx = make_ctx(engine, tmp_path, clock=market_clock)
     half = date(2026, 11, 27)
-    market_clock.t = et(half, 17, 30).astimezone(UTC)
+    market_clock.t = et(half + timedelta(days=1), 0, 10).astimezone(UTC)
 
     def pending(ctx: JobContext, d: date) -> str:
         raise MarketDataPending("暂未就绪")
@@ -475,8 +498,69 @@ def test_market_retry_respects_half_day_and_weekend(
     assert ("market_data", "failed") in sched.tick()
     market_clock.t += timedelta(minutes=15)
     assert ("market_data", "failed") in Scheduler(ctx).tick()
-    market_clock.t = et(date(2026, 11, 28), 17, 45).astimezone(UTC)
+    market_clock.t = et(date(2026, 11, 29), 0, 10).astimezone(UTC)
     assert Scheduler(ctx).tick() == []
+
+
+@pytest.mark.db
+@needs_db
+def test_market_legacy_evening_failures_do_not_exhaust_next_day_window(
+    engine: Engine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    market_clock: Clock,
+) -> None:
+    ctx = make_ctx(engine, tmp_path, clock=market_clock)
+
+    def pending() -> str:
+        raise MarketDataPending("旧版本过早请求")
+
+    for i in range(4):
+        market_clock.t = et(DAY, 20, 30).astimezone(UTC) + timedelta(minutes=i * 15)
+        assert (
+            run_job(
+                engine, "market_data", DAY, pending, ctx.notifier, mode=ctx.mode, rerun_failed=True
+            )
+            == "failed"
+        )
+    market_clock.t = et(NEXT, 0, 9).astimezone(UTC)
+    assert Scheduler(ctx).tick() == []
+    calls: list[date] = []
+
+    def recovered(ctx: JobContext, day: date) -> str:
+        calls.append(day)
+        return "目标日已就绪"
+
+    monkeypatch.setitem(daily.JOB_FUNCS, "market_data", recovered)
+    market_clock.t += timedelta(minutes=1)
+    assert Scheduler(ctx).tick() == [("market_data", "success")]
+    assert calls == [DAY]
+    with Session(engine) as s:
+        rows = s.scalars(select(JobAttempt).where(JobAttempt.job_name == "market_data")
+                         .order_by(JobAttempt.attempt)).all()  # fmt: skip
+        assert [r.result for r in rows] == ["failed"] * 4 + ["success"]
+
+
+@pytest.mark.db
+@needs_db
+def test_market_does_not_run_in_evening_or_delay_morning_execution(
+    engine: Engine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    market_clock: Clock,
+) -> None:
+    ctx = make_ctx(engine, tmp_path, clock=market_clock)
+
+    def forbidden(ctx: JobContext, day: date) -> str:
+        pytest.fail("不可在免费源时间窗口外或临近交易时段启动市场补数")
+
+    monkeypatch.setitem(daily.JOB_FUNCS, "market_data", forbidden)
+    market_clock.t = et(DAY, 20, 30).astimezone(UTC)
+    assert not any(n == "market_data" for n, _ in Scheduler(ctx).tick())
+    market_clock.t = et(NEXT, 9, 49).astimezone(UTC)
+    assert Scheduler(ctx).tick() == []
+    market_clock.t += timedelta(minutes=1)
+    assert Scheduler(ctx).tick() == [("daily_execute", "success"), ("daily_report", "success")]
 
 
 # ---- 组合策略接入（#47 第二份计划任务 5） ----

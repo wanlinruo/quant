@@ -50,8 +50,8 @@ class ScheduleSettings(_Section):
     daily_data: str = "16:30"
     daily_signal: str = "17:00"
     daily_execute: str = "09:50"
-    market_data: str = "20:30"  # 首页市场看板（#69）：Massive 收盘后数据
-    market_extras: str = "21:00"  # 首页宏观、新闻、财经日历（#69 第 2 批），在 market_data 之后
+    market_data: str = "00:10"  # 目标交易日的次一自然日；Basic 当日 REST 数据需美东跨日
+    market_extras: str = "21:00"  # 当晚首页宏观、新闻、财经日历
     stock_data: str = "21:15"  # 个股页新闻与财务指标（#70 第 3 批），约 12 分钟
 
     @field_validator(

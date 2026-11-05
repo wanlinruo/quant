@@ -1058,6 +1058,7 @@ class SysGridOut(BaseModel):
 class SysTodayOut(BaseModel):
     job: str
     planned_at: datetime
+    trade_date: date | None = None
     status: str
     duration_s: float | None = None
     error: str | None = None
