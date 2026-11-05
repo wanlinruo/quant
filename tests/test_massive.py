@@ -116,6 +116,13 @@ def test_403_is_not_auth_error() -> None:
     with pytest.raises(DataUnavailableError) as e:
         client(FakeFetch((403, body))).grouped_daily(date(2026, 10, 30))
     assert not isinstance(e.value, MassiveAuthError | MassiveRateLimited)
+    assert "HTTP 403" in str(e.value) and "美东跨日" in str(e.value)
+
+
+def test_403_does_not_echo_response_secrets() -> None:
+    with pytest.raises(DataUnavailableError) as err:
+        client(FakeFetch((403, {"message": "mk-secret-1"}))).grouped_daily(date(2026, 10, 30))
+    assert "mk-secret-1" not in str(err.value)
 
 
 def test_splits() -> None:

@@ -52,7 +52,7 @@ from quant.db.models import (
     SystemFlag,
 )
 from quant.jobs.daily import JOBS
-from quant.jobs.scheduler import day_plan
+from quant.jobs.scheduler import day_plan, execution_plan
 
 ET = ZoneInfo("America/New_York")
 GRID_DAYS = 30
@@ -153,24 +153,45 @@ def _grid(
 
 
 def _timeline(
-    grid: SysGridOut, s: Session, mode: str, today: date, cal: TradingCalendar, settings: Settings
+    grid: SysGridOut,
+    s: Session,
+    mode: str,
+    today: date,
+    cal: TradingCalendar,
+    settings: Settings,
+    now: datetime,
 ) -> list[SysTodayOut]:
+    plan = execution_plan(today, settings.schedule, cal)
+    dates = {day for _, day, _ in plan}
     runs = {
-        r.job_name: r
-        for r in s.scalars(select(JobRun).where(JobRun.mode == mode, JobRun.trade_date == today))
+        (r.job_name, r.trade_date): r
+        for r in s.scalars(select(JobRun).where(JobRun.mode == mode, JobRun.trade_date.in_(dates)))
     }
-    cell = {row.job: row.cells[-1] for row in grid.jobs}
+    cells = {(row.job, c.date): c for row in grid.jobs for c in row.cells}
     out = []
-    for job, at in day_plan(today, settings.schedule, cal):
-        r = runs.get(job)
-        c = cell.get(job)
+    for job, day, at in plan:
+        r = runs.get((job, day))
+        c = cells.get((job, day))
+        status = c.status if c else "pending"
+        error = _first_line(r.error) if r else None
+        duration = c.duration_s if c else None
+        if (
+            job == "market_data"
+            and r
+            and r.status == "failed"
+            and r.started_at < at
+            and (r.error or "").startswith("MarketDataPending:")
+        ):
+            status = "pending" if now < at + GRACE else "missing"
+            error, duration = None, None
         out.append(
             SysTodayOut(
                 job=job,
                 planned_at=at,
-                status=c.status if c else "pending",
-                duration_s=c.duration_s if c else None,
-                error=_first_line(r.error) if r else None,
+                trade_date=day,
+                status=status,
+                duration_s=duration,
+                error=error,
             )
         )
     return out
@@ -406,12 +427,13 @@ def _cards_and_banner(
 ) -> tuple[list[SysCardOut], SysBannerOut]:
     items: list[SysItemOut] = []
     for t in timeline:
+        trade_date = t.trade_date or today
         if t.status == "failed":
             items.append(
                 SysItemOut(
                     level="error",
-                    text=f"{t.job} {today} 失败：{t.error or ''}",
-                    command=f"quant job {t.job} --date {today} --rerun-failed",
+                    text=f"{t.job} {trade_date} 失败：{t.error or ''}",
+                    command=f"quant job {t.job} --date {trade_date} --rerun-failed",
                 )
             )
         elif t.status == "missing":
@@ -531,8 +553,8 @@ def overview(
         )
     days = cal.trading_days(today - timedelta(days=60), today)[-GRID_DAYS:]
     grid = _grid(s, mode, days, cal, settings, now)
-    timeline = _timeline(grid, s, mode, today, cal, settings)
-    cards, banner = _cards_and_banner(s, mode, settings, grid, timeline, today, sources, now)
+    timeline = _timeline(grid, s, mode, d0, cal, settings, now)
+    cards, banner = _cards_and_banner(s, mode, settings, grid, timeline, d0, sources, now)
     res = resources(s, now)
     if res.items:
         banner.items = [*banner.items, *res.items]

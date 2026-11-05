@@ -144,6 +144,33 @@ def test_today_timeline(client: TestClient) -> None:
         t["daily_signal"]["status"] == "failed" and t["daily_signal"]["error"] == "数据校验未通过"
     )
     assert t["market_data"]["status"] == "na"  # 该账户从未运行过这个任务
+    assert t["market_data"]["trade_date"] == "2026-10-27"
+    assert t["market_data"]["planned_at"].startswith("2026-10-28T00:10")
+
+
+@needs_db
+def test_midnight_market_timeline_and_command_keep_target_day(
+    client: TestClient,
+    db_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _at(monkeypatch, datetime(2026, 10, 29, 0, 12, tzinfo=ET))
+    engine = create_engine(db_url)
+    started = datetime(2026, 10, 29, 0, 10, tzinfo=ET)
+    with Session(engine) as s, s.begin():
+        s.add(JobRun(mode="paper", job_name="market_data", trade_date=SEED_LAST_DAY,
+                     status="failed", started_at=started,
+                     finished_at=started + timedelta(seconds=1),
+                     error="MarketDataPending: HTTP 403"))  # fmt: skip
+    engine.dispose()
+    d = ov(client)
+    t = next(x for x in d["timeline"] if x["job"] == "market_data")
+    assert t["trade_date"] == "2026-10-28" and t["status"] == "failed"
+    assert t["planned_at"].startswith("2026-10-29T00:10")
+    assert any(
+        x["command"] == "quant job market_data --date 2026-10-28 --rerun-failed"
+        for x in d["banner"]["items"]
+    )
 
 
 @needs_db

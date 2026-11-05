@@ -54,6 +54,16 @@ const SYS = {
 const BASE = { "/api/system/overview": [200, SYS], "/api/market/data-status": [200, []] } as const;
 
 describe("SystemPage", () => {
+  it("labels the target trading day for a market task after midnight", async () => {
+    mockApi({ ...BASE, "/api/system/overview": [200, { ...SYS, timeline: [{
+      job: "market_data", trade_date: "2026-10-27", planned_at: "2026-10-28T00:10:00-04:00",
+      status: "pending", duration_s: null, error: null,
+    }] }] });
+    renderPage(<SystemPage />, "/system");
+    const timeline = await screen.findByTestId("timeline");
+    expect(within(timeline).getByText(/数据日 2026-10-27/)).toBeInTheDocument();
+    expect(within(timeline).getByText("00:10")).toBeInTheDocument();
+  });
   it("banner shows error with command and kill switch stays read-only", async () => {
     mockApi(BASE);
     renderPage(<SystemPage />, "/system");

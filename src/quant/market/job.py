@@ -73,7 +73,7 @@ def run_market_data(
             raise
         except DataUnavailableError as e:
             stopped = True
-            notes.append(f"限流或故障，停止本轮（{type(e).__name__}）")
+            notes.append(f"数据源请求停止（{type(e).__name__}: {e}）")
             return False
         if df.empty:
             if day != today:
@@ -94,7 +94,7 @@ def run_market_data(
                 raise
             except DataUnavailableError as e:
                 stopped = True
-                notes.append(f"拆股核对停在 {d}（{type(e).__name__}）")
+                notes.append(f"拆股核对停在 {d}（{type(e).__name__}: {e}）")
                 return False
             for sp in found:
                 if sp.symbol in keep and store.apply_split(sp.symbol, sp.execution_date, sp.factor):
