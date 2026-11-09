@@ -129,9 +129,9 @@ class Collector:
                     pct, used, limit = _container_stats(stats)
                     io = (stats.get("blkio_stats") or {}).get("io_service_bytes_recursive")
                     if isinstance(io, list) and io:
-                        for op in ("Read", "Write"):
-                            extra[f"io_{op.lower()}_bytes"] = sum(
-                                r.get("value", 0) for r in io if r.get("op") == op
+                        for op in ("read", "write"):
+                            extra[f"io_{op}_bytes"] = sum(
+                                r.get("value", 0) for r in io if str(r.get("op", "")).lower() == op
                             )
                 info = self.docker.get(f"/containers/{c['Id']}/json")
                 extra["started_at"] = (info.get("State") or {}).get("StartedAt")
