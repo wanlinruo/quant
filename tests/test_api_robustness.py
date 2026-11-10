@@ -55,10 +55,17 @@ def client(db_url: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iter
 
 
 def _seed(
-    db_url: str, *, strategy: str = "combo", leave_queued: int = 0, fail_one: bool = False
+    db_url: str,
+    *,
+    strategy: str = "combo",
+    params: dict[str, Any] | None = None,
+    leave_queued: int = 0,
+    fail_one: bool = False,
 ) -> int:
     eng = create_engine(db_url)
-    params = {"momentum_weight": 0.4, "swing_weight": 0.6}
+    params = params or (
+        {"momentum_weight": 0.4, "swing_weight": 0.6} if strategy == "combo" else {}
+    )
     with Session(eng) as s, s.begin():
         parent = BacktestRun(
             strategy=strategy,
@@ -149,6 +156,20 @@ def test_pending_and_failed(client: TestClient, db_url: str) -> None:
     assert d["walk_forward"] is None or d["walk_forward"]["segments"] == []
     assert d["neighbors_verdict"] is None and "不完整" in d["neighbors_note"]
     assert any(r["status"] == "failed" for r in d["neighbors"])
+
+
+def test_boundary_neighbors_are_explained_and_not_counted(client: TestClient, db_url: str) -> None:
+    pid = _seed(
+        db_url,
+        strategy="etf_momentum",
+        params={"universe": ["SPY", "QQQ"], "top_k": 1},
+    )
+    d = get(client, pid)
+    assert len(d["neighbors"]) == 5
+    assert "参数越界未运行（不计入判定）" in d["neighbors_note"]
+    assert "动量回看天数 126 · 持有只数 0" in d["neighbors_note"]
+    skipped = [c for c in d["grid"]["cells"] if c["status"] == "skipped"]
+    assert skipped and all(c["error"] == "参数越界，未运行" for c in skipped)
 
 
 def test_overview_neighbor_check_uses_children(client: TestClient, db_url: str) -> None:

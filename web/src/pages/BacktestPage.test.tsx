@@ -420,6 +420,7 @@ describe("BacktestPage", () => {
     const cells = [0, 1, 2].flatMap((y) => [0, 1, 2].map((x) => ({
       x, y, label: `c${x}${y}`, run_id: 200 + x + 3 * y, status: x === 2 && y === 0 ? "skipped" : "done",
       metrics: x === 2 && y === 0 ? null : m(0.1 + x * 0.02, 1 + x * 0.1, -0.2), center: x === 1 && y === 1,
+      error: x === 2 && y === 0 ? "参数越界，未运行" : null,
     })));
     const ROB = {
       status: "pending", note: "", progress: { total: 17, done: 15, failed: 1, queued: 1, running: 0 },
@@ -440,6 +441,7 @@ describe("BacktestPage", () => {
     expect(grid.querySelectorAll(".rb-cell")).toHaveLength(9);
     expect(grid.querySelector(".rb-cell.center")).toHaveTextContent("1.10");
     expect(grid.querySelector(".rb-cell.skipped")).toHaveTextContent("—");
+    expect(grid.querySelector(".rb-cell.skipped")).toHaveAttribute("title", "c20：参数越界，未运行");
     expect(within(grid).getByRole("link", { name: /c00，打开回测 #200/ })).toHaveAttribute("href", "/backtest/200");
     expect(screen.getByText(/15 \/ 17/)).toBeInTheDocument();
     expect(screen.getByText("不完整：1 项未完成或失败")).toBeInTheDocument();

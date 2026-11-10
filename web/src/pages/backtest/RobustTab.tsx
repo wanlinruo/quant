@@ -27,7 +27,7 @@ function Cell({ c }: { c: RbCellOut }) {
       ) : c.status === "skipped" ? <span className="muted">—</span> : <span className={`pill ${STATUS_PILL[c.status] ?? "hold"}`} title={c.error ?? undefined}>{STATUS_TEXT[c.status] ?? c.status}</span>}
     </>
   );
-  const props = { className: `rb-cell ${c.status}${c.center ? " center" : ""}`, style: { background: heat(m?.sharpe) }, title: c.label };
+  const props = { className: `rb-cell ${c.status}${c.center ? " center" : ""}`, style: { background: heat(m?.sharpe) }, title: c.error ? `${c.label}：${c.error}` : c.label };
   return c.run_id ? <a {...props} href={`/backtest/${c.run_id}`} aria-label={`${c.label}，打开回测 #${c.run_id}`}>{body}</a> : <div {...props}>{body}</div>;
 }
 
