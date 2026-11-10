@@ -245,9 +245,9 @@ def test_monitor_records_block_io_without_dumping_docker_payload(tmp_path: Path)
             if path.endswith("/stats?stream=false"):
                 doc["blkio_stats"] = {
                     "io_service_bytes_recursive": [
-                        {"op": "Read", "value": 10},
+                        {"op": "read", "value": 10},  # Docker Engine 29 uses lowercase
                         {"op": "Read", "value": 20},
-                        {"op": "Write", "value": 40},
+                        {"op": "write", "value": 40},
                         {"op": "Total", "value": 70},
                     ]
                 }
