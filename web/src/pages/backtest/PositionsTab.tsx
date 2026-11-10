@@ -77,7 +77,7 @@ export function PositionsTab({ runId }: { runId: number }) {
                     <div className="subpanel-h"><b>持有时间最长</b><span className="muted sm">单笔交易</span></div>
                     <table className="dt compact">
                       <thead><tr><th>代码</th><th>子仓</th><th>开仓</th><th>平仓</th><th className="r">天数</th></tr></thead>
-                      <tbody>{(d.longest ?? []).map((t) => <tr key={`${t.symbol}-${t.open_date}`}><td>{t.symbol}</td><td className="muted">{SLEEVE_TEXT[t.sleeve] ?? t.sleeve}</td><td>{t.open_date}</td><td>{t.close_date ?? "持有中"}</td><td className="r num">{t.days} 天</td></tr>)}</tbody>
+                      <tbody>{(d.longest ?? []).map((t, i) => <tr key={`${t.symbol}-${t.sleeve}-${t.open_date}-${t.close_date ?? "open"}-${i}`}><td>{t.symbol}</td><td className="muted">{SLEEVE_TEXT[t.sleeve] ?? t.sleeve}</td><td>{t.open_date}</td><td>{t.close_date ?? "持有中"}</td><td className="r num">{t.days} 天</td></tr>)}</tbody>
                     </table>
                   </div>
                 </Cell>
