@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, load_only
 
 from quant.api.schemas import (
     SysAttemptOut,
@@ -426,21 +426,39 @@ def _events(s: Session, mode: str, now: datetime) -> list[SysEventOut]:
 
 
 def _queue(s: Session) -> SysQueueOut:
-    runs = s.scalars(select(BacktestRun)).all()
-    counts: dict[str, int] = defaultdict(int)
-    for r in runs:
-        counts[r.status] += 1
-    cur = next((r for r in sorted(runs, key=lambda r: r.id) if r.status == "running"), None)
-    done = [r.finished_at for r in runs if r.status == "done" and r.finished_at]
+    counts = s.scalar(
+        select(
+            func.jsonb_build_object(
+                "queued",
+                func.count().filter(BacktestRun.status == "queued"),
+                "running",
+                func.count().filter(BacktestRun.status == "running"),
+                "done",
+                func.count().filter(BacktestRun.status == "done"),
+                "failed",
+                func.count().filter(BacktestRun.status == "failed"),
+            )
+        )
+    )
+    cur = s.scalars(
+        select(BacktestRun)
+        .options(load_only(BacktestRun.id, BacktestRun.strategy, BacktestRun.started_at))
+        .where(BacktestRun.status == "running")
+        .order_by(BacktestRun.id)
+        .limit(1)
+    ).first()
+    last_finished = s.scalar(
+        select(func.max(BacktestRun.finished_at)).where(BacktestRun.status == "done")
+    )
     return SysQueueOut(
-        queued=counts["queued"],
-        running=counts["running"],
-        done=counts["done"],
-        failed=counts["failed"],
+        queued=(counts or {}).get("queued", 0),
+        running=(counts or {}).get("running", 0),
+        done=(counts or {}).get("done", 0),
+        failed=(counts or {}).get("failed", 0),
         current_id=cur.id if cur else None,
         current_strategy=cur.strategy if cur else None,
         current_started=cur.started_at if cur else None,
-        last_finished=max(done) if done else None,
+        last_finished=last_finished,
     )
 
 

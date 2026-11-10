@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 
@@ -211,8 +210,21 @@ def backtest_equity(s: Session, run_ids: Sequence[int]) -> list[EquityPoint]:
 
 
 def queue_status(s: Session) -> QueueStatus:
-    counts = Counter(s.scalars(select(BacktestRun.status)).all())
-    return QueueStatus(**{k: v for k, v in counts.items() if k in QueueStatus.model_fields})
+    counts = s.scalar(
+        select(
+            func.jsonb_build_object(
+                "queued",
+                func.count().filter(BacktestRun.status == "queued"),
+                "running",
+                func.count().filter(BacktestRun.status == "running"),
+                "done",
+                func.count().filter(BacktestRun.status == "done"),
+                "failed",
+                func.count().filter(BacktestRun.status == "failed"),
+            )
+        )
+    )
+    return QueueStatus(**(counts or {}))
 
 
 # ---- 系统 ----
