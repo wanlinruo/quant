@@ -18,7 +18,7 @@ function heat(sharpe: number | null | undefined): string {
 function Cell({ c }: { c: RbCellOut }) {
   const m = c.metrics;
   return (
-    <div className={`rb-cell ${c.status}${c.center ? " center" : ""}`} style={{ background: heat(m?.sharpe) }} title={c.label}>
+    <div className={`rb-cell ${c.status}${c.center ? " center" : ""}`} style={{ background: heat(m?.sharpe) }} title={c.error ? `${c.label}：${c.error}` : c.label}>
       {m ? (
         <>
           <b className="num">{num(m.sharpe, 2)}</b>

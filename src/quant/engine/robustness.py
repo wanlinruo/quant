@@ -179,6 +179,28 @@ def plan(strategy: str, params: Mapping[str, Any], start: date, end: date) -> li
     return out
 
 
+def skipped_neighbor_labels(strategy: str, params: Mapping[str, Any]) -> list[str]:
+    """因参数边界未生成的相邻设置；用于解释判定为何只包含部分相邻项。"""
+    if strategy not in AXES:
+        return []
+    ax, ay, extras = AXES[strategy]
+    base = {k: v for k, v in params.items() if not k.startswith("_")}
+    full = {**DEFAULTS[strategy], **base}
+    bx, by = _get(base, DEFAULTS[strategy], ax.path), _get(base, DEFAULTS[strategy], ay.path)
+    skipped: list[str] = []
+    for i, j in ((0, 1), (2, 1), (1, 0), (1, 2)):
+        vx, vy = _value(bx, ax.step, i - 1), _value(by, ay.step, j - 1)
+        if not (ax.valid(vx, full) and ay.valid(vy, full)):
+            skipped.append(f"{ax.label} {ax.fmt.format(vx)} · {ay.label} {ay.fmt.format(vy)}")
+    for extra in extras:
+        current = _get(base, DEFAULTS[strategy], extra.path)
+        for direction in (-1, 1):
+            value = _value(current, extra.step, direction)
+            if not extra.valid(value, full):
+                skipped.append(f"{extra.label} {extra.fmt.format(value)}")
+    return skipped
+
+
 def scale_costs(raw: Mapping[str, str], mult: float) -> dict[str, str]:
     """按倍数放大费率、最低收费与滑点；max_fee_pct 是上限，不变。"""
     out = {}
