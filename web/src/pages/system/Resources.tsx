@@ -7,7 +7,8 @@ export const NO_SAMPLES = "暂无资源采样（monitor 未运行）";
 const GB = 1024 ** 3;
 
 export function ResourceCard({ c }: { c: SysResourceOut }) {
-  const pts = (c.series ?? []).filter((v): v is number => v != null);
+  const pts = c.series ?? [];
+  const sampleCount = pts.filter((v) => v != null).length;
   return (
     <div className={`sys-card ${c.level ?? "info"}`}>
       <Stat
@@ -16,7 +17,7 @@ export function ResourceCard({ c }: { c: SysResourceOut }) {
         sub={
           <span className="res-sub">
             <span>{c.text || (c.key === "latency" ? "" : "24 小时")}</span>
-            {pts.length > 1 && <Sparkline values={pts} width={110} height={20} />}
+            {sampleCount > 1 && <Sparkline values={pts} width={110} height={20} />}
           </span>
         }
       />
