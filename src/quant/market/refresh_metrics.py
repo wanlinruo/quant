@@ -12,6 +12,8 @@ from pathlib import Path
 from quant.data.quota import atomic_write_text
 from quant.market.session import ET
 
+SNAPSHOT_MTIME_TOLERANCE_S = 1.0
+
 
 def record_refresh(
     data_dir: Path,
@@ -39,9 +41,11 @@ def record_refresh(
         doc = {}
     elapsed = time.monotonic() - started
     today = datetime.now(UTC).astimezone(ET).date().isoformat()
+    started_at = time.time() - elapsed
     updated = bool(
         snap.exists()
-        and snap.stat().st_mtime >= time.time() - elapsed
+        # 墙上时间、单调时钟与文件系统时间戳存在亚秒级偏差；容差只影响同日快照。
+        and snap.stat().st_mtime >= started_at - SNAPSHOT_MTIME_TOLERANCE_S
         and doc.get("as_of") == today
     )
     rows.append(
