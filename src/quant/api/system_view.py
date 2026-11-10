@@ -35,7 +35,9 @@ from quant.core.calendar import TradingCalendar
 from quant.core.settings import Settings
 from quant.data.events import load_fomc_dates
 from quant.data.market_store import (
+    ETF_SET,
     calendar_path,
+    load_gics,
     macro_path,
     market_dir,
     news_path,
@@ -53,10 +55,12 @@ from quant.db.models import (
 )
 from quant.jobs.daily import JOBS
 from quant.jobs.scheduler import day_plan, execution_plan
+from quant.market.stock_job import METRICS_MAX_AGE
 
 ET = ZoneInfo("America/New_York")
 GRID_DAYS = 30
 STALE_DAYS = 2
+SOURCE_MIN_COVERAGE = 0.9
 WEEK = "一二三四五六日"
 NO_DB = "未配置数据库（QUANT_DATABASE_URL），只能显示日历与本地数据文件"
 RECONCILE_TEXT = {"success": "已对账", "running": "执行中"}
@@ -243,18 +247,43 @@ def _sources(settings: Settings, cal: TradingCalendar, today: date) -> list[SysS
             )
         out.append(SysSourceOut(key=key, label=label, status=state(t), updated=t, detail=detail))
     stocks = market_dir(data_dir) / "stocks"
-    docs = [d for p in stocks.glob("*.json") if (d := _file_doc(p))] if stocks.is_dir() else []
-    times = [t for d in docs if (t := _stamp(d.get("news_updated")))]
-    with_metrics = sum(1 for d in docs if d.get("metrics_updated"))
+    docs = (
+        {p.stem: d for p in stocks.glob("*.json") if (d := _file_doc(p))} if stocks.is_dir() else {}
+    )
+    gics = load_gics(data_dir)
+    expected = ({s for s in gics.members if s not in ETF_SET} if gics else set()) | set(docs)
+    total = len(expected)
+    times = [t for d in docs.values() if (t := _stamp(d.get("news_updated")))]
+    news_fresh = sum(
+        1
+        for s in expected
+        if (t := _stamp(docs.get(s, {}).get("news_updated"))) and state(t) == "ok"
+    )
+    metrics_cutoff = today - timedelta(days=METRICS_MAX_AGE)
+    metrics_fresh = sum(
+        1
+        for s in expected
+        if (v := docs.get(s, {}).get("metrics_updated"))
+        and str(v)[:10] >= metrics_cutoff.isoformat()
+    )
     newest = max(times) if times else None
+    news_coverage = news_fresh / total if total else 0.0
+    metrics_coverage = metrics_fresh / total if total else 0.0
+    stock_status = state(newest)
+    if stock_status == "ok" and min(news_coverage, metrics_coverage) < SOURCE_MIN_COVERAGE:
+        stock_status = "warn"
     out.append(
         SysSourceOut(
             key="stocks",
             label="个股新闻与财务（Finnhub）",
-            status=state(newest),
+            status=stock_status,
             updated=newest,
-            detail=f"{len(docs)} 只，财务指标 {with_metrics} 只" if docs else "",
-            progress=with_metrics / len(docs) if docs else None,
+            detail=(
+                f"新闻新鲜 {news_fresh}/{total} 只，财务指标 {metrics_fresh}/{total} 只"
+                if total
+                else ""
+            ),
+            progress=min(news_coverage, metrics_coverage) if total else None,
         )
     )
     return out
@@ -452,6 +481,8 @@ def _cards_and_banner(
             items.append(
                 SysItemOut(level="warn", text=f"{src.label} 超过 {STALE_DAYS} 个交易日未更新")
             )
+        elif src.status == "warn":
+            items.append(SysItemOut(level="warn", text=f"{src.label} 覆盖不足：{src.detail}"))
     week = now - timedelta(days=7)
     failed_bt = s.scalars(
         select(BacktestRun).where(BacktestRun.status == "failed", BacktestRun.finished_at >= week)

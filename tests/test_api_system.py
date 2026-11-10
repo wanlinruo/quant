@@ -1,5 +1,6 @@
 """系统页概览（#71 A 批）：测试库 + 构造的任务记录与数据文件。"""
 
+import json
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -201,6 +202,38 @@ def test_cards_risk_events_queue_upcoming(client: TestClient) -> None:
 def test_sources_pending_without_files(client: TestClient) -> None:
     src = {s["key"]: s for s in ov(client)["sources"]}
     assert src["market"]["status"] == "pending" and src["news"]["status"] == "pending"
+
+
+@needs_db
+def test_stock_source_uses_dates_and_expected_coverage(client: TestClient, tmp_path: Path) -> None:
+    from quant.data.market_store import gics_path, market_dir
+
+    gics = gics_path(tmp_path)
+    gics.parent.mkdir(parents=True, exist_ok=True)
+    gics.write_text(
+        "Symbol,Security,GICS Sector,GICS Sub-Industry\n"
+        "S0,Co S0,Technology,Hardware\n"
+        "S1,Co S1,Technology,Hardware\n",
+        encoding="utf-8",
+    )
+    stocks = market_dir(tmp_path) / "stocks"
+    stocks.mkdir(parents=True)
+    fresh = NOW.isoformat()
+    old = (NOW - timedelta(days=10)).isoformat()
+    (stocks / "S0.json").write_text(
+        json.dumps({"symbol": "S0", "news_updated": fresh, "metrics_updated": "2026-10-28"})
+    )
+    (stocks / "S1.json").write_text(
+        json.dumps({"symbol": "S1", "news_updated": old, "metrics_updated": "2026-10-28"})
+    )
+
+    d = ov(client)
+    src = next(s for s in d["sources"] if s["key"] == "stocks")
+    assert src["status"] == "warn" and src["progress"] == pytest.approx(0.5)
+    assert src["detail"] == "新闻新鲜 1/2 只，财务指标 2/2 只"
+    assert any(
+        "个股新闻与财务" in x["text"] and "覆盖不足" in x["text"] for x in d["banner"]["items"]
+    )
 
 
 @needs_db
