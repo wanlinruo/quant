@@ -17,16 +17,18 @@ function heat(sharpe: number | null | undefined): string {
 
 function Cell({ c }: { c: RbCellOut }) {
   const m = c.metrics;
-  return (
-    <div className={`rb-cell ${c.status}${c.center ? " center" : ""}`} style={{ background: heat(m?.sharpe) }} title={c.label}>
+  const body = (
+    <>
       {m ? (
         <>
           <b className="num">{num(m.sharpe, 2)}</b>
           <span className="num sm">{pct(m.cagr, 1)} · {pct(m.max_drawdown, 0)}</span>
         </>
       ) : c.status === "skipped" ? <span className="muted">—</span> : <span className={`pill ${STATUS_PILL[c.status] ?? "hold"}`} title={c.error ?? undefined}>{STATUS_TEXT[c.status] ?? c.status}</span>}
-    </div>
+    </>
   );
+  const props = { className: `rb-cell ${c.status}${c.center ? " center" : ""}`, style: { background: heat(m?.sharpe) }, title: c.label };
+  return c.run_id ? <a {...props} href={`/backtest/${c.run_id}`} aria-label={`${c.label}，打开回测 #${c.run_id}`}>{body}</a> : <div {...props}>{body}</div>;
 }
 
 function Mcols({ m }: { m: RbMetricsOut | null | undefined }) {
@@ -46,7 +48,7 @@ function Rows({ rows, verdict }: { rows: RbRowOut[]; verdict?: boolean }) {
       <tbody>
         {rows.map((r) => (
           <tr key={`${r.label}-${r.run_id}`} className={r.base ? "base-row" : ""}>
-            <td>{r.label}</td>
+            <td>{r.run_id ? <a href={`/backtest/${r.run_id}`}>{r.label}</a> : r.label}</td>
             <Mcols m={r.metrics} />
             <td><span className={`pill ${STATUS_PILL[r.status] ?? "hold"}`} title={r.error ?? undefined}>{STATUS_TEXT[r.status] ?? r.status}</span></td>
             {verdict && <td>{r.passed === true ? <span className="pill ok">通过</span> : r.passed === false ? <span className="pill err">未通过</span> : "—"}</td>}
