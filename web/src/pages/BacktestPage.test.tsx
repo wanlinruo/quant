@@ -97,6 +97,18 @@ describe("BacktestPage", () => {
     expect(screen.getByText("#127 · combo")).toBeInTheDocument();
   });
 
+  it("opens a run from the keyboard without toggling its compare checkbox", async () => {
+    mockApi({ "/api/backtests": [200, [run(128), run(127)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS] });
+    const { user } = renderRoute("/backtest");
+    const open = await screen.findByRole("button", { name: "打开回测 #127 combo" });
+    await user.tab();
+    open.focus();
+    await user.keyboard("{Enter}");
+    expect(currentLocation()).toBe("/backtest/127");
+    expect(screen.getAllByRole("checkbox").filter((x) => (x as HTMLInputElement).checked)).toHaveLength(1);
+    expect(screen.getByLabelText("对比 #127")).toBeChecked();
+  });
+
   const TIINGO = (fixedDone: number) => ({
     source: "tiingo", data_end: fixedDone ? "2026-10-28" : null,
     fixed: { done: fixedDone, total: 19 }, current: { done: 120, total: 503 }, delisted: { done: 0, total: 260 },
@@ -159,7 +171,7 @@ describe("BacktestPage", () => {
     mockApi({ "/api/backtests": [200, [run(128), failed]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS] });
     const { user } = renderPage(<BacktestPage />, "/backtest");
     await screen.findByText("#128");
-    await user.click(screen.getByRole("button", { name: "失败" }));
+    await user.click(screen.getByRole("tab", { name: "失败" }));
     expect(screen.queryByText("#128")).not.toBeInTheDocument();
     expect(screen.getByText("回测数据尚未补齐：缺 QQQ")).toBeInTheDocument();
   });
@@ -179,9 +191,9 @@ describe("BacktestPage", () => {
       "/api/backtests/128/robustness": [200, { status: "not_requested", note: "未运行：新建回测时勾选“同时跑稳健性检验”" }] });
     const { user } = renderPage(<BacktestPage />, "/backtest");
     const chart = await screen.findByTestId("main-chart");
-    await user.click(screen.getByRole("button", { name: "收益分析" }));
-    await user.click(screen.getByRole("button", { name: "交易明细" }));
-    await user.click(screen.getByRole("button", { name: "稳健性" }));
+    await user.click(screen.getByRole("tab", { name: "收益分析" }));
+    await user.click(screen.getByRole("tab", { name: "交易明细" }));
+    await user.click(screen.getByRole("tab", { name: "稳健性" }));
     expect(await screen.findByText(/未运行：新建回测时勾选/)).toBeInTheDocument();
     expect(screen.queryByTestId("rb-grid")).toBeNull();
     expect(screen.getByTestId("main-chart")).toBe(chart);
@@ -201,7 +213,7 @@ describe("BacktestPage", () => {
     mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS], "/api/backtests/128/trades": [200, TRADES], "/api/backtests/128/positions": [200, POSITIONS] });
     const r = renderPage(<BacktestPage />, "/backtest");
     await screen.findByText("QQQ 10.10%");
-    await r.user.click(screen.getByRole("button", { name }));
+    await r.user.click(screen.getByRole("tab", { name }));
     return screen.getByTestId(`tab-${name}`);
   }
 
@@ -263,7 +275,7 @@ describe("BacktestPage", () => {
     const r = within(table).getByText("BBB").closest("tr")!;
     await userEvent.click(r);
     expect(r).toHaveAttribute("aria-selected", "true");
-    await userEvent.click(within(tab).getByRole("button", { name: "波段仓" }));
+    await userEvent.click(within(tab).getByRole("tab", { name: "波段仓" }));
     expect(within(table).queryByText("AAA")).not.toBeInTheDocument();
     expect(within(tab).getByTestId("scatter").querySelectorAll("circle")).toHaveLength(1); // 散点跟随筛选
     expect(within(tab).getAllByText("动量排名跌出前 10").length).toBeGreaterThan(0);
@@ -281,7 +293,7 @@ describe("BacktestPage", () => {
     const ret = await openTab("收益分析");
     expect(within(ret).queryByText(/子仓贡献.*B 批接入/)).not.toBeInTheDocument();
     expect(within(ret).getByText("子仓累计收益贡献")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "回撤与风险" }));
+    await userEvent.click(screen.getByRole("tab", { name: "回撤与风险" }));
     const risk = screen.getByTestId("tab-回撤与风险");
     expect(within(risk).getByText("+3.00%")).toBeInTheDocument();
   });
@@ -290,7 +302,7 @@ describe("BacktestPage", () => {
     mockApi({ "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, ANALYSIS], "/api/backtests/128/trades": [200, { note: "此回测运行于交易记录功能上线之前，重新运行（复制参数新建）即可查看", trades: [], by_reason: [], by_symbol: [] }] });
     const { user } = renderPage(<BacktestPage />, "/backtest");
     await screen.findByText("QQQ 10.10%");
-    await user.click(screen.getByRole("button", { name: "交易明细" }));
+    await user.click(screen.getByRole("tab", { name: "交易明细" }));
     expect(await screen.findByText(/重新运行/)).toBeInTheDocument();
   });
 
