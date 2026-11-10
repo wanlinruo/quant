@@ -215,6 +215,22 @@ describe("BacktestPage", () => {
     expect(within(tab).getByText("2023")).toBeInTheDocument();
   });
 
+  it("hides an empty out-of-sample row when the run does not cross 2023", async () => {
+    const split = {
+      ...ANALYSIS.overview!.split,
+      oos: { strategy: null, qqq: null },
+    };
+    mockApi({
+      "/api/backtests": [200, [run(128)]],
+      "/api/backtests/equity": [200, []],
+      "/api/backtests/defaults": [200, DEFAULTS],
+      "/api/backtests/128/analysis": [200, { ...ANALYSIS, overview: { ...ANALYSIS.overview, split } }],
+    });
+    renderPage(<BacktestPage />, "/backtest");
+    const tab = await screen.findByTestId("tab-概览");
+    expect(within(tab).queryByText("样本外（2023 起）")).not.toBeInTheDocument();
+  });
+
   it("returns tab", async () => {
     const tab = await openTab("收益分析");
     const cell = within(tab).getByText("+5.0%");
@@ -227,6 +243,7 @@ describe("BacktestPage", () => {
     expect(within(tab).getByText("-21.30%")).toBeInTheDocument();
     expect(within(tab).getByText("82%")).toBeInTheDocument();
     expect(within(tab).getByText("VaR 95%（日）")).toBeInTheDocument();
+    expect(within(tab).getByText("按月收益的算术均值比（策略 ÷ QQQ）")).toBeInTheDocument();
   });
 
   it("params tab", async () => {

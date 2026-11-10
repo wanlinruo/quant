@@ -37,6 +37,7 @@ export function OverviewTab({ a }: A) {
   const o = a.overview;
   if (!o) return <EmptyState />;
   const seg = [["full", "全区间"], ["ins", "样本内（2023 前）"], ["oos", "样本外（2023 起）"]] as const;
+  const availableSeg = seg.filter(([k]) => o.split[k]?.strategy || o.split[k]?.qqq);
   const maxY = Math.max(...o.yearly.flatMap((y) => [Math.abs(y.strategy ?? 0), Math.abs(y.qqq ?? 0)]), 0.01);
   return (
     <div data-testid="tab-概览">
@@ -63,7 +64,7 @@ export function OverviewTab({ a }: A) {
             <table className="dt compact">
               <thead><tr><th>区间</th><th className="r">年化</th><th className="r">QQQ</th><th className="r">夏普</th><th className="r">QQQ</th><th className="r">最大回撤</th><th className="r">QQQ</th></tr></thead>
               <tbody>
-                {seg.map(([k, label]) => {
+                {availableSeg.map(([k, label]) => {
                   const s = o.split[k]?.strategy as M;
                   const q = o.split[k]?.qqq as M;
                   return (
@@ -228,7 +229,7 @@ export function RiskTab({ a }: A) {
       </Sub>
       <Grid>
         <Cell span={4}>
-          <Sub title="涨跌市中的表现" note="按月">
+          <Sub title="涨跌市中的表现" note="按月收益的算术均值比（策略 ÷ QQQ）">
             <table className="dt compact kv">
               <tbody>
                 <tr><td className="muted">上行捕获率</td><td className="r num">{r.capture.up == null ? "—" : pct(r.capture.up, 0)}</td></tr>
@@ -273,7 +274,7 @@ export function RiskTab({ a }: A) {
                 {r.tail.map((x) => (
                   <tr key={x.label}>
                     <td className="muted">{x.label}</td>
-                    <td className="r num">{x.value == null ? "—" : ["偏度", "峰度"].includes(x.label) ? num(x.value, 2) : pct(x.value, 2)}</td>
+                    <td className="r num">{x.value == null ? "—" : ["偏度", "超额峰度"].includes(x.label) ? num(x.value, 2) : pct(x.value, 2)}</td>
                   </tr>
                 ))}
               </tbody>
