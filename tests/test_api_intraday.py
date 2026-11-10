@@ -132,6 +132,7 @@ def test_quote_from_before_open_is_not_shown(
     assert "HALT" not in [q["symbol"] for q in d["quotes"]]
 
 
+@needs_db
 def test_no_false_delay_warning_right_after_open(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, db_url: str
 ) -> None:
