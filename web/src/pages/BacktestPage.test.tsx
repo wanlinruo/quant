@@ -269,6 +269,23 @@ describe("BacktestPage", () => {
     expect(within(tab).getAllByText("动量排名跌出前 10").length).toBeGreaterThan(0);
   });
 
+  it("shows infinite profit factor when every closed trade is profitable", async () => {
+    const trades = {
+      ...TRADES,
+      summary: { ...TRADES.summary, closed: 2, win_rate: 1, profit_factor: null },
+    };
+    mockApi({
+      "/api/backtests": [200, [run(128)]],
+      "/api/backtests/equity": [200, []],
+      "/api/backtests/defaults": [200, DEFAULTS],
+      "/api/backtests/128/analysis": [200, ANALYSIS],
+      "/api/backtests/128/trades": [200, trades],
+    });
+    renderPage(<BacktestPage />, "/backtest?tab=trades");
+    const tab = await screen.findByTestId("tab-交易明细");
+    expect(await within(tab).findByText("∞")).toBeInTheDocument();
+  });
+
   it("positions tab", async () => {
     const tab = await openTab("持仓变化");
     expect(await within(tab).findByTestId("stack")).toBeInTheDocument();

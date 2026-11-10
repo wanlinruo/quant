@@ -52,7 +52,7 @@ export function TradesTab({ runId, selected, onSelect }: { runId: number; select
           const cards: [string, string][] = [
             ["交易笔数", `${s.trades}（已平仓 ${s.closed}）`],
             ["胜率", s.win_rate == null ? "—" : pct(s.win_rate, 1)],
-            ["盈亏比", s.profit_factor == null ? "—" : num(s.profit_factor, 2)],
+            ["盈亏比", s.profit_factor == null ? (s.closed > 0 && s.win_rate === 1 ? "∞" : "—") : num(s.profit_factor, 2)],
             ["平均持有", s.avg_days == null ? "—" : `${num(s.avg_days, 1)} 天`],
             ["平均收益", s.avg_ret == null ? "—" : signedPct(s.avg_ret, 1)],
             ["最好 / 最差", `${s.best?.symbol ?? "—"} ${s.best ? signedPct(s.best.ret, 1) : ""} / ${s.worst?.symbol ?? "—"} ${s.worst ? signedPct(s.worst.ret, 1) : ""}`],

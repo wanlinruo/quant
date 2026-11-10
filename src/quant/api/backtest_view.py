@@ -210,6 +210,7 @@ def _same(v: Any) -> Any:
 # ---- 交易明细与持仓变化（#67 B 批）----
 
 OLD_RUN_NOTE = "此回测运行于交易记录功能上线之前，重新运行（复制参数新建）即可查看"
+NO_TRADES_NOTE = "本次回测没有产生交易"
 
 
 def _dates(s: Session, run_id: int) -> list[date]:
@@ -233,7 +234,10 @@ def trades_view(s: Session, run_id: int) -> BacktestTrades | None:
     rows = s.scalars(select(BacktestTrade).where(BacktestTrade.run_id == run_id)
                      .order_by(BacktestTrade.seq)).all()  # fmt: skip
     if not rows:
-        return BacktestTrades(note=OLD_RUN_NOTE)
+        has_daily = s.scalar(
+            select(BacktestDaily.run_id).where(BacktestDaily.run_id == run_id).limit(1)
+        )
+        return BacktestTrades(note=NO_TRADES_NOTE if has_daily is not None else OLD_RUN_NOTE)
     dates = _dates(s, run_id)
     out = [BtTradeOut(seq=t.seq, symbol=t.symbol, sleeve=t.sleeve, open_date=t.open_date,
                       open_price=t.open_price, close_date=t.close_date, close_price=t.close_price,
