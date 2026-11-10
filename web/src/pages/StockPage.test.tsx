@@ -144,7 +144,7 @@ describe("StockPage", () => {
     expect(within(side).getAllByRole("link")).toHaveLength(5);
     expect(within(side).getByRole("link", { name: "Nvidia Q3 earnings beat" })).toHaveAttribute("rel", "noreferrer");
     expect(within(side).getByText("10-30 16:00")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "新闻" }));
+    await user.click(screen.getByRole("tab", { name: "新闻" }));
     const tab = await screen.findByTestId("stock-news-tab");
     expect(within(tab).getAllByRole("link")).toHaveLength(7);
     expect(within(tab).getByText("财报")).toBeInTheDocument();
