@@ -106,10 +106,10 @@ describe("MarketPage", () => {
     const { user } = renderPage(<MarketPage />, "/");
     const table = await screen.findByTestId("movers");
     expect(within(table).getByText("XOM")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "放量" }));
+    await user.click(screen.getByRole("tab", { name: "放量" }));
     expect(within(table).queryByText("XOM")).not.toBeInTheDocument();
     expect(within(table).getByText("NVDA")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "跌幅" }));
+    await user.click(screen.getByRole("tab", { name: "跌幅" }));
     expect(within(table).getByText("XOM")).toBeInTheDocument();
     expect(within(table).queryByText("NVDA")).not.toBeInTheDocument();
   });
@@ -118,7 +118,7 @@ describe("MarketPage", () => {
     mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW] });
     const { user } = renderPage(<MarketPage />, "/");
     const table = await screen.findByTestId("movers");
-    await user.click(screen.getByRole("button", { name: "我的持仓" }));
+    await user.click(screen.getByRole("tab", { name: "我的持仓" }));
     expect(within(table).getByText("AAPL")).toBeInTheDocument();
     expect(within(table).queryByText("NVDA")).not.toBeInTheDocument();
   });
@@ -129,7 +129,7 @@ describe("MarketPage", () => {
     const { user } = renderPage(<MarketPage />, "/");
     const table = await screen.findByTestId("movers");
     expect(within(table).queryByText("MSFT")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "我的持仓" }));
+    await user.click(screen.getByRole("tab", { name: "我的持仓" }));
     expect(within(table).getByText("MSFT")).toBeInTheDocument();
   });
 
@@ -160,11 +160,11 @@ describe("MarketPage", () => {
     expect(await within(panel).findAllByRole("link")).toHaveLength(3);
     expect(within(panel).getByText("10-29")).toBeInTheDocument();
     expect(within(panel).getAllByText("10-30")).toHaveLength(2);
-    await user.click(within(panel.closest("section")!).getByRole("button", { name: "宏观" }));
+    await user.click(within(panel.closest("section")!).getByRole("tab", { name: "宏观" }));
     expect(within(panel).getAllByRole("link")).toHaveLength(1);
-    await user.click(within(panel.closest("section")!).getByRole("button", { name: "持仓" }));
+    await user.click(within(panel.closest("section")!).getByRole("tab", { name: "持仓" }));
     expect(within(panel).getAllByRole("link")).toHaveLength(2);
-    await user.click(within(panel.closest("section")!).getByRole("button", { name: "财报" }));
+    await user.click(within(panel.closest("section")!).getByRole("tab", { name: "财报" }));
     expect(within(panel).getByRole("link", { name: "Exxon Q3 earnings beat" })).toHaveAttribute("rel", "noreferrer");
     expect(within(panel).getAllByRole("link")).toHaveLength(1);
   });
@@ -212,7 +212,7 @@ describe("MarketPage", () => {
     const { user } = renderPage(<MarketPage />, "/");
     const hm = await screen.findByTestId("heatmap");
     expect(within(hm).getByText("XOM")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "1周" }));
+    await user.click(screen.getByRole("tab", { name: "1周" }));
     expect(within(hm).queryByText("XOM")).not.toBeInTheDocument();
     expect(within(hm).getByText("+5.0%")).toBeInTheDocument();
   });

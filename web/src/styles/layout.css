@@ -106,7 +106,7 @@ table.dt tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
 .error-box { color: #fca5a5; background: #3a171c; border: 1px solid #5c2229; border-radius: 6px; padding: 10px 12px; }
 
 /* 回测页 */
-.runs .run { display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 5px; white-space: nowrap; cursor: pointer; }
+.runs .run { display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 5px; white-space: nowrap; }
 .runs .run:hover { background: var(--panel-2); }
 .runs .run.on { background: #141c33; outline: 1px solid #2a3d73; }
 .statbar { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: var(--gap); margin-top: 10px; }
@@ -223,6 +223,8 @@ td.reason a:hover { text-decoration: underline; }
 /* 回测页（#67 A 批） */
 .run { flex-direction: column; align-items: stretch; }
 .run-main { display: flex; align-items: center; gap: 6px; }
+.run-open { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.run-open:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 3px; }
 .run-err { color: var(--down, #ef4444); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 22px; }
 .statbar .stat { min-width: 0; }
 .stat-v { font-size: 16px; color: #fff; font-weight: 600; }
@@ -325,7 +327,7 @@ pre.cmd.log { max-height: 260px; overflow: auto; white-space: pre; user-select: 
 .rb-heat { display: grid; grid-template-columns: 48px repeat(3, minmax(0, 1fr)); gap: 4px; margin-bottom: 6px; }
 .rb-heat .ax { text-align: center; align-self: center; }
 .rb-row { display: contents; }
-.rb-cell { border: 1px solid var(--border); border-radius: 6px; padding: 8px 6px; display: grid; justify-items: center; gap: 2px; min-height: 52px; align-content: center; }
+.rb-cell { border: 1px solid var(--border); border-radius: 6px; padding: 8px 6px; display: grid; justify-items: center; gap: 2px; min-height: 52px; align-content: center; color: inherit; text-decoration: none; }
 .rb-cell b { color: var(--text-strong); font-size: 15px; }
 .rb-cell.center { outline: 2px solid var(--primary); outline-offset: -2px; }
 .dt tr.base-row td { color: var(--text-strong); font-weight: 600; }

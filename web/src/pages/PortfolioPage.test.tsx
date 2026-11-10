@@ -82,7 +82,7 @@ describe("PortfolioPage", () => {
     mockApi(ROUTES);
     const { user } = renderPage(<PortfolioPage />, "/portfolio");
     expect(await screen.findByRole("link", { name: "META" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "波段仓" }));
+    await user.click(screen.getByRole("tab", { name: "波段仓" }));
     expect(screen.queryByRole("link", { name: "META" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "NVDA" })).toBeInTheDocument();
   });
@@ -118,7 +118,7 @@ describe("PortfolioPage", () => {
   it("closed trades tab shows stats", async () => {
     mockApi(ROUTES);
     const { user } = renderPage(<PortfolioPage />, "/portfolio");
-    await user.click(await screen.findByRole("button", { name: "已平仓" }));
+    await user.click(await screen.findByRole("tab", { name: "已平仓" }));
     expect(await screen.findByText("胜率 100.0%")).toBeInTheDocument();
     expect(screen.getByText("AAPL")).toBeInTheDocument();
   });
