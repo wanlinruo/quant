@@ -58,9 +58,12 @@ export function BacktestPage() {
   const navigate = useNavigate();
   const { search } = useLocation();
 
-  const list = runs.data ?? [];
+  const parentList = runs.data ?? [];
+  const listedRoute = parentList.find((r) => String(r.id) === routeId);
+  const directRun = useApi<BacktestRunOut>(routeId && runs.data && !listedRoute ? `/api/backtests/${routeId}` : null);
+  const list = directRun.data ? [directRun.data, ...parentList] : parentList;
   const firstDone = list.find((r) => r.status === "done") ?? list[0];
-  const defaultId = list.find((r) => String(r.id) === routeId)?.id ?? firstDone?.id;
+  const defaultId = (listedRoute ?? directRun.data)?.id ?? firstDone?.id;
   const selected = useMemo(() => checked ?? (defaultId !== undefined ? [defaultId] : []), [checked, defaultId]);
   const current = list.find((r) => r.id === selected[0]);
   const compare = selected.length >= 2;

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from api_fixtures import SEED_LAST_DAY, needs_db, seed
 from quant.api.app import create_app
 from quant.api.deps import get_engine, get_settings
-from quant.db.models import JobAttempt, JobRun, Order
+from quant.db.models import BacktestRun, JobAttempt, JobRun, Order
 
 ET = ZoneInfo("America/New_York")
 NOW = datetime(2026, 10, 28, 22, 0, tzinfo=ET)  # 周三晚，当日任务都已过计划时间
@@ -196,6 +196,46 @@ def test_cards_risk_events_queue_upcoming(client: TestClient) -> None:
     )
     assert any("月末调仓" in x["tags"] for x in days)  # 10-30 是月末交易日
     assert all(x["date"] <= "2026-11-10" for x in days)  # 10 个交易日内，不含 11-26
+
+
+@needs_db
+def test_child_backtest_failure_is_not_a_system_alert(client: TestClient, db_url: str) -> None:
+    eng = create_engine(db_url)
+    finished = NOW.astimezone(UTC) - timedelta(hours=1)
+    with Session(eng) as s, s.begin():
+        parent = BacktestRun(
+            strategy="combo",
+            params={},
+            start=date(2020, 1, 2),
+            end=date(2021, 1, 4),
+            status="failed",
+            error="父任务失败",
+            finished_at=finished,
+        )
+        s.add(parent)
+        s.flush()
+        child = BacktestRun(
+            strategy="combo",
+            params={},
+            start=parent.start,
+            end=parent.end,
+            status="failed",
+            error="子任务失败",
+            finished_at=finished,
+            parent_id=parent.id,
+            variant={"kind": "grid", "x": 0, "y": 0},
+        )
+        s.add(child)
+        s.flush()
+        parent_id, child_id = parent.id, child.id
+    eng.dispose()
+
+    d = ov(client)
+    events = " ".join(x["text"] for x in d["events"])
+    banner = " ".join(x["text"] for x in d["banner"]["items"])
+    assert f"回测 #{parent_id}" in events and f"回测 #{child_id}" not in events
+    assert "近 7 天有 1 个回测失败" in banner
+    assert d["queue"]["failed"] == 3  # 队列负载仍包含稳健性子任务
 
 
 @needs_db

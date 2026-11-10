@@ -89,6 +89,18 @@ describe("BacktestPage", () => {
     expect(await screen.findByText("#127 · combo")).toBeInTheDocument();
   });
 
+  it("loads a robustness child that is intentionally absent from the parent list", async () => {
+    const child = { ...run(203), params: { top_n: 9 } };
+    mockApi({
+      "/api/backtests": [200, [run(128)]],
+      "/api/backtests/203": [200, child],
+      "/api/backtests/203/analysis": [200, { ...ANALYSIS, id: 203 }],
+      "/api/backtests/defaults": [200, DEFAULTS],
+    });
+    renderRoute("/backtest/203");
+    expect(await screen.findByText("#203 · combo")).toBeInTheDocument();
+  });
+
   it("clicking a row updates the url and keeps the account", async () => {
     mockApi({ "/api/backtests": [200, [run(128), run(127)]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS] });
     const { user } = renderRoute("/backtest?account=paper");
@@ -416,9 +428,12 @@ describe("BacktestPage", () => {
     expect(grid.querySelectorAll(".rb-cell")).toHaveLength(9);
     expect(grid.querySelector(".rb-cell.center")).toHaveTextContent("1.10");
     expect(grid.querySelector(".rb-cell.skipped")).toHaveTextContent("—");
+    expect(within(grid).getByRole("link", { name: /c00，打开回测 #200/ })).toHaveAttribute("href", "/backtest/200");
     expect(screen.getByText(/15 \/ 17/)).toBeInTheDocument();
     expect(screen.getByText("不完整：1 项未完成或失败")).toBeInTheDocument();
-    expect(screen.getByText("动量仓比例 30% · 择时波动阈值 30%").closest("tr")).toHaveTextContent("未通过");
+    const neighbor = screen.getByRole("link", { name: "动量仓比例 30% · 择时波动阈值 30%" });
+    expect(neighbor).toHaveAttribute("href", "/backtest/203");
+    expect(neighbor.closest("tr")).toHaveTextContent("未通过");
     expect(screen.getByText("2019").closest("tr")).toHaveTextContent("c001");
     expect(screen.getByText("成本 ×1（本次）")).toBeInTheDocument();
     expect(screen.getByText("起点 2017-01-28").closest("tr")).toHaveTextContent("排队");

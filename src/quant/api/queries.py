@@ -165,6 +165,29 @@ def robust_progress(s: Session, parent_ids: Sequence[int]) -> dict[int, RobustPr
     return {pid: RobustProgressOut(total=sum(c.values()), **c) for pid, c in counts.items()}
 
 
+def _backtest_run_out(r: BacktestRun, robust: RobustProgressOut | None = None) -> BacktestRunOut:
+    return BacktestRunOut(
+        id=r.id,
+        strategy=r.strategy,
+        status=r.status,
+        start=r.start,
+        end=r.end,
+        params={k: v for k, v in r.params.items() if not k.startswith("_")},
+        costs=r.params.get("_costs"),
+        metrics=r.metrics or {},
+        error=_first_line(r.error),
+        created_at=r.created_at,
+        finished_at=r.finished_at,
+        robust=robust,
+    )
+
+
+def backtest_run(s: Session, run_id: int) -> BacktestRunOut | None:
+    """单个回测摘要；允许按编号查看不出现在父任务列表里的稳健性子回测。"""
+    run = s.get(BacktestRun, run_id)
+    return _backtest_run_out(run) if run is not None else None
+
+
 def backtest_runs(s: Session, limit: int = 200) -> list[BacktestRunOut]:
     """回测列表（不含稳健性检验子任务）；父回测附子任务进度。"""
     runs = s.scalars(
@@ -176,20 +199,7 @@ def backtest_runs(s: Session, limit: int = 200) -> list[BacktestRunOut]:
     progress = robust_progress(s, [r.id for r in runs if r.params.get(ROBUST_KEY)])
     empty = RobustProgressOut(total=0, done=0, failed=0, queued=0, running=0)
     return [
-        BacktestRunOut(
-            id=r.id,
-            strategy=r.strategy,
-            status=r.status,
-            start=r.start,
-            end=r.end,
-            params={k: v for k, v in r.params.items() if not k.startswith("_")},
-            costs=r.params.get("_costs"),
-            metrics=r.metrics or {},
-            error=_first_line(r.error),
-            created_at=r.created_at,
-            finished_at=r.finished_at,
-            robust=progress.get(r.id, empty) if r.params.get(ROBUST_KEY) else None,
-        )
+        _backtest_run_out(r, progress.get(r.id, empty) if r.params.get(ROBUST_KEY) else None)
         for r in runs
     ]
 
@@ -263,7 +273,7 @@ def recent_failures(s: Session, limit: int = 20) -> list[FailureOut]:
     ).all()
     bts = s.scalars(
         select(BacktestRun)
-        .where(BacktestRun.status == "failed")
+        .where(BacktestRun.status == "failed", BacktestRun.parent_id.is_(None))
         .order_by(BacktestRun.created_at.desc())
         .limit(limit)
     ).all()

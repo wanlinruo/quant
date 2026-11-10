@@ -401,7 +401,11 @@ def _events(s: Session, mode: str, now: datetime) -> list[SysEventOut]:
             )
         )
     for b in s.scalars(
-        select(BacktestRun).where(BacktestRun.status == "failed", BacktestRun.finished_at >= since)
+        select(BacktestRun).where(
+            BacktestRun.status == "failed",
+            BacktestRun.parent_id.is_(None),
+            BacktestRun.finished_at >= since,
+        )
     ):
         out.append(
             SysEventOut(
@@ -503,7 +507,11 @@ def _cards_and_banner(
             items.append(SysItemOut(level="warn", text=f"{src.label} 覆盖不足：{src.detail}"))
     week = now - timedelta(days=7)
     failed_bt = s.scalars(
-        select(BacktestRun).where(BacktestRun.status == "failed", BacktestRun.finished_at >= week)
+        select(BacktestRun).where(
+            BacktestRun.status == "failed",
+            BacktestRun.parent_id.is_(None),
+            BacktestRun.finished_at >= week,
+        )
     ).all()
     if failed_bt:
         items.append(SysItemOut(level="warn", text=f"近 7 天有 {len(failed_bt)} 个回测失败"))
