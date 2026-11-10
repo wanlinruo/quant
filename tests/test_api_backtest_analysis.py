@@ -241,7 +241,9 @@ def test_new_run_with_no_trades_has_accurate_note(
     eng = create_engine(db_url)
     idx = IDX[:3]
     eq = prices(7, 0.0001).loc[idx] * 1000
-    daily = [(d.date(), 1.0, 1.0, {}) for d in idx]
+    daily: list[tuple[date, float, float | None, dict[str, float]]] = [
+        (d.date(), 1.0, 1.0, {}) for d in idx
+    ]
     with Session(eng) as s, s.begin():
         rid = create_run(s, "etf_momentum", {}, idx[0].date(), idx[-1].date(), status="running")
         complete_run(s, rid, {"cagr": 0.0}, eq, eq / eq.cummax() - 1, Ledger([], [], daily))
