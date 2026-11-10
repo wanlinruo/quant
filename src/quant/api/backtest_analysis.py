@@ -438,7 +438,7 @@ def tail(equity: pd.Series) -> list[dict[str, Any]]:
         {"label": "单日最大亏损", "value": _f(r.min())},
         {"label": "单周最大亏损", "value": _f(weekly.min())},
         {"label": "偏度", "value": _f(r.skew())},
-        {"label": "峰度", "value": _f(r.kurt())},
+        {"label": "超额峰度", "value": _f(r.kurt())},
     ]
 
 
