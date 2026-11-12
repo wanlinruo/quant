@@ -15,7 +15,7 @@ from quant.data.providers.coinbase import URL as COINBASE_URL
 from quant.data.providers.finnhub import EarningsRaw, FinnhubAuthError, NewsRaw
 from quant.data.providers.forexfactory import URL as FF_URL
 from quant.data.providers.fred import FredUnreachable, Obs
-from quant.market.extras_job import run_market_extras
+from quant.market.extras_job import MarketExtrasPartialFailure, run_market_extras
 
 CAL = get_calendar()
 DAY = date(2026, 11, 6)  # 周五，非农公布日
@@ -130,8 +130,10 @@ def test_extras_writes_three_files(tmp_path: Path) -> None:
 def test_extras_one_source_failing_keeps_others(tmp_path: Path) -> None:
     write_snapshot(tmp_path)
     run(tmp_path, fred=FakeFred(), finnhub=FakeFinnhub())
-    summary = run(tmp_path, fred=FakeFred(), finnhub=FakeFinnhub(),
-                  fetch=make_fetch(ff=(200, "<html>"), btc=(503, "down")))  # fmt: skip
+    with pytest.raises(MarketExtrasPartialFailure) as exc:
+        run(tmp_path, fred=FakeFred(), finnhub=FakeFinnhub(),
+            fetch=make_fetch(ff=(200, "<html>"), btc=(503, "down")))  # fmt: skip
+    summary = str(exc.value)
     macro = read(tmp_path, "macro.json")["items"]
     assert [i["symbol"] for i in macro] == ["VIX", "US10Y", "USD", "WTI", "BTC"]  # BTC 沿用上次
     assert macro[-1]["close"] == 70006.0
@@ -220,7 +222,8 @@ def test_job_empty_keys_treated_as_missing(tmp_path: Path, monkeypatch: pytest.M
 
 def test_macro_failure_keeps_previous_items(tmp_path: Path) -> None:
     run(tmp_path, fred=FakeFred(), finnhub=None)
-    run(tmp_path, fred=FakeFred(fail={"VIXCLS", "DGS10"}), finnhub=None)
+    with pytest.raises(MarketExtrasPartialFailure):
+        run(tmp_path, fred=FakeFred(fail={"VIXCLS", "DGS10"}), finnhub=None)
     items = read(tmp_path, "macro.json")["items"]
     assert [i["symbol"] for i in items] == ["VIX", "US10Y", "USD", "WTI", "BTC"]
 
@@ -261,14 +264,18 @@ def test_company_news_end_is_next_day(tmp_path: Path) -> None:
 
 def test_fred_stops_after_network_failure(tmp_path: Path) -> None:
     fred = FakeFred(fail={"VIXCLS"})
-    summary = run(tmp_path, fred=fred, finnhub=None)
+    with pytest.raises(MarketExtrasPartialFailure) as exc:
+        run(tmp_path, fred=fred, finnhub=None)
+    summary = str(exc.value)
     assert fred.calls == ["VIXCLS"]  # 宏观与实际值都不再请求
     assert summary.count("FRED") == 1
 
 
 def test_fred_single_series_error_does_not_stop_others(tmp_path: Path) -> None:
     fred = FakeFred(bad={"VIXCLS"})
-    summary = run(tmp_path, fred=fred, finnhub=None)
+    with pytest.raises(MarketExtrasPartialFailure) as exc:
+        run(tmp_path, fred=fred, finnhub=None)
+    summary = str(exc.value)
     assert fred.calls[0] == "VIXCLS" and len(fred.calls) > 1  # 其它序列照常请求
     assert "VIXCLS" in summary
     symbols = [i["symbol"] for i in read(tmp_path, "macro.json")["items"]]

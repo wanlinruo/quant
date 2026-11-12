@@ -77,9 +77,24 @@ def run_market_data(
             return False
         if df.empty:
             if day != today:
-                store.mark_empty(day)  # 该日没有数据（如临时停市），以后补历史跳过
+                store.mark_empty(
+                    day,
+                    source="massive.grouped_daily",
+                    observed_on=today,
+                )
+                notes.append(f"{day} 数据源返回空，标记至 {today + timedelta(days=7)} 后复核")
+            return False
+        old_coverage = store.coverage(day, members) if store.has_day(day) else 0.0
+        symbols = set(df["symbol"]) if "symbol" in df else set()
+        new_coverage = len(symbols & set(members)) / len(members) if members else 0.0
+        if old_coverage and new_coverage <= old_coverage:
+            notes.append(
+                f"{day} 重取覆盖 {new_coverage:.1%} 未优于旧文件 {old_coverage:.1%}，保留旧文件"
+            )
             return False
         store.write_day(day, df, keep)
+        if old_coverage:
+            notes.append(f"{day} 覆盖由 {old_coverage:.1%} 提升至 {new_coverage:.1%}")
         return True
 
     def check_splits() -> bool:
@@ -119,14 +134,18 @@ def run_market_data(
     # 补历史：最近 history_days 个交易日中缺的，由近及远
     start = today - timedelta(days=int(settings.history_days * 1.6) + 10)
     window = cal.trading_days(start, today)[-settings.history_days :]
-    empty = store.empty_days()
+    empty = store.empty_days(today)
     missing = [d for d in reversed(window)
                if d != today and not store.has_day(d) and d not in empty]  # fmt: skip
+    if empty:
+        notes.append(f"空日冷却 {len(empty)} 天（到期后自动复核，写入成功可撤销）")
     fetched = 0
     for d in missing[: settings.history_per_run]:
         if stopped or not splits_done:
             break
         fetched += fetch_day(d)
+    if missing and (stopped or not splits_done):
+        notes.append("后续历史补齐未请求（数据源已停止或拆股尚未核对完成）")
     # 市值：从未取过的优先，其次最旧的
     caps = store.caps()
     refreshed = 0
@@ -142,12 +161,15 @@ def run_market_data(
                 raise
             except DataUnavailableError as e:
                 notes.append(f"限流或故障，市值停在 {refreshed} 只（{type(e).__name__}）")
+                stopped = True
                 break
             old = caps.get(s)
             cap = info.market_cap if info and info.market_cap else (old.market_cap if old else None)
             caps[s] = CapInfo(cap, info.name if info else (old.name if old else None), today)
             refreshed += 1
         store.write_caps(caps)
+    elif settings.caps_per_run and stopped:
+        notes.append("市值刷新未请求（本轮数据源已停止）")
     snap = build_snapshot(store, gics, today, stale, holdings)
     atomic_write_text(snapshot_path(data_dir), json.dumps(snap.to_json(), ensure_ascii=False,
                                                           allow_nan=False))  # fmt: skip
@@ -157,4 +179,6 @@ def run_market_data(
     detail = "；".join([summary, *notes])
     if require_current and (stale or snap.as_of < today.isoformat()):
         raise MarketDataPending(f"目标日 {today} 未就绪；{detail}；保留展示缓存，等待重试")
+    if require_current and stopped:
+        raise MarketDataPending(f"目标日 {today} 已生成，但本轮存在局部失败；{detail}；等待重试")
     return detail

@@ -136,6 +136,30 @@ def test_extras_old_snapshot(client: TestClient, tmp_path: Path) -> None:
     assert d["covered"] and d["sector_periods"] == {} and len(d["peers"]) == 8
 
 
+def test_extras_reads_compact_heatmap_snapshot(client: TestClient, tmp_path: Path) -> None:
+    setup(
+        tmp_path,
+        snapshot={
+            "as_of": "2026-10-30",
+            "heatmap": {
+                "version": 2,
+                "cells": [
+                    {
+                        "symbol": "DELL",
+                        "name": "Co DELL",
+                        "sector": "信息技术",
+                        "market_cap": CAPS["DELL"],
+                        "returns": {"1D": 0.04, "YTD": 0.25},
+                    }
+                ],
+            },
+            "sector_periods": {"XLK": PERIODS},
+        },
+    )
+    peer = client.get("/api/stock/AAPL/extras").json()["peers"][0]
+    assert peer["symbol"] == "DELL" and peer["d1"] == 0.04 and peer["ytd"] == 0.25
+
+
 def test_extras_peers_fill_from_sector_when_few(client: TestClient, tmp_path: Path) -> None:
     setup(tmp_path)
     d = client.get("/api/stock/MSFT/extras").json()  # Software 子行业有 4 只（MSFT 之外 3 只）

@@ -146,6 +146,11 @@ export function MarketPage() {
   return (
     <div className="page">
       {market.error && <div className="error-box" role="alert">市场概览请求失败：{market.error.message}</div>}
+      {m && (m.stale || (m.coverage != null && m.coverage < 0.95)) && (
+        <div className="error-box" role="alert">
+          市场日线尚未完整就绪{m.coverage != null ? `，成分覆盖 ${pct(m.coverage, 1)}` : ""}；当前展示保留快照，后台将继续重试。
+        </div>
+      )}
       <Grid>
         <Cell span={12}>
           <section className="panel strip" data-testid="ticker-strip">
@@ -213,7 +218,7 @@ export function MarketPage() {
                         <tbody>
                           {m.sectors.map((s) => (
                             <tr key={s.symbol}>
-                              <td>{s.name} <span className="muted sm">{s.symbol}</span></td>
+                              <td>{s.name} <span className="muted sm">{s.symbol}{s.as_of && m.as_of && s.as_of !== m.as_of ? ` · 截至 ${s.as_of.slice(5)}` : ""}</span></td>
                               <td className={`r num ${tone(s.d1)}`}>{signedPct(s.d1)}</td>
                               <td className={`r num ${tone(s.w1)}`}>{signedPct(s.w1)}</td>
                               <td className={`r num ${tone(s.m1)}`}>{signedPct(s.m1)}</td>

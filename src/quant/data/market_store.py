@@ -13,7 +13,7 @@ import re
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +26,7 @@ from quant.data.quota import atomic_write_text
 log = logging.getLogger("quant.market_store")
 
 MARKET_DIR = "market"
+EMPTY_DAY_RETRY_DAYS = 7
 GICS_URL = (
     "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv"
 )
@@ -202,6 +203,7 @@ class MarketStore:
         tmp = path.with_suffix(".tmp")
         df.to_parquet(tmp, index=False)
         tmp.replace(path)
+        self.clear_empty(day)
         return len(df)
 
     def has_day(self, day: date) -> bool:
@@ -265,13 +267,81 @@ class MarketStore:
         have = set(pd.read_parquet(self._day_path(day), columns=["symbol"])["symbol"])
         return len(have & set(members)) / len(members)
 
-    def empty_days(self) -> set[date]:
+    def empty_day_records(self) -> dict[date, dict[str, str | int | None]]:
+        """空日标记及来源；旧版永久列表读作待复核记录。"""
         doc = _read_json(self.root / "empty_days.json")
-        return {date.fromisoformat(d) for d in doc} if isinstance(doc, list) else set()
+        if isinstance(doc, list):
+            return {
+                date.fromisoformat(str(d)): {
+                    "source": "legacy",
+                    "marked_on": None,
+                    "retry_after": None,
+                    "attempts": 1,
+                }
+                for d in doc
+            }
+        rows = doc.get("days") if isinstance(doc, dict) else None
+        if not isinstance(rows, dict):
+            return {}
+        out: dict[date, dict[str, str | int | None]] = {}
+        for raw_day, raw in rows.items():
+            if not isinstance(raw, dict):
+                continue
+            try:
+                d = date.fromisoformat(str(raw_day))
+            except ValueError:
+                continue
+            out[d] = {
+                "source": str(raw.get("source") or "unknown"),
+                "marked_on": str(raw["marked_on"]) if raw.get("marked_on") else None,
+                "retry_after": str(raw["retry_after"]) if raw.get("retry_after") else None,
+                "attempts": int(raw.get("attempts") or 1),
+            }
+        return out
 
-    def mark_empty(self, day: date) -> None:
-        days = sorted(self.empty_days() | {day})
-        atomic_write_text(self.root / "empty_days.json", json.dumps([d.isoformat() for d in days]))
+    def empty_days(self, as_of: date | None = None) -> set[date]:
+        """返回仍在冷却期的空日；不传 as_of 时返回全部记录供状态展示。"""
+        rows = self.empty_day_records()
+        if as_of is None:
+            return set(rows)
+        active = set()
+        for day, row in rows.items():
+            raw = row.get("retry_after")
+            try:
+                retry_after = date.fromisoformat(str(raw)) if raw else date.min
+            except ValueError:
+                retry_after = date.min
+            if as_of < retry_after:
+                active.add(day)
+        return active
+
+    def mark_empty(
+        self,
+        day: date,
+        *,
+        source: str,
+        observed_on: date,
+        retry_days: int = EMPTY_DAY_RETRY_DAYS,
+    ) -> None:
+        rows = self.empty_day_records()
+        previous = rows.get(day, {})
+        rows[day] = {
+            "source": source,
+            "marked_on": observed_on.isoformat(),
+            "retry_after": (observed_on + timedelta(days=retry_days)).isoformat(),
+            "attempts": int(previous.get("attempts") or 0) + 1,
+        }
+        doc = {"version": 2, "days": {d.isoformat(): rows[d] for d in sorted(rows)}}
+        atomic_write_text(self.root / "empty_days.json", json.dumps(doc, ensure_ascii=False))
+
+    def clear_empty(self, day: date) -> None:
+        path = self.root / "empty_days.json"
+        rows = self.empty_day_records()
+        if day not in rows:
+            return
+        rows.pop(day)
+        doc = {"version": 2, "days": {d.isoformat(): rows[d] for d in sorted(rows)}}
+        atomic_write_text(path, json.dumps(doc, ensure_ascii=False))
 
     def splits_checked(self) -> date | None:
         """拆股已核对到的日期（含）。"""

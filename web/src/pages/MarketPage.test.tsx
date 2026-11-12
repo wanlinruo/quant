@@ -274,6 +274,36 @@ describe("MarketPage", () => {
     expect(screen.getByText("市值每天补 60 只，约 9 个交易日补齐")).toBeInTheDocument();
   });
 
+  it("warns when daily member coverage is low", async () => {
+    mockApi({
+      ...BASE,
+      "/api/market/overview": [
+        200,
+        { ...OVERVIEW, stale: true, coverage: 0.82 },
+      ],
+    });
+    renderPage(<MarketPage />, "/");
+    expect(await screen.findByRole("alert")).toHaveTextContent("成分覆盖 82.0%");
+    expect(screen.getByRole("alert")).toHaveTextContent("后台将继续重试");
+  });
+
+  it("shows a sector ETF cutoff when it differs from the market snapshot", async () => {
+    mockApi({
+      ...BASE,
+      "/api/market/overview": [
+        200,
+        {
+          ...OVERVIEW,
+          sectors: OVERVIEW.sectors.map((row) =>
+            row.symbol === "XLK" ? { ...row, as_of: "2026-10-29" } : row,
+          ),
+        },
+      ],
+    });
+    renderPage(<MarketPage />, "/");
+    expect(await screen.findByText(/XLK · 截至 10-29/)).toBeInTheDocument();
+  });
+
   it("home page has no separate intraday panel", async () => {
     mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW] });
     renderPage(<MarketPage />, "/");

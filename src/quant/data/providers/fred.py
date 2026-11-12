@@ -29,6 +29,14 @@ class FredAuthError(DataUnavailableError):
     """key 无效（FRED 返回 400 并提示 api_key）。"""
 
 
+class FredHttpError(DataUnavailableError):
+    """单个 FRED 请求的非认证 4xx；只影响对应序列。"""
+
+
+class FredParseError(DataUnavailableError):
+    """FRED 200 响应结构或字段无法解析；只影响对应序列。"""
+
+
 @dataclass(frozen=True)
 class Obs:
     date: date
@@ -65,20 +73,27 @@ class FredClient:
             raise FredAuthError("FRED 拒绝访问，请检查 FRED_API_KEY")
         if status >= 500 or status == 429:
             raise FredUnreachable(f"FRED {what} 返回 {status}")
-        if status != 200 or not isinstance(body, dict):
-            raise DataUnavailableError(f"FRED {what} 返回 {status}")  # 只影响这一个序列
+        if status != 200:
+            raise FredHttpError(f"FRED {what} 返回 {status}")
+        if not isinstance(body, dict):
+            raise FredParseError(f"FRED {what} 响应格式错误")
         return body
 
     def observations(self, series: str, start: date) -> list[Obs]:
         """series 自 start 起的观测值，升序；缺失值（"."）跳过。"""
         body = self._get("/series/observations", series, series_id=series,
                          observation_start=start.isoformat())  # fmt: skip
+        rows = body.get("observations")
+        if not isinstance(rows, list):
+            raise FredParseError(f"FRED {series} observations 格式错误")
         out = []
-        for r in body.get("observations") or []:
+        for r in rows:
+            if isinstance(r, dict) and r.get("value") == ".":
+                continue
             try:
                 out.append(Obs(date.fromisoformat(r["date"]), float(r["value"])))
             except (KeyError, TypeError, ValueError):
-                continue
+                raise FredParseError(f"FRED {series} 观测值无法解析") from None
         return sorted(out, key=lambda o: o.date)
 
     def last_updated(self, series: str) -> datetime:
@@ -90,4 +105,4 @@ class FredClient:
                 raw += ":00"  # "-05" → "-05:00"
             return datetime.fromisoformat(raw)
         except (KeyError, IndexError, TypeError, ValueError):
-            raise DataUnavailableError(f"FRED {series} 更新时间无法解析") from None
+            raise FredParseError(f"FRED {series} 更新时间无法解析") from None

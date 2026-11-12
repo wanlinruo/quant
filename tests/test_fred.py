@@ -9,7 +9,14 @@ from pydantic import SecretStr
 
 from fakes import FakeFetch
 from quant.data.providers.base import DataUnavailableError
-from quant.data.providers.fred import FredAuthError, FredClient, FredUnreachable, Obs
+from quant.data.providers.fred import (
+    FredAuthError,
+    FredClient,
+    FredHttpError,
+    FredParseError,
+    FredUnreachable,
+    Obs,
+)
 
 
 def client(fetch: object, key: str = "k") -> FredClient:
@@ -64,11 +71,29 @@ def test_server_errors_are_unreachable(status: int) -> None:
 
 
 def test_client_error_is_not_unreachable() -> None:
-    with pytest.raises(DataUnavailableError) as e:
+    with pytest.raises(FredHttpError) as e:
         client(FakeFetch((404, {"error_message": "Bad series"})), "SECRET").observations(
             "X", date(2026, 1, 1)
         )
     assert not isinstance(e.value, FredUnreachable)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"observations": [{"date": "bad", "value": "1"}]},
+        {"observations": [{"date": "2026-10-30", "value": "bad"}]},
+    ],
+)
+def test_observation_parse_errors_are_distinct(body: object) -> None:
+    with pytest.raises(FredParseError):
+        client(FakeFetch((200, body))).observations("X", date(2026, 1, 1))
+
+
+def test_non_json_success_body_is_parse_error() -> None:
+    with pytest.raises(FredParseError):
+        client(FakeFetch((200, "<html>"))).observations("X", date(2026, 1, 1))
 
 
 def test_network_error_is_unreachable() -> None:

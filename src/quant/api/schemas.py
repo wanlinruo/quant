@@ -578,6 +578,7 @@ class StylePairOut(BaseModel):
 class SectorRowOut(BaseModel):
     symbol: str
     name: str
+    as_of: date | None = None
     d1: float | None
     w1: float | None
     m1: float | None
