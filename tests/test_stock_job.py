@@ -12,7 +12,7 @@ import pytest
 from quant.data import market_store as ms
 from quant.data.providers.base import DataUnavailableError
 from quant.data.providers.finnhub import FinnhubAuthError, NewsRaw
-from quant.market.stock_job import run_stock_data
+from quant.market.stock_job import StockDataPartialFailure, run_stock_data
 from quant.market.stock_metrics import METRIC_KEYS
 
 TODAY = date(2026, 10, 30)
@@ -96,7 +96,9 @@ def test_stock_data_holdings_first_and_metrics_cap(tmp_path: Path) -> None:
 
 def test_stock_data_resumes_oldest_first(tmp_path: Path) -> None:
     gics(tmp_path, [f"S{i}" for i in range(6)])
-    summary = run(tmp_path, FakeFinnhub(fail_at=3))
+    with pytest.raises(StockDataPartialFailure) as exc:
+        run(tmp_path, FakeFinnhub(fail_at=3))
+    summary = str(exc.value)
     assert "限流或故障" in summary
     assert sorted(p.stem for p in (tmp_path / "market" / "stocks").glob("*.json")) == [
         "S0",
@@ -160,7 +162,9 @@ def test_stock_news_only_relevant(tmp_path: Path) -> None:
 def test_stock_metrics_before_news_and_stage_in_summary(tmp_path: Path) -> None:
     gics(tmp_path, ["S0", "S1", "S2"])
     fh = FakeFinnhub(fail_at=4)  # 3 次指标 + 1 次新闻后限流
-    summary = run(tmp_path, fh)
+    with pytest.raises(StockDataPartialFailure) as exc:
+        run(tmp_path, fh)
+    summary = str(exc.value)
     assert fh.metric_calls == ["S0", "S1", "S2"] and fh.news_calls == ["S0"]
     assert "停在新闻阶段" in summary and doc(tmp_path, "S2")["metrics_updated"]
 

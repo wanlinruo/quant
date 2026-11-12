@@ -58,6 +58,22 @@ def test_overview_reads_snapshot(client: TestClient, tmp_path: Path) -> None:
     assert set(o["heatmap"]) == {"1D", "1W", "1M", "YTD"}
 
 
+def test_snapshot_cache_is_bounded_and_invalidates_on_replace(tmp_path: Path) -> None:
+    from quant.api.routes import market
+
+    market._json_cache.clear()
+    paths = []
+    for i in range(market.JSON_CACHE_MAX + 2):
+        path = tmp_path / f"{i}.json"
+        path.write_text(json.dumps({"value": i}), encoding="utf-8")
+        paths.append(path)
+        assert market._load(path) == {"value": i}
+    assert len(market._json_cache) == market.JSON_CACHE_MAX
+    path = paths[-1]
+    path.write_text(json.dumps({"value": 999, "changed": True}), encoding="utf-8")
+    assert market._load(path) == {"value": 999, "changed": True}
+
+
 def test_overview_corrupt_snapshot_is_pending(client: TestClient, tmp_path: Path) -> None:
     path = snapshot_path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -149,20 +149,28 @@ def build_calendar(
     """返回（已公布，按时间降序；接下来，按时间升序）。"""
     start = datetime.combine(prev_day, time(0), ET)
     items: list[tuple[datetime, CalItem]] = []
-    fomc_days = set(fomc)
+    local_fomc_days = set(fomc)
     rate: dict[date, Mapping[str, Any]] = {}  # FF 的 Federal Funds Rate：预期 / 前值
+    ff_fomc_days: set[date] = set()
     for e in ff:
         t = datetime.fromisoformat(str(e["time"])).astimezone(ET)
         if e["title"] in FOMC_FF_TITLES:
+            ff_fomc_days.add(t.date())
             if e["title"] == "Federal Funds Rate":
                 rate[t.date()] = e
-                fomc_days.add(t.date())
             continue
         key = f"{e['title']}|{t.date().isoformat()}"
         items.append((t, CalItem(t.isoformat(), False, "econ", str(e["title"]), int(e["impact"]),
                                  actuals.get(key), e.get("forecast") or None,
                                  e.get("previous") or None, [], False, None)))  # fmt: skip
     items += _earnings_items(earnings, holdings, big)
+    # FF 是实际发布时间；若本地维护日期相差一天，以 FF 为准并合并，避免出现相邻两条。
+    reconciled_local = {
+        d
+        for d in local_fomc_days
+        if not any(abs((d - ff_day).days) <= 1 for ff_day in ff_fomc_days)
+    }
+    fomc_days = reconciled_local | ff_fomc_days
     fomc_items = []
     for d in sorted(fomc_days):
         t = datetime.combine(d, time(14, 0), ET)

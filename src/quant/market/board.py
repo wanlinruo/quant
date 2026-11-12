@@ -193,6 +193,7 @@ def styles(close: pd.DataFrame) -> list[StylePair]:
 class SectorRow:
     symbol: str
     name: str
+    as_of: str | None
     d1: float | None
     w1: float | None
     m1: float | None
@@ -208,7 +209,8 @@ def sectors(close: pd.DataFrame) -> list[SectorRow]:
         c = _col(close, etf)
         d1 = _ret(c, 1)
         rows.append(SectorRow(
-            etf, ETF_SET[etf][0], d1, _ret(c, 5), _ret(c, 21), _ytd(c),
+            etf, ETF_SET[etf][0], c.index[-1].date().isoformat() if len(c) else None,
+            d1, _ret(c, 5), _ret(c, 21), _ytd(c),
             _f(d1 - spy_d1) if d1 is not None and spy_d1 is not None else None, _spark(c, 21),
         ))  # fmt: skip
     return sorted(rows, key=lambda r: -(r.d1 if r.d1 is not None else -math.inf))
@@ -244,14 +246,37 @@ def _signals(
     c: pd.Series, o: pd.Series, h: pd.Series, lo: pd.Series, v: pd.Series
 ) -> tuple[list[str], float | None]:
     out: list[str] = []
-    vr = _f(v.iloc[-1] / v.iloc[-21:-1].mean()) if len(v) > 20 and v.iloc[-21:-1].mean() else None
+    cv = pd.DataFrame({"close": c, "volume": v.reindex(c.index)}).dropna()
+    prior_volume = cv["volume"].iloc[-21:-1] if len(cv) > 20 else pd.Series(dtype=float)
+    avg_volume = prior_volume.mean() if len(prior_volume) == 20 else None
+    vr = (
+        _f(cv["volume"].iloc[-1] / avg_volume)
+        if len(cv) and cv.index[-1] == c.index[-1] and avg_volume
+        else None
+    )
     if vr is not None and vr >= VOLUME_SURGE and c.iloc[-1] >= c.iloc[-20:].max():
         out.append("放量突破")
-    if len(c) > 1 and len(o) and c.iloc[-2] and abs(o.iloc[-1] / c.iloc[-2] - 1) >= GAP_PCT:
+    current_open = o.reindex(c.index).iloc[-1] if len(c) else None
+    if (
+        len(c) > 1
+        and pd.notna(current_open)
+        and c.iloc[-2]
+        and abs(float(current_open) / c.iloc[-2] - 1) >= GAP_PCT
+    ):
         out.append("跳空")
-    if len(h) >= YEAR and h.iloc[-1] > h.iloc[-YEAR:-1].max():
+    aligned_h = h.reindex(c.index).dropna()
+    aligned_lo = lo.reindex(c.index).dropna()
+    if (
+        len(aligned_h) >= YEAR
+        and aligned_h.index[-1] == c.index[-1]
+        and aligned_h.iloc[-1] > aligned_h.iloc[-YEAR:-1].max()
+    ):
         out.append("52周新高")
-    if len(lo) >= YEAR and lo.iloc[-1] < lo.iloc[-YEAR:-1].min():
+    if (
+        len(aligned_lo) >= YEAR
+        and aligned_lo.index[-1] == c.index[-1]
+        and aligned_lo.iloc[-1] < aligned_lo.iloc[-YEAR:-1].min()
+    ):
         out.append("52周新低")
     if len(c) > 50:
         ma, ma_prev = c.iloc[-50:].mean(), c.iloc[-51:-1].mean()
@@ -415,7 +440,33 @@ class MarketSnapshot:
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = _clean(asdict(self))
+        out["heatmap"] = compact_heatmap(out.get("heatmap"))
         return out
+
+
+def compact_heatmap(raw: Any) -> dict[str, Any]:
+    """快照内每只股票只存一次元数据；API 读取时展开为原有按周期结构。"""
+    periods = raw if isinstance(raw, dict) else {}
+    cells: dict[str, dict[str, Any]] = {}
+    for period, rows in periods.items():
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("symbol"):
+                continue
+            symbol = str(row["symbol"])
+            cell = cells.setdefault(
+                symbol,
+                {
+                    "symbol": symbol,
+                    "name": row.get("name"),
+                    "sector": row.get("sector"),
+                    "market_cap": row.get("market_cap"),
+                    "returns": {},
+                },
+            )
+            cell["returns"][str(period)] = row.get("ret")
+    return {"version": 2, "cells": list(cells.values())}
 
 
 def _clean(x: Any) -> Any:

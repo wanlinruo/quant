@@ -884,6 +884,7 @@ export interface RobustnessOut {
 export interface SectorRowOut {
   symbol: string;
   name: string;
+  as_of?: string | null;
   d1: number | null;
   w1: number | null;
   m1: number | null;

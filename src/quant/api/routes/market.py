@@ -43,6 +43,8 @@ log = logging.getLogger("quant.api.market")
 
 DATA_STATUS_TTL = 300  # 秒；全量校验所有标的较慢，与改版前的面板一样缓存 5 分钟
 _status_cache: dict[tuple[str, date], tuple[float, list[DataStatusRow]]] = {}
+_json_cache: dict[Path, tuple[int, int, Any]] = {}
+JSON_CACHE_MAX = 8
 
 
 def _now() -> float:
@@ -83,14 +85,42 @@ def bars(symbol: str, start: date | None = None) -> BarsOut:
 
 
 def _load(path: Path) -> Any:
-    """读任务生成的 JSON；没有或损坏时为 None。"""
+    """按文件 mtime/size 缓存任务 JSON；缓存有界且文件替换后立即失效。"""
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        st = path.stat()
+        hit = _json_cache.get(path)
+        key = (st.st_mtime_ns, st.st_size)
+        if hit is not None and hit[:2] == key:
+            return hit[2]
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        _json_cache[path] = (*key, doc)
+        while len(_json_cache) > JSON_CACHE_MAX:
+            _json_cache.pop(next(iter(_json_cache)))
+        return doc
     except FileNotFoundError:
+        _json_cache.pop(path, None)
         return None
     except (OSError, ValueError) as e:
         log.warning("%s 无法读取：%s", path.name, type(e).__name__)
         return None
+
+
+def _expanded_heatmap(raw: Any) -> dict[str, list[dict[str, Any]]]:
+    """兼容 v1 快照，并把 v2 去重结构展开成现有 API 合约。"""
+    if not isinstance(raw, dict) or raw.get("version") != 2:
+        return raw if isinstance(raw, dict) else {}
+    out: dict[str, list[dict[str, Any]]] = {k: [] for k in ("1D", "1W", "1M", "YTD")}
+    for cell in raw.get("cells") or []:
+        if not isinstance(cell, dict):
+            continue
+        returns = cell.get("returns")
+        if not isinstance(returns, dict):
+            continue
+        base = {k: cell.get(k) for k in ("symbol", "name", "sector", "market_cap")}
+        for period in out:
+            if period in returns:
+                out[period].append({**base, "ret": returns[period]})
+    return out
 
 
 def _macro(data_dir: Path) -> list[TickerItemOut]:
@@ -131,7 +161,8 @@ def overview() -> MarketOverview:
     if not isinstance(doc, dict):
         return MarketOverview(status="pending", macro=macro)
     try:
-        out = MarketOverview(status="ok", **doc)
+        normalized = {**doc, "heatmap": _expanded_heatmap(doc.get("heatmap"))}
+        out = MarketOverview(status="ok", **normalized)
     except (TypeError, ValidationError) as e:
         log.warning("首页快照无法读取：%s", type(e).__name__)
         return MarketOverview(status="pending", macro=macro)

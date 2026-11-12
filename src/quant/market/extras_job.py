@@ -46,6 +46,10 @@ MACRO_LOOKBACK = 260
 AUTH_ERRORS = (FinnhubAuthError, FredAuthError)
 
 
+class MarketExtrasPartialFailure(DataUnavailableError):
+    """独立区块已尽量刷新，但至少一个已配置来源失败。"""
+
+
 class FredLike(Protocol):
     def observations(self, series: str, start: date) -> list[Obs]: ...
     def last_updated(self, series: str) -> datetime: ...
@@ -80,6 +84,7 @@ def run_market_extras(
     fetch: Fetch = http_fetch,
 ) -> str:
     notes: list[str] = []
+    failures: list[str] = []
     auth: list[DataUnavailableError] = []
     gen = now.astimezone(ET)
     stamp = gen.isoformat()
@@ -88,7 +93,9 @@ def run_market_extras(
     def fail(what: str, e: DataUnavailableError) -> None:
         if isinstance(e, AUTH_ERRORS):
             auth.append(e)
-        notes.append(f"{what}暂不可用（{e}）")
+        message = f"{what}暂不可用（{e}）"
+        notes.append(message)
+        failures.append(message)
 
     # ---- 宏观 ----
     fred_obs: dict[str, list[Obs]] = {}
@@ -156,7 +163,7 @@ def run_market_extras(
                 except DataUnavailableError as e:
                     if isinstance(e, AUTH_ERRORS):
                         raise
-                    notes.append(f"公司新闻停在 {s}（{e}）")
+                    fail(f"Finnhub 公司新闻 {s} ", e)
                     break
             reasons = {}
             if as_of is not None:
@@ -236,4 +243,7 @@ def run_market_extras(
     if auth:
         log.warning(text)
         raise auth[0]
+    if failures:
+        log.warning(text)
+        raise MarketExtrasPartialFailure(text)
     return text

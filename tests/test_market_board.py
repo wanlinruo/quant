@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from quant.data.market_store import ETF_SET, SECTOR_ETF, GicsTable, MarketStore
+from quant.data.market_store import ETF_SET, SECTOR_ETF, CapInfo, GicsTable, MarketStore
 from quant.market import board as b
 
 N = 300
@@ -167,6 +167,7 @@ def test_snapshot_json_serializable_no_nan(tmp_path: object) -> None:
         day = day.rename_axis("symbol").reset_index()
         day["vwap"] = day["close"]
         store.write_day(d.date(), day, keep=set(day["symbol"]))
+    store.write_caps({s: CapInfo(1e9, s, IDX[-1].date()) for s in GICS.members})
     snap = b.build_snapshot(store, GICS, IDX[-1].date(), stale=False)
     doc = snap.to_json()
     text = json.dumps(doc, allow_nan=False)
@@ -182,6 +183,10 @@ def test_snapshot_json_serializable_no_nan(tmp_path: object) -> None:
     assert xlk["1D"] == pytest.approx(d1) and xlk["6M"] is not None
     assert xlk["1Y"] is None  # 合成数据 260 个工作日只跨 361 天，不足 1 年时不给
     assert set(doc["sector_periods"]) == set(SECTOR_ETF.values())
+    assert doc["heatmap"]["version"] == 2
+    cells = doc["heatmap"]["cells"]
+    assert len({c["symbol"] for c in cells}) == len(cells)
+    assert set(cells[0]["returns"]) == {"1D", "1W", "1M", "YTD"}
 
 
 # ---- 后续修复（#79）----
@@ -205,6 +210,29 @@ def test_heatmap_1d_none_when_stale() -> None:
     close.loc[IDX[-1], "GAP"] = np.nan
     cells = {c.symbol: c for c in b.heatmap(close, GICS, {s: 1e9 for s in GICS.members})["1D"]}
     assert cells["GAP"].ret is None and cells["UP"].ret is not None
+
+
+def test_signals_align_missing_values_by_date() -> None:
+    idx = pd.bdate_range(end="2026-10-30", periods=260)
+    close = pd.Series(np.linspace(90, 110, len(idx)), index=idx)
+    open_ = close.copy()
+    high = close + 1
+    low = close - 1
+    volume = pd.Series(1000.0, index=idx)
+    open_.iloc[-2] = np.nan  # 不能导致最后开盘价错位成前一天
+    volume.iloc[-1] = np.nan  # 当日缺量时不能拿前一日冒充当日量
+    high.iloc[-1] = np.nan  # 当日缺最高价时不能报 52 周新高
+    signals, ratio = b._signals(close, open_.dropna(), high.dropna(), low, volume.dropna())
+    assert "跳空" not in signals and "放量突破" not in signals
+    assert "52周新高" not in signals and ratio is None
+
+
+def test_sector_row_exposes_its_own_cutoff() -> None:
+    f = frames()
+    close = f["close"].copy()
+    close.loc[IDX[-1], "XLK"] = np.nan
+    xlk = next(row for row in b.sectors(close) if row.symbol == "XLK")
+    assert xlk.as_of == IDX[-2].date().isoformat()
 
 
 def test_movers_keep_signal_rows_beyond_cap() -> None:

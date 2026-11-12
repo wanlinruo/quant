@@ -49,6 +49,16 @@ def _num(v: Any) -> float | None:
 
 def _rets(snap: dict[str, Any], period: str) -> dict[str, float | None]:
     heat = snap.get("heatmap")
+    if isinstance(heat, dict) and heat.get("version") == 2:
+        out: dict[str, float | None] = {}
+        for cell in heat.get("cells") or []:
+            if not isinstance(cell, dict) or not cell.get("symbol"):
+                continue
+            returns = cell.get("returns")
+            out[str(cell["symbol"])] = (
+                _num(returns.get(period)) if isinstance(returns, dict) else None
+            )
+        return out
     cells = heat.get(period) if isinstance(heat, dict) else None
     try:
         return {c["symbol"]: _num(c.get("ret")) for c in cells or []}
