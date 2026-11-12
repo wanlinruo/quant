@@ -2,7 +2,7 @@
 
 个人美股量化交易系统：老虎证券 OpenAPI 下单，日频 ETF 轮动起步。完整设计见 [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)，开发约定见 [`CLAUDE.md`](CLAUDE.md)。
 
-> 当前阶段：Phase 4 模拟盘稳定性验收。交易主链、回测和面板已上线；[连续运行验收 #34](https://github.com/wanlinruo/quant/issues/34) 与 [完整交易日容量验收 #100](https://github.com/wanlinruo/quant/issues/100) 进行中，尚未切换实盘。最近运行证据见 [`docs/operations/2026-11-04-acceptance-status.md`](docs/operations/2026-11-04-acceptance-status.md)。
+> 当前阶段：Phase 4 模拟盘稳定性验收。交易主链、回测和面板已上线；完整交易日容量验收 [#100](https://github.com/wanlinruo/quant/issues/100) 已通过，[连续运行验收 #34](https://github.com/wanlinruo/quant/issues/34) 截至 2026-11-11 为 5 / 20，尚未切换实盘。最新逐日证据及人工介入边界以 #34 为准。
 
 ## 快速开始
 
@@ -38,7 +38,7 @@ cp .env.example .env   # 按注释填写；.env 已被 gitignore
 | `src/quant/jobs` | 定时任务（按美东时间调度） |
 | `src/quant/db` | 数据库表与迁移 |
 | `src/quant/notify` | 告警 |
-| `src/quant/dashboard` | 只读面板 |
+| `src/quant/api`、`web` | FastAPI 只读接口与 React 面板 |
 | `configs/` | YAML 配置（base / dev / paper / live） |
 | `scripts/` | 一次性脚本，如 Phase 0 验证 |
 | `research/` | notebooks，不参与部署 |
