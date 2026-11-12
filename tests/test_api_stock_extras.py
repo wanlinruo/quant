@@ -84,6 +84,7 @@ def test_extras_covered_symbol(client: TestClient, tmp_path: Path) -> None:
     assert d["covered"] and d["symbol"] == "AAPL" and d["name"] == "Co AAPL"
     assert d["sector"] == "信息技术" and d["sub_industry"] == SUB and d["sector_etf"] == "XLK"
     assert d["market_cap"] == 5e12 and d["sector_periods"]["1D"] == 0.012
+    assert d["sector_as_of"] == "2026-10-30"
     peers = [p["symbol"] for p in d["peers"]]
     assert peers[:3] == ["DELL", "HPQ", "SMCI"]  # 同子行业优先，按市值降序
     assert "AAPL" not in peers and "XOM" not in peers and len(peers) == 8

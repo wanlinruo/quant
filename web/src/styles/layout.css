@@ -225,6 +225,7 @@ td.reason a:hover { text-decoration: underline; }
 .run-main { display: flex; align-items: center; gap: 6px; }
 .run-open { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left; }
 .run-open:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 3px; }
+.run-metric { display: inline-block; width: 58px; flex: none; text-align: right; }
 .run-err { color: var(--down, #ef4444); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 22px; }
 .statbar .stat { min-width: 0; }
 .stat-v { font-size: 16px; color: #fff; font-weight: 600; }

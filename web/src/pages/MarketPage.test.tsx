@@ -225,6 +225,22 @@ describe("MarketPage", () => {
     expect(within(row).getByText("3")).toBeInTheDocument();
   });
 
+  it("index chart exposes an accessible date-range switch", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW] });
+    const { user } = renderPage(<MarketPage />, "/");
+    const panel = (await screen.findByText("指数日线（ETF）")).closest("section")!;
+    const oneYear = within(panel).getByRole("tab", { name: "1年" });
+    expect(oneYear).toHaveAttribute("aria-selected", "true");
+    await user.click(within(panel).getByRole("tab", { name: "1月" }));
+    expect(within(panel).getByRole("tab", { name: "1月" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("shows an overview request error instead of only pending placeholders", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [500, { detail: "upstream unavailable" }] });
+    renderPage(<MarketPage />, "/");
+    expect(await screen.findByRole("alert")).toHaveTextContent("市场概览请求失败");
+  });
+
   it("treemap cells link to stock page with account", async () => {
     mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW] });
     const { user } = renderPage(<MarketPage />, "/?account=paper");

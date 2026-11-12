@@ -97,6 +97,7 @@ def stock_extras(data_dir: Path, symbol: str) -> StockExtras:
             "sub_industry": sub,
             "sector_etf": etf,
             "sector_periods": periods,
+            "sector_as_of": snap.get("as_of") if periods else None,
             "peers": [
                 PeerOut(
                     symbol=s,

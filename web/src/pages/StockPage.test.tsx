@@ -43,7 +43,7 @@ const METRICS = [
 ];
 const EXTRAS = {
   symbol: "NVDA", covered: true, name: "Nvidia", sector: "信息技术", sub_industry: "Semiconductors", market_cap: 4.5e12,
-  sector_etf: "XLK", sector_periods: { ...NONE, "1D": 0.012, "1Y": 0.25 },
+  sector_etf: "XLK", sector_periods: { ...NONE, "1D": 0.012, "1Y": 0.25 }, sector_as_of: "2026-10-30",
   peers: [
     { symbol: "AVGO", name: "Broadcom", market_cap: 1.6e12, d1: 0.021, ytd: 0.4 },
     { symbol: "AMD", name: "Advanced Micro Devices", market_cap: 2.4e11, d1: -0.03, ytd: null },
@@ -121,6 +121,16 @@ describe("StockPage", () => {
     const row = (await screen.findByText("板块 ETF · XLK 信息技术")).closest("tr")!;
     expect(within(row).getByText("+1.20%")).toBeInTheDocument();
     expect(within(row).getByText("+25.00%")).toBeInTheDocument();
+  });
+
+  it("notes when sector ETF returns use an older cutoff date", async () => {
+    render("NVDA", { ...ROUTES, "/api/stock/NVDA/extras": [200, { ...EXTRAS, sector_as_of: "2026-10-29" }] });
+    expect(await screen.findByText("截至 10-29")).toBeInTheDocument();
+  });
+
+  it("shows an extras request failure instead of treating it as pending", async () => {
+    render("NVDA", { ...ROUTES, "/api/stock/NVDA/extras": [500, { detail: "broken snapshot" }] });
+    expect(await screen.findByRole("alert")).toHaveTextContent("扩展数据请求失败");
   });
 
   it("stock extras key stats cap and sector", async () => {

@@ -94,6 +94,7 @@ export interface BacktestRunOut {
   end: string;
   params: Record<string, unknown>;
   costs: Record<string, string> | null;
+  initial_cash: number | null;
   metrics: Record<string, unknown>;
   error: string;
   created_at: string;
@@ -921,6 +922,7 @@ export interface StockExtras {
   market_cap?: number | null;
   sector_etf?: string | null;
   sector_periods?: Record<string, number | null>;
+  sector_as_of?: string | null;
   peers?: PeerOut[];
   metrics?: MetricOut[];
   metrics_updated?: string | null;
