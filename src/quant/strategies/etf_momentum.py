@@ -55,6 +55,7 @@ class MomentumParams:
 
 class EtfMomentum(Strategy):
     name = "etf_momentum"
+    params_type = MomentumParams
 
     def __init__(self, calendar: TradingCalendar | None = None) -> None:
         self._cal = calendar or get_calendar()

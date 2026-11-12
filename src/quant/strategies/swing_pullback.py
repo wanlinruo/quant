@@ -309,6 +309,7 @@ def _size(
 
 class SwingPullback(Strategy):
     name = "swing_pullback"
+    params_type = SwingParams
     min_weight_diff: ClassVar[float | None] = 0.10
     # 个股财报日常有 15–30% 的单日波动；40% 仍能识别 2:1 及以上未复权的拆股（−50%）
     max_daily_move: ClassVar[float] = 0.40

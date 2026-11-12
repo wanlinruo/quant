@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import shlex
 from bisect import bisect_left
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import date
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from quant.api import backtest_analysis as ba
@@ -178,10 +178,10 @@ def analysis(s: Session, run_id: int, settings: Settings) -> BacktestAnalysis | 
                                 qqq=qn, spy=sn, drawdown=[float(p.drawdown) for p in points],
                                 qqq_drawdown=qdd)  # fmt: skip
     stats = [BtStatOut(**asdict(x)) for x in ba.stat_bar(eq, qqq)]
-    tv = trades_view(s, run_id)
-    if tv is not None and tv.summary is not None:
-        fill = {"win_rate": tv.summary.win_rate, "profit_factor": tv.summary.profit_factor,
-                "trades": float(tv.summary.trades)}  # fmt: skip
+    trade_metrics = _trade_metrics(s, run_id)
+    if trade_metrics is not None:
+        fill = {"win_rate": trade_metrics.win_rate, "profit_factor": trade_metrics.profit_factor,
+                "trades": float(trade_metrics.trades)}  # fmt: skip
         stats = [x.model_copy(update={"value": fill[x.key]}) if x.key in fill else x for x in stats]
     out["stats"] = stats
     daily = s.scalars(select(BacktestDaily).where(BacktestDaily.run_id == run_id)
@@ -226,6 +226,39 @@ def _hold_days(dates: list[date], start: date, end: date | None) -> int:
 
 def _rate(xs: list[float]) -> float | None:
     return sum(1 for x in xs if x > 0) / len(xs) if xs else None
+
+
+@dataclass(frozen=True)
+class _TradeMetrics:
+    trades: int
+    win_rate: float | None
+    profit_factor: float | None
+
+
+def _trade_metrics(s: Session, run_id: int) -> _TradeMetrics | None:
+    """只在数据库内聚合分析页和对比页需要的交易指标。"""
+    closed = BacktestTrade.close_date.is_not(None)
+    row = s.scalar(
+        select(
+            func.jsonb_build_array(
+                func.count(BacktestTrade.seq),
+                func.sum(case((closed, 1), else_=0)),
+                func.sum(case((closed & (BacktestTrade.pnl > 0), 1), else_=0)),
+                func.sum(case((closed & (BacktestTrade.pnl > 0), BacktestTrade.pnl), else_=0.0)),
+                func.sum(case((closed & (BacktestTrade.pnl < 0), -BacktestTrade.pnl), else_=0.0)),
+            )
+        ).where(BacktestTrade.run_id == run_id)
+    )
+    if row is None:
+        return None
+    trades, closed_count, wins, win_pnl, loss_pnl = row
+    if not trades:
+        return None
+    return _TradeMetrics(
+        trades=int(trades),
+        win_rate=float(wins) / int(closed_count) if closed_count else None,
+        profit_factor=float(win_pnl) / float(loss_pnl) if loss_pnl else None,
+    )
 
 
 def trades_view(s: Session, run_id: int) -> BacktestTrades | None:
@@ -316,6 +349,22 @@ def timing_periods(daily: list[BacktestDaily], eq: pd.Series | None) -> list[BtT
 def positions_view(s: Session, run_id: int, day: date | None) -> BacktestPositions | None:
     if s.get(BacktestRun, run_id) is None:
         return None
+    # 日期切换只返回当天快照；历史图表和最长持仓由无 date 的首次请求加载一次。
+    if day is not None:
+        held = s.scalars(
+            select(BacktestPosition)
+            .where(
+                BacktestPosition.run_id == run_id,
+                BacktestPosition.pos_date == day,
+            )
+            .order_by(BacktestPosition.weight.desc())
+        ).all()
+        return BacktestPositions(
+            day=day,
+            holdings=[
+                BtHoldingOut(symbol=p.symbol, sleeve=p.sleeve, weight=p.weight) for p in held
+            ],
+        )
     daily = s.scalars(select(BacktestDaily).where(BacktestDaily.run_id == run_id)
                       .order_by(BacktestDaily.day)).all()  # fmt: skip
     if not daily:
@@ -327,7 +376,7 @@ def positions_view(s: Session, run_id: int, day: date | None) -> BacktestPositio
     rows = [BtDailyPosOut(date=r.day, cash=r.cash_weight, sleeves=sleeves.get(r.day, {}),
                           timing_factor=r.timing_factor) for r in daily]  # fmt: skip
     eq = _equity(s, run_id)
-    pick = day or daily[-1].day
+    pick = daily[-1].day
     held = s.scalars(select(BacktestPosition).where(BacktestPosition.run_id == run_id,
                                                     BacktestPosition.pos_date == pick)
                      .order_by(BacktestPosition.weight.desc())).all()  # fmt: skip
@@ -409,12 +458,11 @@ def compare_view(s: Session, ids: list[int]) -> BacktestCompare:
         best = _best(vals, key in LOWER_BETTER)
         metrics.append(BtCompareMetric(key=key, label=first.label, kind=first.kind, scope="common",
                                        values=vals, best=best))  # fmt: skip
-    trades = {r.id: trades_view(s, r.id) for r in runs}
+    trades = {r.id: _trade_metrics(s, r.id) for r in runs}
     for key, label, kind in (("win_rate", "胜率", "pct"), ("trades", "交易笔数", "int")):
         full: dict[str, float | None] = {}
         for r in runs:
-            tv = trades[r.id]
-            sm = tv.summary if tv is not None else None
+            sm = trades[r.id]
             full[str(r.id)] = (
                 None if sm is None else (sm.win_rate if key == "win_rate" else float(sm.trades))
             )

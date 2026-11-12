@@ -119,3 +119,45 @@ def test_open_at_end_and_daily_rows() -> None:
     last = led.daily[-1]
     assert last[0] == D[5] and last[1] == pytest.approx(1 - 103.0 / 10_000) and last[2] == 0.5
     assert len(led.daily) == len(D)
+
+
+def test_same_day_sleeve_exit_and_entry_assigns_day_pnl_to_exiting_sleeve() -> None:
+    holdings = {
+        D[0]: {},
+        D[1]: {"AAA": (100, 1000.0)},
+        D[2]: {"AAA": (100, 1200.0)},
+        D[3]: {"AAA": (100, 1300.0)},
+        D[4]: {},
+    }
+    fills = [
+        fill(D[1], "AAA", Side.BUY, 100, "10"),
+        fill(D[2], "AAA", Side.SELL, 100, "12"),
+        fill(D[2], "AAA", Side.BUY, 100, "12"),
+        fill(D[4], "AAA", Side.SELL, 100, "14"),
+    ]
+    attribution = {
+        D[0]: attr({"swing": {"AAA": 1.0}}),
+        D[1]: attr({"momentum": {"AAA": 1.0}}),
+        D[2]: attr({"momentum": {"AAA": 1.0}}),
+        D[3]: attr({"momentum": {}}),
+    }
+    by = {t.sleeve: t for t in build_ledger(holdings, fills, attribution, EQ).trades}
+    assert by["swing"].close_date == D[2] and by["swing"].pnl == pytest.approx(200)
+    assert by["momentum"].open_date == D[2] and by["momentum"].pnl == pytest.approx(200)
+
+
+def test_near_zero_share_drift_is_not_an_adjustment() -> None:
+    holdings = {
+        D[0]: {},
+        D[1]: {"AAA": (100.0, 1000.0)},
+        D[2]: {"AAA": (100.0000004, 1100.0)},
+        D[3]: {"AAA": (100.0, 1200.0)},
+    }
+    attribution = {d: attr({"main": {"AAA": 1.0}}) for d in D}
+    trade = build_ledger(
+        holdings,
+        [fill(D[1], "AAA", Side.BUY, 100, "10")],
+        attribution,
+        EQ,
+    ).trades[0]
+    assert trade.adjustments == []
