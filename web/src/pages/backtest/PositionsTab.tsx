@@ -48,7 +48,14 @@ function Stack({ daily, timing }: { daily: BtDailyPosOut[]; timing: BtTimingOut[
 /** 持仓变化：子仓 / 现金占比随时间变化、选一天看当天持仓、持有时间最长的交易 */
 export function PositionsTab({ runId }: { runId: number }) {
   const [day, setDay] = useState<string | null>(null);
-  const res = useApi<BacktestPositions>(`/api/backtests/${runId}/positions`, day ? { date: day } : undefined);
+  const res = useApi<BacktestPositions>(`/api/backtests/${runId}/positions`);
+  const selected = useApi<BacktestPositions>(day ? `/api/backtests/${runId}/positions` : null, day ? { date: day } : undefined);
+  const holdingsTable = (d: BacktestPositions) => (
+    <table className="dt compact">
+      <thead><tr><th>代码</th><th>子仓</th><th className="r">权重</th></tr></thead>
+      <tbody>{(d.holdings ?? []).map((h) => <tr key={`${h.symbol}-${h.sleeve}`}><td>{h.symbol}</td><td className="muted">{SLEEVE_TEXT[h.sleeve] ?? h.sleeve}</td><td className="r num">{pct(h.weight, 1)}</td></tr>)}</tbody>
+    </table>
+  );
   return (
     <div data-testid="tab-持仓变化">
       <ApiState result={res}>
@@ -64,12 +71,9 @@ export function PositionsTab({ runId }: { runId: number }) {
                   <div className="subpanel">
                     <div className="subpanel-h">
                       <b>当天持仓</b>
-                      <input type="date" aria-label="选择日期" value={d.day ?? ""} min={first} max={last} onChange={(e) => setDay(e.target.value || null)} />
+                      <input type="date" aria-label="选择日期" value={day ?? d.day ?? ""} min={first} max={last} onChange={(e) => setDay(e.target.value || null)} />
                     </div>
-                    <table className="dt compact">
-                      <thead><tr><th>代码</th><th>子仓</th><th className="r">权重</th></tr></thead>
-                      <tbody>{(d.holdings ?? []).map((h) => <tr key={`${h.symbol}-${h.sleeve}`}><td>{h.symbol}</td><td className="muted">{SLEEVE_TEXT[h.sleeve] ?? h.sleeve}</td><td className="r num">{pct(h.weight, 1)}</td></tr>)}</tbody>
-                    </table>
+                    {day ? <ApiState result={selected}>{holdingsTable}</ApiState> : holdingsTable(d)}
                   </div>
                 </Cell>
                 <Cell span={6}>

@@ -2,10 +2,11 @@
 
 import json
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,14 +16,16 @@ from sqlalchemy.orm import Session
 from api_fixtures import needs_db, seed, valid_submit_body
 from quant.api import queries
 from quant.api.app import create_app
-from quant.api.backtests import build_submission
+from quant.api.backtests import build_submission, param_schema
 from quant.api.deps import get_engine, get_settings
+from quant.api.routes import backtests as backtest_routes
 from quant.api.routes import market
 from quant.api.schemas import BacktestSubmit, CostsIn
 from quant.broker.sim import CostModel
-from quant.core.settings import CostSettings, Settings
+from quant.core.settings import ConfigError, CostSettings, Settings
 from quant.db.models import BacktestRun
 from quant.engine.runner import BacktestSpec
+from quant.strategies import STRATEGIES
 
 
 def _clear() -> None:
@@ -446,6 +449,55 @@ def test_param_schema_uses_configured(monkeypatch: pytest.MonkeyPatch, tmp_path:
         combo[(None, "momentum_weight")]["default"] == 0.5
         and combo[("momentum", "top_n")]["default"] == 10
     )
+
+
+def test_param_schema_follows_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    @dataclass(frozen=True)
+    class DemoParams:
+        window: int = 7
+
+    class DemoStrategy:
+        params_type = DemoParams
+        param_groups: ClassVar[dict[str, type]] = {}
+        param_group_defaults: ClassVar[dict[str, dict[str, Any]]] = {}
+
+    monkeypatch.setitem(STRATEGIES, "demo", DemoStrategy)
+    schema = param_schema("etf_momentum", {})
+    assert [field.model_dump() for field in schema["demo"]] == [
+        {"key": "window", "group": None, "type": "int", "default": 7}
+    ]
+
+
+def test_param_schema_distinguishes_no_params_and_invalid_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class NoParamsStrategy:
+        params_type = None
+        param_groups: ClassVar[dict[str, type]] = {}
+        param_group_defaults: ClassVar[dict[str, dict[str, Any]]] = {}
+
+    monkeypatch.setitem(STRATEGIES, "no_params", NoParamsStrategy)
+    assert param_schema("no_params", {})["no_params"] == []
+    with pytest.raises(ValueError, match="没有参数"):
+        param_schema("no_params", {"unexpected": 1})
+    with pytest.raises(ValueError, match="momentum 须为参数组"):
+        param_schema("combo", {"momentum": 3})
+    with pytest.raises(ValueError, match="top_n 须为整数"):
+        param_schema("combo", {"momentum": {"top_n": "ten"}})
+    with pytest.raises(ValueError, match="未注册"):
+        param_schema("missing", {})
+
+
+def test_param_schema_reports_config_load_failure(
+    client_no_db: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken_settings() -> Settings:
+        raise ConfigError("配置文件损坏")
+
+    monkeypatch.setattr(backtest_routes, "get_settings", broken_settings)
+    response = client_no_db.get("/api/backtests/param-schema")
+    assert response.status_code == 500
+    assert response.json()["detail"] == "配置加载失败：配置文件损坏"
 
 
 def test_submit_combo_with_param_overrides() -> None:

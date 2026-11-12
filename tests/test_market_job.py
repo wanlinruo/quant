@@ -277,8 +277,11 @@ def test_empty_day_not_requested_again(tmp_path: Path) -> None:
     d = CAL.previous_trading_day(TODAY)
     run(tmp_path, FakeClient(empty={d}))
     c = FakeClient()
-    run(tmp_path, c)
+    summary = run(tmp_path, c)
     assert d not in c.days
+    records = ms.MarketStore(tmp_path).empty_day_records()
+    assert records[d]["source"] == "massive.grouped_daily"
+    assert records[d]["retry_after"] and "自动复核" in summary
     run(tmp_path, FakeClient(empty={TODAY}), today=TODAY)
     assert TODAY not in ms.MarketStore(tmp_path).empty_days()
 
@@ -340,11 +343,38 @@ def test_required_current_day_pending_keeps_readable_snapshot(tmp_path: Path, fa
     assert snapshot(tmp_path)["stale"] is False
 
 
-def test_current_day_ready_but_optional_history_limited_still_succeeds(tmp_path: Path) -> None:
-    summary = run_market_data(FakeClient(limit_after=1), tmp_path, TODAY, CAL, SETTINGS, set(),
-                              fetch_text=lambda url: GICS_CSV, require_current=True)  # fmt: skip
+def test_current_day_ready_but_optional_history_failure_is_visible(tmp_path: Path) -> None:
+    with pytest.raises(MarketDataPending, match="局部失败") as exc:
+        run_market_data(FakeClient(limit_after=1), tmp_path, TODAY, CAL, SETTINGS, set(),
+                        fetch_text=lambda url: GICS_CSV, require_current=True)  # fmt: skip
+    summary = str(exc.value)
     assert "429" in summary
     assert snapshot(tmp_path)["stale"] is False
+
+
+def test_low_coverage_refetch_never_replaces_better_file(tmp_path: Path) -> None:
+    store = ms.MarketStore(tmp_path)
+    better = frame(TODAY)
+    better = better[better["symbol"].isin([f"S{i}" for i in range(300)])]
+    store.write_day(TODAY, better, keep=set(better["symbol"]))
+
+    class Worse(FakeClient):
+        def grouped_daily(self, day: date) -> pd.DataFrame:
+            self.days.append(day)
+            return frame(day)[frame(day)["symbol"].isin([f"S{i}" for i in range(200)])]
+
+    summary = run(tmp_path, Worse())
+    assert store.coverage(TODAY, [f"S{i}" for i in range(450)]) == pytest.approx(300 / 450)
+    assert "未优于旧文件" in summary
+
+
+def test_expired_empty_marker_is_retried_and_cleared(tmp_path: Path) -> None:
+    old = CAL.previous_trading_day(TODAY)
+    store = ms.MarketStore(tmp_path)
+    store.mark_empty(old, source="massive.grouped_daily", observed_on=date(2026, 10, 1))
+    c = FakeClient()
+    run(tmp_path, c)
+    assert old in c.days and old not in store.empty_days()
 
 
 def test_required_past_day_rerun_accepts_newer_snapshot(tmp_path: Path) -> None:

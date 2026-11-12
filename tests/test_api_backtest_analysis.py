@@ -199,6 +199,7 @@ def test_positions_endpoint(setup: tuple[TestClient, dict[str, int]]) -> None:
         ("AAA", "momentum"),
         ("BBB", "swing"),
     }
+    assert h["daily"] == [] and h["timing"] == [] and h["longest"] == []
     assert (
         d["longest"][0]["symbol"] == "CCC" and d["longest"][0]["days"] == 99
     )  # 仍持有，算到最后一天
@@ -215,6 +216,29 @@ def test_analysis_uses_trades(setup: tuple[TestClient, dict[str, int]]) -> None:
     ] == pytest.approx(2700 / 100000)
     tm = a["risk"]["timing"]
     assert len(tm) == 1 and tm[0]["days"] == 20 and tm[0]["factor"] == pytest.approx(0.5)
+
+
+def test_summary_views_do_not_build_trade_details(
+    setup: tuple[TestClient, dict[str, int]],
+    db_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, ids = setup
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("summary view must not build trade detail objects")
+
+    monkeypatch.setattr("quant.api.backtest_view.trades_view", fail)
+    assert client.get(f"/api/backtests/{ids['done']}/analysis").status_code == 200
+
+    eng = create_engine(db_url)
+    with Session(eng) as s, s.begin():
+        eq = prices(22, 0.0005) * 1000
+        rid = create_run(s, "combo", {}, IDX[0].date(), IDX[-1].date(), status="running")
+        complete_run(s, rid, {}, eq, eq / eq.cummax() - 1, sample_ledger())
+    eng.dispose()
+    response = client.get("/api/backtests/compare", params={"ids": [ids["done"], rid]})
+    assert response.status_code == 200
 
 
 def test_old_run_without_ledger(setup: tuple[TestClient, dict[str, int]], db_url: str) -> None:

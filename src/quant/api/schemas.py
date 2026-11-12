@@ -157,6 +157,7 @@ class BacktestRunOut(BaseModel):
     end: date
     params: dict[str, Any]
     costs: dict[str, str] | None
+    initial_cash: float | None
     metrics: dict[str, Any]
     error: str
     created_at: datetime
@@ -577,6 +578,7 @@ class StylePairOut(BaseModel):
 class SectorRowOut(BaseModel):
     symbol: str
     name: str
+    as_of: date | None = None
     d1: float | None
     w1: float | None
     m1: float | None
@@ -712,6 +714,7 @@ class StockExtras(BaseModel):
     market_cap: float | None = None
     sector_etf: str | None = None
     sector_periods: dict[str, float | None] = {}
+    sector_as_of: date | None = None
     peers: list[PeerOut] = []
     metrics: list[MetricOut] = []
     metrics_updated: date | None = None

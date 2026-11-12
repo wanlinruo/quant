@@ -30,6 +30,10 @@ NEWS_KEEP = 15
 METRICS_MAX_AGE = 6  # 天；超过才重取
 
 
+class StockDataPartialFailure(DataUnavailableError):
+    """已保留阶段性进度，但本轮未完整覆盖全部标的。"""
+
+
 class FinnhubLike(Protocol):
     def company_news(self, symbol: str, start: date, end: date) -> list[NewsRaw]: ...
     def metrics(self, symbol: str, keys: Sequence[str]) -> dict[str, float | None]: ...
@@ -124,4 +128,7 @@ def run_stock_data(
     if removed:
         notes.append(f"清理停用代码 {removed} 只")
     summary = f"新闻 {news_n} 只；指标 {metrics_n} 只；覆盖 {len(universe)} 只"
-    return "；".join([summary, *notes])
+    text = "；".join([summary, *notes])
+    if notes and any("限流或故障" in note for note in notes):
+        raise StockDataPartialFailure(text)
+    return text

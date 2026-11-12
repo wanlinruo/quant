@@ -174,6 +174,7 @@ def _backtest_run_out(r: BacktestRun, robust: RobustProgressOut | None = None) -
         end=r.end,
         params={k: v for k, v in r.params.items() if not k.startswith("_")},
         costs=r.params.get("_costs"),
+        initial_cash=_opt(r.params.get("_cash")),
         metrics=r.metrics or {},
         error=_first_line(r.error),
         created_at=r.created_at,

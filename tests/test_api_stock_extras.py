@@ -84,6 +84,7 @@ def test_extras_covered_symbol(client: TestClient, tmp_path: Path) -> None:
     assert d["covered"] and d["symbol"] == "AAPL" and d["name"] == "Co AAPL"
     assert d["sector"] == "信息技术" and d["sub_industry"] == SUB and d["sector_etf"] == "XLK"
     assert d["market_cap"] == 5e12 and d["sector_periods"]["1D"] == 0.012
+    assert d["sector_as_of"] == "2026-10-30"
     peers = [p["symbol"] for p in d["peers"]]
     assert peers[:3] == ["DELL", "HPQ", "SMCI"]  # 同子行业优先，按市值降序
     assert "AAPL" not in peers and "XOM" not in peers and len(peers) == 8
@@ -133,6 +134,30 @@ def test_extras_old_snapshot(client: TestClient, tmp_path: Path) -> None:
     ms.snapshot_path(tmp_path).unlink()
     d = client.get("/api/stock/AAPL/extras").json()
     assert d["covered"] and d["sector_periods"] == {} and len(d["peers"]) == 8
+
+
+def test_extras_reads_compact_heatmap_snapshot(client: TestClient, tmp_path: Path) -> None:
+    setup(
+        tmp_path,
+        snapshot={
+            "as_of": "2026-10-30",
+            "heatmap": {
+                "version": 2,
+                "cells": [
+                    {
+                        "symbol": "DELL",
+                        "name": "Co DELL",
+                        "sector": "信息技术",
+                        "market_cap": CAPS["DELL"],
+                        "returns": {"1D": 0.04, "YTD": 0.25},
+                    }
+                ],
+            },
+            "sector_periods": {"XLK": PERIODS},
+        },
+    )
+    peer = client.get("/api/stock/AAPL/extras").json()["peers"][0]
+    assert peer["symbol"] == "DELL" and peer["d1"] == 0.04 and peer["ytd"] == 0.25
 
 
 def test_extras_peers_fill_from_sector_when_few(client: TestClient, tmp_path: Path) -> None:

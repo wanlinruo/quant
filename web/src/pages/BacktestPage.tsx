@@ -123,7 +123,7 @@ export function BacktestPage() {
                 a={a}
                 warnings={<CoverageWarnings run={current} />}
                 onParams={() => setTab("params")}
-                onCopy={() => setDrawer({ strategy: current.strategy, start: current.start, end: current.end, params: current.params, costs: current.costs, cash: a?.initial_cash != null ? String(a.initial_cash) : null })}
+                onCopy={() => setDrawer({ strategy: current.strategy, start: current.start, end: current.end, params: current.params, costs: current.costs, cash: current.initial_cash != null ? String(current.initial_cash) : a?.initial_cash != null ? String(a.initial_cash) : null })}
                 onExport={() => a && exportCsv(a)}
               />
               <MainChart

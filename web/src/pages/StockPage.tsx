@@ -85,6 +85,8 @@ export function StockPage() {
 
   return (
     <div className="page">
+      {prof.error && <div className="error-box" role="alert">个股资料请求失败：{prof.error.message}</div>}
+      {ext.error && <div className="error-box" role="alert">扩展数据请求失败：{ext.error.message}</div>}
       <Grid>
         <Cell span={12}>
           <section className="panel">
@@ -141,7 +143,7 @@ export function StockPage() {
                     <tr><td className="muted">QQQ</td>{PERIOD_KEYS.map((k) => <td key={k} className={`r num ${tone(p.periods_qqq[k])}`}>{sp(p.periods_qqq[k])}</td>)}</tr>
                     {x?.sector_etf ? (
                       <tr>
-                        <td className="muted">{`板块 ETF · ${x.sector_etf} ${x.sector ?? ""}`}</td>
+                        <td className="muted">{`板块 ETF · ${x.sector_etf} ${x.sector ?? ""}`}{x.sector_as_of && p.as_of && x.sector_as_of !== p.as_of && <span className="pill warn" style={{ marginLeft: 6 }}>截至 {x.sector_as_of.slice(5)}</span>}</td>
                         {PERIOD_KEYS.map((k) => {
                           const v = x.sector_periods?.[k];
                           return <td key={k} className={`r num ${tone(v)}`}>{sp(v)}</td>;

@@ -10,6 +10,7 @@ import { ROBUST_REFRESH_MS, RUNS_REFRESH_MS } from "./backtest/robustRefresh";
 
 const run = (id: number, status = "done") => ({
   id, strategy: "combo", status, start: "2016-10-28", end: "2026-10-29", params: {}, costs: null,
+  initial_cash: 100000,
   metrics: { total_return: 1.5, cagr: 0.248, volatility: 0.19, max_drawdown: -0.213, sharpe: 1.21, calmar: 1.16, turnover: 4.6, trades: 1284 },
   error: "", created_at: "2026-10-29T21:14:00Z", finished_at: "2026-10-29T21:17:00Z",
 });
@@ -25,6 +26,8 @@ describe("BacktestPage", () => {
     renderPage(<BacktestPage />, "/backtest");
     expect(await screen.findByText("#128")).toBeInTheDocument();
     expect(screen.getAllByText("24.80%").length).toBeGreaterThan(0);
+    expect(screen.getAllByTitle("年化收益")[0]).toHaveClass("run-metric");
+    expect(screen.getAllByTitle("最大回撤")[0]).toHaveClass("run-metric");
   });
 
   it("limits comparison to five runs", async () => {
@@ -211,14 +214,15 @@ describe("BacktestPage", () => {
     expect(screen.getByTestId("main-chart")).toBe(chart);
   });
 
-  it("copy params opens drawer with strategy and dates", async () => {
-    const r = { ...run(128), strategy: "etf_momentum", params: { lookback: 99, top_k: 2 }, start: "2018-01-02", end: "2024-12-31" };
-    mockApi({ "/api/backtests": [200, [r]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, { ...ANALYSIS, strategy: "etf_momentum" }] });
+  it("copy params uses summary cash before analysis has loaded", async () => {
+    const r = { ...run(128), strategy: "etf_momentum", initial_cash: 75000, params: { lookback: 99, top_k: 2 }, start: "2018-01-02", end: "2024-12-31" };
+    mockApi({ "/api/backtests": [200, [r]], "/api/backtests/equity": [200, []], "/api/backtests/defaults": [200, DEFAULTS] });
     const { user } = renderPage(<BacktestPage />, "/backtest");
     await user.click(await screen.findByRole("button", { name: "复制参数新建" }));
     const dlg = await screen.findByRole("dialog");
     expect(within(dlg).getByDisplayValue("2018-01-02")).toBeInTheDocument();
     expect(within(dlg).getByDisplayValue("99")).toBeInTheDocument();
+    expect(within(dlg).getByLabelText("初始资金（美元）")).toHaveValue(75000);
   });
 
   async function openTab(name: string) {
@@ -260,6 +264,17 @@ describe("BacktestPage", () => {
     const cell = within(tab).getByText("+5.0%");
     expect(cell.closest("td")).toHaveClass("up");
     expect(within(tab).getByText("2023-01-31")).toBeInTheDocument();
+  });
+
+  it("single-month returns explain why no distribution is drawn", async () => {
+    const returns = { ...ANALYSIS.returns, distribution: [{ lo: 0.05, hi: 0.05, count: 1 }] };
+    mockApi({
+      "/api/backtests": [200, [run(128)]], "/api/backtests/equity": [200, []],
+      "/api/backtests/defaults": [200, DEFAULTS], "/api/backtests/128/analysis": [200, { ...ANALYSIS, returns }],
+    });
+    const { user } = renderPage(<BacktestPage />, "/backtest");
+    await user.click(await screen.findByRole("tab", { name: "收益分析" }));
+    expect(await screen.findByText("仅有 1 个月收益，样本不足以形成分布")).toBeInTheDocument();
   });
 
   it("risk tab", async () => {

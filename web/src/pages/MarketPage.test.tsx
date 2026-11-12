@@ -225,6 +225,22 @@ describe("MarketPage", () => {
     expect(within(row).getByText("3")).toBeInTheDocument();
   });
 
+  it("index chart exposes an accessible date-range switch", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW] });
+    const { user } = renderPage(<MarketPage />, "/");
+    const panel = (await screen.findByText("指数日线（ETF）")).closest("section")!;
+    const oneYear = within(panel).getByRole("tab", { name: "1年" });
+    expect(oneYear).toHaveAttribute("aria-selected", "true");
+    await user.click(within(panel).getByRole("tab", { name: "1月" }));
+    expect(within(panel).getByRole("tab", { name: "1月" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("shows an overview request error instead of only pending placeholders", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [500, { detail: "upstream unavailable" }] });
+    renderPage(<MarketPage />, "/");
+    expect(await screen.findByRole("alert")).toHaveTextContent("市场概览请求失败");
+  });
+
   it("treemap cells link to stock page with account", async () => {
     mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW] });
     const { user } = renderPage(<MarketPage />, "/?account=paper");
@@ -256,6 +272,36 @@ describe("MarketPage", () => {
     renderPage(<MarketPage />, "/");
     expect(await screen.findByText(/价格涨跌，不含分红/)).toBeInTheDocument();
     expect(screen.getByText("市值每天补 60 只，约 9 个交易日补齐")).toBeInTheDocument();
+  });
+
+  it("warns when daily member coverage is low", async () => {
+    mockApi({
+      ...BASE,
+      "/api/market/overview": [
+        200,
+        { ...OVERVIEW, stale: true, coverage: 0.82 },
+      ],
+    });
+    renderPage(<MarketPage />, "/");
+    expect(await screen.findByRole("alert")).toHaveTextContent("成分覆盖 82.0%");
+    expect(screen.getByRole("alert")).toHaveTextContent("后台将继续重试");
+  });
+
+  it("shows a sector ETF cutoff when it differs from the market snapshot", async () => {
+    mockApi({
+      ...BASE,
+      "/api/market/overview": [
+        200,
+        {
+          ...OVERVIEW,
+          sectors: OVERVIEW.sectors.map((row) =>
+            row.symbol === "XLK" ? { ...row, as_of: "2026-10-29" } : row,
+          ),
+        },
+      ],
+    });
+    renderPage(<MarketPage />, "/");
+    expect(await screen.findByText(/XLK · 截至 10-29/)).toBeInTheDocument();
   });
 
   it("home page has no separate intraday panel", async () => {

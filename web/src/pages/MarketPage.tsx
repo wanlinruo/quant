@@ -53,6 +53,8 @@ const FILTERS = [
 type FilterKey = (typeof FILTERS)[number]["key"];
 const INDICES = ["SPY", "QQQ", "DIA", "IWM"] as const;
 type IndexKey = (typeof INDICES)[number];
+const INDEX_RANGES = [{ key: "1M", label: "1月", days: 22 }, { key: "3M", label: "3月", days: 66 }, { key: "1Y", label: "1年", days: 252 }] as const;
+type IndexRange = (typeof INDEX_RANGES)[number]["key"];
 const HEAT_H = 470;
 const SIDE_H = 380;
 const ROW_H = 360;
@@ -143,6 +145,12 @@ export function MarketPage() {
 
   return (
     <div className="page">
+      {market.error && <div className="error-box" role="alert">市场概览请求失败：{market.error.message}</div>}
+      {m && (m.stale || (m.coverage != null && m.coverage < 0.95)) && (
+        <div className="error-box" role="alert">
+          市场日线尚未完整就绪{m.coverage != null ? `，成分覆盖 ${pct(m.coverage, 1)}` : ""}；当前展示保留快照，后台将继续重试。
+        </div>
+      )}
       <Grid>
         <Cell span={12}>
           <section className="panel strip" data-testid="ticker-strip">
@@ -210,7 +218,7 @@ export function MarketPage() {
                         <tbody>
                           {m.sectors.map((s) => (
                             <tr key={s.symbol}>
-                              <td>{s.name} <span className="muted sm">{s.symbol}</span></td>
+                              <td>{s.name} <span className="muted sm">{s.symbol}{s.as_of && m.as_of && s.as_of !== m.as_of ? ` · 截至 ${s.as_of.slice(5)}` : ""}</span></td>
                               <td className={`r num ${tone(s.d1)}`}>{signedPct(s.d1)}</td>
                               <td className={`r num ${tone(s.w1)}`}>{signedPct(s.w1)}</td>
                               <td className={`r num ${tone(s.m1)}`}>{signedPct(s.m1)}</td>
@@ -359,12 +367,14 @@ function Movers({ rows, mine, link }: { rows: MoverOut[] | null; mine: Set<strin
 
 function IndexChart({ m }: { m: Full | null }) {
   const [sym, setSym] = useState<IndexKey>("SPY");
+  const [range, setRange] = useState<IndexRange>("1Y");
+  const days = INDEX_RANGES.find((x) => x.key === range)?.days ?? 252;
   const bars = useMemo(
-    () => (m?.index_candles[sym] ?? []).map((c) => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume })),
-    [m, sym],
+    () => (m?.index_candles[sym] ?? []).slice(-days).map((c) => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume })),
+    [days, m, sym],
   );
   return (
-    <Panel title="指数日线（ETF）" right={<Tabs tabs={INDICES.map((s) => ({ key: s, label: s }))} value={sym} onChange={setSym} />} height={ROW_H}>
+    <Panel title="指数日线（ETF）" right={<span style={{ display: "flex", gap: 8 }}><Tabs tabs={INDEX_RANGES.map((x) => ({ key: x.key, label: x.label }))} value={range} onChange={setRange} /><Tabs tabs={INDICES.map((s) => ({ key: s, label: s }))} value={sym} onChange={setSym} /></span>} height={ROW_H}>
       {bars.length ? <CandleChart height={ROW_H - 70} bars={bars} mas={[20, 50]} /> : <EmptyState kind="pending" />}
     </Panel>
   );

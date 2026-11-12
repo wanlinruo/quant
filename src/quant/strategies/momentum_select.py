@@ -90,6 +90,7 @@ def rebalance_day(cal: TradingCalendar, d: date) -> date:
 
 class MomentumSelect(Strategy):
     name = "momentum_select"
+    params_type = MomentumParams
     min_weight_diff: ClassVar[float | None] = 0.10
     # 个股财报跳空可达 40–50%（如 AMD 2016-04 +52%）
     max_daily_move: ClassVar[float] = 0.6

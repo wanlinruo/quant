@@ -113,6 +113,7 @@ function heat(v: number | null | undefined): React.CSSProperties | undefined {
 export function ReturnsTab({ a }: A) {
   const r = a.returns;
   if (!r) return <EmptyState />;
+  const distributionMonths = r.distribution.reduce((sum, b) => sum + b.count, 0);
   const maxCount = Math.max(...r.distribution.map((b) => b.count), 1);
   const roll = r.rolling.map((x) => ({ time: x.date, ret: x.ret, sharpe: x.sharpe }));
   return (
@@ -137,13 +138,13 @@ export function ReturnsTab({ a }: A) {
       <Grid>
         <Cell span={4}>
           <Sub title="月收益分布">
-            <div className="hist">
+            {distributionMonths <= 1 ? <EmptyState note="仅有 1 个月收益，样本不足以形成分布" /> : <div className="hist">
               {r.distribution.map((b, i) => (
                 <div key={i} className="hist-col" title={`${signedPct(b.lo, 1)} ~ ${signedPct(b.hi, 1)}：${b.count} 个月`}>
                   <i className={b.hi <= 0 ? "neg" : "pos"} style={{ height: `${(b.count / maxCount) * 100}%` }} />
                 </div>
               ))}
-            </div>
+            </div>}
           </Sub>
         </Cell>
         <Cell span={4}>

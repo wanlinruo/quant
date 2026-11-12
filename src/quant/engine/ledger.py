@@ -5,6 +5,7 @@
 
 子仓份额取最近一个信号日的归因（信号日 t 决定、t+1 开盘成交，所以第 d 天用 d 之前最近的信号日）。
 每日盈亏 = 收盘市值 − 前一日市值 − 当日净买入额（成交额含佣金），按前一日份额拆分到子仓。
+同日从一个子仓退出并进入另一个子仓时，当日盈亏归退出子仓；新子仓从当日调仓后开始承接盈亏。
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from quant.strategies.base import Attribution
 
 ET = ZoneInfo("America/New_York")
 DEFAULT_REASON = "目标调整"
+ADJUSTMENT_QTY_EPSILON = 1e-6
 Holdings = Mapping[date, Mapping[str, tuple[float, float]]]  # 日期 → 代码 → (股数, 市值)
 
 
@@ -155,7 +157,9 @@ def build_ledger(
                 prev_qty = prev_hold.get(s, (0.0, 0.0))[0]
                 if abs(qty - prev_qty) > 1e-9:  # 只有真实成交（股数变化）才算调整
                     before = prev_qty * prev_share.get(s, {}).get(sleeve, 0.0)
-                    t.adjustments.append({"date": d.isoformat(), "qty": round(qty * w - before, 6)})
+                    delta = qty * w - before
+                    if abs(delta) > ADJUSTMENT_QTY_EPSILON:
+                        t.adjustments.append({"date": d.isoformat(), "qty": round(delta, 6)})
             t.max_invested = max(t.max_invested, mv * w)
         e = eq.get(d) or 0.0
         invested = 0.0

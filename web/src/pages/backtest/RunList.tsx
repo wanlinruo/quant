@@ -62,8 +62,8 @@ export function RunList({ result, selected, currentId, max, canCreate, onOpen, o
                   <span className="muted">{r.strategy}</span>
                   {r.robust && <span className="pill info" title="稳健性检验子回测：完成 + 失败 / 总数">{r.robust.total ? `稳健 ${r.robust.done + r.robust.failed}/${r.robust.total}` : "稳健 待生成"}</span>}
                   <span style={{ flex: 1 }} />
-                  <span className="num up">{cagr !== undefined ? pct(cagr, 1) : ""}</span>
-                  <span className="num down">{mdd !== undefined ? pct(mdd, 1) : ""}</span>
+                  <span className="num up run-metric" title="年化收益">{cagr !== undefined ? pct(cagr, 1) : ""}</span>
+                  <span className="num down run-metric" title="最大回撤">{mdd !== undefined ? pct(mdd, 1) : ""}</span>
                 </button>
               </div>
               {r.status === "failed" && r.error && <div className="run-err sm" title={r.error}>{r.error}</div>}

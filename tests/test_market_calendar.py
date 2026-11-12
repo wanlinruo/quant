@@ -126,6 +126,21 @@ def test_fomc_not_duplicated_with_ff() -> None:
     assert fomc.forecast == "3.75%" and fomc.previous == "4.00%" and fomc.impact == 3
 
 
+def test_fomc_statement_is_kept_and_reconciles_one_day_local_drift() -> None:
+    ff = [
+        {
+            "title": "FOMC Statement",
+            "time": "2026-11-18T14:00:00-05:00",
+            "impact": 3,
+            "forecast": "",
+            "previous": "",
+        }
+    ]
+    _, up = build_calendar(ff, {}, [], [date(2026, 11, 17)], set(), set(), NOW, date(2026, 11, 5))
+    fomc = [item for item in up if item.kind == "fomc"]
+    assert len(fomc) == 1 and fomc[0].time.startswith("2026-11-18T14:00:00")
+
+
 def test_dmh_is_intraday() -> None:
     earn = [EarningsRaw("AAPL", date(2026, 11, 10), "dmh", 1.0, None)]
     _, up = build_calendar([], {}, earn, [], {"AAPL"}, set(), NOW, date(2026, 11, 5))

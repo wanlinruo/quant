@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from sqlalchemy import Engine, create_engine, delete, select, update
@@ -18,7 +18,9 @@ from quant.db.models import (
     BacktestRun,
     BacktestTrade,
 )
-from quant.engine.ledger import Ledger
+
+if TYPE_CHECKING:
+    from quant.engine.ledger import Ledger
 
 
 def make_engine(url: str) -> Engine:
