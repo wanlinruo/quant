@@ -1,0 +1,77 @@
+name: Phase 4 acceptance audit
+
+# 只读生产审计：不部署、不触发任务、不修改数据库。
+on:
+  workflow_dispatch:
+    inputs:
+      dates:
+        description: "美东交易日，空格分隔（YYYY-MM-DD）"
+        required: true
+        default: "2026-11-09 2026-11-11"
+  push:
+    branches: [test]
+    paths:
+      - .github/workflows/acceptance-audit.yml
+      - scripts/acceptance/audit_phase4.sh
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Read-only production evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AUDIT_DATES: ${{ inputs.dates || '2026-11-09 2026-11-11' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate audit script
+        run: bash -n scripts/acceptance/audit_phase4.sh
+
+      - name: SSH setup
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/audit_key
+          chmod 600 ~/.ssh/audit_key
+          printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
+
+      - name: Collect read-only evidence
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER_: ${{ secrets.DEPLOY_USER }}
+        run: |
+          read -r -a dates <<< "$AUDIT_DATES"
+          ssh -i ~/.ssh/audit_key -o BatchMode=yes \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+            "$USER_@$HOST" bash -s -- "${dates[@]}" \
+            < scripts/acceptance/audit_phase4.sh | tee phase4-audit.txt
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo '## Phase 4 production audit'
+            echo
+            echo 'Read-only evidence; no jobs were triggered and no production data was modified.'
+            echo
+            echo '```text'
+            if [[ -f phase4-audit.txt ]]; then
+              cat phase4-audit.txt
+            else
+              echo 'Audit did not produce an output file.'
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase4-audit
+          path: phase4-audit.txt
+          if-no-files-found: ignore
+          retention-days: 30
