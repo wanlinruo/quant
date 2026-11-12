@@ -21,17 +21,12 @@ MAX_STR = 64
 
 
 def _classes(strategy: str) -> tuple[type | None, dict[str, type]]:
-    from quant.strategies.combo import ComboParams
-    from quant.strategies.etf_momentum import MomentumParams as EtfParams
-    from quant.strategies.momentum_select import MomentumParams as SelectParams
-    from quant.strategies.swing_pullback import SwingParams
+    from quant.strategies import STRATEGIES
 
-    return {
-        "combo": (ComboParams, {"momentum": SelectParams, "swing": SwingParams}),
-        "momentum_select": (SelectParams, {}),
-        "swing_pullback": (SwingParams, {}),
-        "etf_momentum": (EtfParams, {}),
-    }.get(strategy, (None, {}))
+    registered = STRATEGIES.get(strategy)
+    if registered is None:
+        return None, {}
+    return registered.params_type, dict(registered.param_groups)
 
 
 def _default(f: dataclasses.Field[Any]) -> Any:

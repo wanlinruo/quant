@@ -196,23 +196,34 @@ def _fields(cls: type, values: Mapping[str, Any], group: str | None) -> list[Par
 
 
 def param_schema(strategy_name: str, configured: Mapping[str, Any]) -> dict[str, list[ParamField]]:
-    """各策略的参数表单；configured 为服务器配置的策略参数（只用于名为 strategy_name 的策略）。"""
-    from quant.strategies.combo import V2_SWING, ComboParams
-    from quant.strategies.etf_momentum import MomentumParams as EtfParams
-    from quant.strategies.momentum_select import MomentumParams as SelectParams
-    from quant.strategies.swing_pullback import SwingParams
+    """从策略注册表生成参数表单；None 参数模型才表示策略确实没有参数。"""
+    if strategy_name not in STRATEGIES:
+        raise ValueError(f"配置的策略未注册：{strategy_name}")
+    if not isinstance(configured, Mapping):
+        raise TypeError("strategy.params 必须是映射")
+    selected = STRATEGIES[strategy_name]
+    normalized: Mapping[str, Any] = {}
+    if selected.params_type is None:
+        if configured:
+            raise ValueError(f"策略 {strategy_name} 没有参数，但配置了 strategy.params")
+    else:
+        normalized, errors = check_params(strategy_name, configured)
+        if errors:
+            raise ValueError("；".join(errors))
 
-    def cfg(name: str) -> Mapping[str, Any]:
-        return configured if strategy_name == name else {}
-
-    c = cfg("combo")
-    return {
-        "combo": [
-            *_fields(ComboParams, c, None),
-            *_fields(SelectParams, c.get("momentum") or {}, "momentum"),
-            *_fields(SwingParams, {**V2_SWING, **(c.get("swing") or {})}, "swing"),
-        ],
-        "etf_momentum": _fields(EtfParams, cfg("etf_momentum"), None),
-        "momentum_select": _fields(SelectParams, cfg("momentum_select"), None),
-        "swing_pullback": _fields(SwingParams, cfg("swing_pullback"), None),
-    }
+    out: dict[str, list[ParamField]] = {}
+    for name, strategy in STRATEGIES.items():
+        cls = strategy.params_type
+        if cls is None:
+            out[name] = []
+            continue
+        values = normalized if name == strategy_name else {}
+        fields = _fields(cls, values, None)
+        for group, group_cls in strategy.param_groups.items():
+            raw = values.get(group, {})
+            if not isinstance(raw, Mapping):
+                raise TypeError(f"strategy.params.{group} 必须是映射")
+            defaults = strategy.param_group_defaults.get(group, {})
+            fields.extend(_fields(group_cls, {**defaults, **raw}, group))
+        out[name] = fields
+    return out

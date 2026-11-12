@@ -142,6 +142,10 @@ class Attribution:
 
 class Strategy(ABC):
     name: ClassVar[str]
+    # 回测面板参数模型。注册表据此生成表单并校验覆盖；None 表示策略确实没有可配置参数。
+    params_type: ClassVar[type[Any] | None] = None
+    param_groups: ClassVar[Mapping[str, type[Any]]] = {}
+    param_group_defaults: ClassVar[Mapping[str, Mapping[str, Any]]] = {}
     # 非 None 时替换订单计算的 min_weight_diff：持有型策略用较大的值，避免价格漂移触发来回调仓
     min_weight_diff: ClassVar[float | None] = None
     # 数据校验的单日涨跌阈值：超过即视为可疑数据（如未复权的拆股），停止运行

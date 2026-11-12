@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from quant.api import queries
@@ -31,6 +32,7 @@ from quant.api.schemas import (
     SubmitResult,
 )
 from quant.core.calendar import get_calendar
+from quant.core.settings import ConfigError
 from quant.data import backtest_data as bd
 from quant.data.quota import QuotaLedger
 from quant.data.universe import constituents_path, load_constituents
@@ -102,8 +104,14 @@ def run_robustness(run_id: int, s: SessionDep) -> RobustnessOut:
 @router.get("/backtests/param-schema")
 def params_schema() -> dict[str, list[ParamField]]:
     """新建回测表单：各策略的参数、类型与默认值（服务器配置的策略参数覆盖默认值）。"""
-    settings = get_settings()
-    return param_schema(settings.strategy.name, settings.strategy.params)
+    try:
+        settings = get_settings()
+    except (ConfigError, OSError, ValidationError) as e:
+        raise HTTPException(status_code=500, detail=f"配置加载失败：{e}") from e
+    try:
+        return param_schema(settings.strategy.name, settings.strategy.params)
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=500, detail=f"策略参数配置错误：{e}") from e
 
 
 @router.get("/backtests/compare")

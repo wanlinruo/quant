@@ -20,7 +20,7 @@ import pandas as pd
 from quant.core.calendar import TradingCalendar, get_calendar
 from quant.strategies.base import Attribution, Context, Strategy, validate_weights
 from quant.strategies.momentum_select import MomentumParams, MomentumSelect, rebalance_day
-from quant.strategies.swing_pullback import SwingPullback
+from quant.strategies.swing_pullback import SwingParams, SwingPullback
 
 TRADING_DAYS = 252
 RANK_KEEP = 50  # 信号明细中保存的动量排名个数
@@ -114,6 +114,12 @@ class ComboBreakdown:
 
 class Combo(Strategy):
     name = "combo"
+    params_type = ComboParams
+    param_groups: ClassVar[Mapping[str, type[Any]]] = {
+        "momentum": MomentumParams,
+        "swing": SwingParams,
+    }
+    param_group_defaults: ClassVar[Mapping[str, Mapping[str, Any]]] = {"swing": V2_SWING}
     # 择时把动量仓 10% → 5%、V2 仓 15% → 7.5%：阈值必须 < 0.05 才会执行减仓；
     # 同时足够大，价格漂移不触发来回调仓（动量仓需涨约 40% 才触发）
     min_weight_diff: ClassVar[float | None] = 0.04
