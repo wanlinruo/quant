@@ -29,6 +29,11 @@ function sp(v: number | null | undefined, digits = 2): string {
   return v == null ? "—" : signedPct(v, digits);
 }
 
+function updatedAt(value: string): string {
+  const { date, time } = etParts(value);
+  return `更新于 ${date.slice(5)} ${time} ET`;
+}
+
 const UNCOVERED = "仅覆盖标普 500 成分股与持仓";
 
 /** 估值、新闻、同板块：未覆盖、已取到但为空、尚未取到时的说明；有数据时为 null。 */
@@ -62,7 +67,7 @@ export function StockPage() {
   const news = x?.news ?? [];
   const metrics = x?.metrics ?? [];
   const peers = x?.peers ?? [];
-  const newsUpd = x?.news_updated ? (({ date, time }) => `更新于 ${date.slice(5)} ${time} ET`)(etParts(x.news_updated)) : null;
+  const newsUpd = x?.news_updated ? updatedAt(x.news_updated) : null;
   const list = res.data?.bars;
 
   const candles = useMemo(() => toCandles(list ?? [], adjust), [list, adjust]);
