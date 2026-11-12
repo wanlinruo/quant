@@ -52,7 +52,7 @@ LEFT JOIN job_runs r
   ON r.mode = 'paper' AND r.trade_date = d.trade_date AND r.job_name = e.job_name
 LEFT JOIN attempts a
   ON a.mode = r.mode AND a.trade_date = r.trade_date AND a.job_name = r.job_name
-ORDER BY d.trade_date, e.job_name;"
+ORDER BY d.trade_date, e.job_name;" < /dev/null
 
 echo
 echo "[unexpected paper jobs]"
@@ -67,7 +67,7 @@ WHERE mode = 'paper'
     'daily_execute', 'daily_report', 'daily_data', 'daily_signal',
     'market_extras', 'stock_data', 'market_data'
   )
-ORDER BY trade_date, job_name;"
+ORDER BY trade_date, job_name;" < /dev/null
 
 echo
 echo "[container evidence by ET calendar day]"
@@ -83,7 +83,7 @@ FROM system_metrics
 WHERE kind = 'container'
   AND (ts AT TIME ZONE 'America/New_York')::date IN ($dates_sql)
 GROUP BY day_et, name
-ORDER BY day_et, name;"
+ORDER BY day_et, name;" < /dev/null
 
 echo
 echo "[metric coverage]"
@@ -96,4 +96,4 @@ SELECT (ts AT TIME ZONE 'America/New_York')::date AS day_et,
 FROM system_metrics
 WHERE (ts AT TIME ZONE 'America/New_York')::date IN ($dates_sql)
 GROUP BY day_et, kind
-ORDER BY day_et, kind;"
+ORDER BY day_et, kind;" < /dev/null
