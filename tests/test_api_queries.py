@@ -67,6 +67,7 @@ def test_backtest_runs_strip_private_params(db_url: str) -> None:
         assert all(not k.startswith("_") for r in runs for k in r.params)
         queued = next(r for r in runs if r.status == "queued")
         assert queued.costs == {"slippage": "0.0005"} and queued.params == {"top_n": 10}
+        assert queued.initial_cash == 75000
         failed = next(r for r in runs if r.status == "failed")
         assert failed.error == "数据缺失"
         assert queries.backtest_equity(s, [queued.id]) == []

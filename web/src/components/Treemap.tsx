@@ -20,11 +20,13 @@ export function Treemap({ groups, width, height }: { groups: TreeGroup[]; width:
             {g.cells.map((c, ci) => {
               const cr = inner[ci];
               const style = { ...pct(cr, width, height), background: c.color };
-              const body = cr.w > 34 && cr.h > 18 ? <span><b>{c.label}</b>{c.sublabel && <span className="tm-sub">{c.sublabel}</span>}</span> : null;
+              const body = cr.w > 34 && cr.h > 18 ? (
+                <span><b>{c.label}</b>{c.sublabel && cr.w > 52 && cr.h > 34 && <span className="tm-sub">{c.sublabel}</span>}</span>
+              ) : null;
               return c.to ? (
                 <Link key={c.key} to={c.to} className="tm-cell" style={style} title={c.title}>{body ?? <span className="sr">{c.label}</span>}</Link>
               ) : (
-                <div key={c.key} className="tm-cell" style={style} title={c.title}>{body}</div>
+                <div key={c.key} className="tm-cell" style={style} title={c.title}>{body ?? <span className="sr">{c.label}</span>}</div>
               );
             })}
           </div>
