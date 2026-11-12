@@ -294,6 +294,7 @@ function BreadthPanel({ b }: { b: BreadthOut | null }) {
           <tbody>
             {statRow("上涨", b.advancers, n)}
             {statRow("下跌", b.decliners, n)}
+            {statRow("持平", b.unchanged, n)}
             {statRow("52 周新高", b.new_highs, n)}
             {statRow("52 周新低", b.new_lows, n)}
             {statRow("站上 50 日线", b.above_50, p)}

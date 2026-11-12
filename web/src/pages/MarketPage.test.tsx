@@ -217,6 +217,14 @@ describe("MarketPage", () => {
     expect(within(hm).getByText("+5.0%")).toBeInTheDocument();
   });
 
+  it("market breadth includes unchanged members", async () => {
+    mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW] });
+    renderPage(<MarketPage />, "/");
+    const row = (await screen.findByText("持平")).closest("tr")!;
+    expect(within(row).getByText("7")).toBeInTheDocument();
+    expect(within(row).getByText("3")).toBeInTheDocument();
+  });
+
   it("treemap cells link to stock page with account", async () => {
     mockApi({ ...BASE, "/api/market/overview": [200, OVERVIEW] });
     const { user } = renderPage(<MarketPage />, "/?account=paper");
