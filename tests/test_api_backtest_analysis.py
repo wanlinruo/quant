@@ -234,6 +234,27 @@ def test_old_run_without_ledger(setup: tuple[TestClient, dict[str, int]], db_url
     assert a["returns"]["sleeves"] is None and a["risk"]["timing"] == []
 
 
+def test_new_run_with_no_trades_has_accurate_note(
+    setup: tuple[TestClient, dict[str, int]], db_url: str
+) -> None:
+    client, _ = setup
+    eng = create_engine(db_url)
+    idx = IDX[:3]
+    eq = prices(7, 0.0001).loc[idx] * 1000
+    daily: list[tuple[date, float, float | None, dict[str, float]]] = [
+        (d.date(), 1.0, 1.0, {}) for d in idx
+    ]
+    with Session(eng) as s, s.begin():
+        rid = create_run(s, "etf_momentum", {}, idx[0].date(), idx[-1].date(), status="running")
+        complete_run(s, rid, {"cagr": 0.0}, eq, eq / eq.cummax() - 1, Ledger([], [], daily))
+    eng.dispose()
+
+    trades = client.get(f"/api/backtests/{rid}/trades").json()
+    assert trades["trades"] == [] and trades["note"] == "本次回测没有产生交易"
+    positions = client.get(f"/api/backtests/{rid}/positions").json()
+    assert positions["note"] is None and len(positions["daily"]) == 3
+
+
 def test_compare_endpoint(setup: tuple[TestClient, dict[str, int]], db_url: str) -> None:
     client, ids = setup
     eng = create_engine(db_url)

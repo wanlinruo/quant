@@ -31,6 +31,15 @@ def test_mem() -> None:
     assert monitor.parse_mem(MEMINFO) == (3000000 * 1024, 4000000 * 1024)
 
 
+def test_next_deadline_keeps_fixed_cadence_and_skips_missed_slots() -> None:
+    assert monitor.next_deadline(100.0, 110.0, 60.0) == 160.0
+    assert monitor.next_deadline(100.0, 160.0, 60.0) == 160.0
+    assert monitor.next_deadline(100.0, 170.0, 60.0) == 220.0
+    assert monitor.next_deadline(100.0, 281.0, 60.0) == 340.0
+    with pytest.raises(ValueError, match="positive"):
+        monitor.next_deadline(100.0, 110.0, 0.0)
+
+
 class FakeDocker:
     def __init__(self, fail_stats: bool = False) -> None:
         self.fail_stats = fail_stats

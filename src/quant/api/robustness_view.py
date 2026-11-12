@@ -184,10 +184,22 @@ def robustness_view(s: Session, run_id: int) -> RobustnessOut | None:
                         )
                     )
                 else:
-                    grid_cells.append(RbCellOut(x=x, y=y, label=label, status="skipped"))
+                    grid_cells.append(
+                        RbCellOut(
+                            x=x,
+                            y=y,
+                            label=label,
+                            status="skipped",
+                            error="参数越界，未运行",
+                        )
+                    )
         out.grid = RbGridOut(x_label=xl, y_label=yl, x_values=xs, y_values=ys, cells=grid_cells)
 
     out.neighbors, out.neighbors_verdict, out.neighbors_note = _neighbors(kids, combo)
+    skipped_neighbors = robustness.skipped_neighbor_labels(parent.strategy, parent.params)
+    if skipped_neighbors:
+        prefix = f"{out.neighbors_note}；" if out.neighbors_note else ""
+        out.neighbors_note = f"{prefix}参数越界未运行（不计入判定）：{'、'.join(skipped_neighbors)}"
 
     grid = by_kind.get("grid", [])
     if not any(k.status not in FINISHED for k in grid):

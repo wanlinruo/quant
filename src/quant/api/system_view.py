@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, load_only
 
 from quant.api.schemas import (
     SysAttemptOut,
@@ -35,7 +35,9 @@ from quant.core.calendar import TradingCalendar
 from quant.core.settings import Settings
 from quant.data.events import load_fomc_dates
 from quant.data.market_store import (
+    ETF_SET,
     calendar_path,
+    load_gics,
     macro_path,
     market_dir,
     news_path,
@@ -53,10 +55,12 @@ from quant.db.models import (
 )
 from quant.jobs.daily import JOBS
 from quant.jobs.scheduler import day_plan, execution_plan
+from quant.market.stock_job import METRICS_MAX_AGE
 
 ET = ZoneInfo("America/New_York")
 GRID_DAYS = 30
 STALE_DAYS = 2
+SOURCE_MIN_COVERAGE = 0.9
 WEEK = "一二三四五六日"
 NO_DB = "未配置数据库（QUANT_DATABASE_URL），只能显示日历与本地数据文件"
 RECONCILE_TEXT = {"success": "已对账", "running": "执行中"}
@@ -243,18 +247,43 @@ def _sources(settings: Settings, cal: TradingCalendar, today: date) -> list[SysS
             )
         out.append(SysSourceOut(key=key, label=label, status=state(t), updated=t, detail=detail))
     stocks = market_dir(data_dir) / "stocks"
-    docs = [d for p in stocks.glob("*.json") if (d := _file_doc(p))] if stocks.is_dir() else []
-    times = [t for d in docs if (t := _stamp(d.get("news_updated")))]
-    with_metrics = sum(1 for d in docs if d.get("metrics_updated"))
+    docs = (
+        {p.stem: d for p in stocks.glob("*.json") if (d := _file_doc(p))} if stocks.is_dir() else {}
+    )
+    gics = load_gics(data_dir)
+    expected = ({s for s in gics.members if s not in ETF_SET} if gics else set()) | set(docs)
+    total = len(expected)
+    times = [t for d in docs.values() if (t := _stamp(d.get("news_updated")))]
+    news_fresh = sum(
+        1
+        for s in expected
+        if (t := _stamp(docs.get(s, {}).get("news_updated"))) and state(t) == "ok"
+    )
+    metrics_cutoff = today - timedelta(days=METRICS_MAX_AGE)
+    metrics_fresh = sum(
+        1
+        for s in expected
+        if (v := docs.get(s, {}).get("metrics_updated"))
+        and str(v)[:10] >= metrics_cutoff.isoformat()
+    )
     newest = max(times) if times else None
+    news_coverage = news_fresh / total if total else 0.0
+    metrics_coverage = metrics_fresh / total if total else 0.0
+    stock_status = state(newest)
+    if stock_status == "ok" and min(news_coverage, metrics_coverage) < SOURCE_MIN_COVERAGE:
+        stock_status = "warn"
     out.append(
         SysSourceOut(
             key="stocks",
             label="个股新闻与财务（Finnhub）",
-            status=state(newest),
+            status=stock_status,
             updated=newest,
-            detail=f"{len(docs)} 只，财务指标 {with_metrics} 只" if docs else "",
-            progress=with_metrics / len(docs) if docs else None,
+            detail=(
+                f"新闻新鲜 {news_fresh}/{total} 只，财务指标 {metrics_fresh}/{total} 只"
+                if total
+                else ""
+            ),
+            progress=min(news_coverage, metrics_coverage) if total else None,
         )
     )
     return out
@@ -372,7 +401,11 @@ def _events(s: Session, mode: str, now: datetime) -> list[SysEventOut]:
             )
         )
     for b in s.scalars(
-        select(BacktestRun).where(BacktestRun.status == "failed", BacktestRun.finished_at >= since)
+        select(BacktestRun).where(
+            BacktestRun.status == "failed",
+            BacktestRun.parent_id.is_(None),
+            BacktestRun.finished_at >= since,
+        )
     ):
         out.append(
             SysEventOut(
@@ -397,21 +430,39 @@ def _events(s: Session, mode: str, now: datetime) -> list[SysEventOut]:
 
 
 def _queue(s: Session) -> SysQueueOut:
-    runs = s.scalars(select(BacktestRun)).all()
-    counts: dict[str, int] = defaultdict(int)
-    for r in runs:
-        counts[r.status] += 1
-    cur = next((r for r in sorted(runs, key=lambda r: r.id) if r.status == "running"), None)
-    done = [r.finished_at for r in runs if r.status == "done" and r.finished_at]
+    counts = s.scalar(
+        select(
+            func.jsonb_build_object(
+                "queued",
+                func.count().filter(BacktestRun.status == "queued"),
+                "running",
+                func.count().filter(BacktestRun.status == "running"),
+                "done",
+                func.count().filter(BacktestRun.status == "done"),
+                "failed",
+                func.count().filter(BacktestRun.status == "failed"),
+            )
+        )
+    )
+    cur = s.scalars(
+        select(BacktestRun)
+        .options(load_only(BacktestRun.id, BacktestRun.strategy, BacktestRun.started_at))
+        .where(BacktestRun.status == "running")
+        .order_by(BacktestRun.id)
+        .limit(1)
+    ).first()
+    last_finished = s.scalar(
+        select(func.max(BacktestRun.finished_at)).where(BacktestRun.status == "done")
+    )
     return SysQueueOut(
-        queued=counts["queued"],
-        running=counts["running"],
-        done=counts["done"],
-        failed=counts["failed"],
+        queued=(counts or {}).get("queued", 0),
+        running=(counts or {}).get("running", 0),
+        done=(counts or {}).get("done", 0),
+        failed=(counts or {}).get("failed", 0),
         current_id=cur.id if cur else None,
         current_strategy=cur.strategy if cur else None,
         current_started=cur.started_at if cur else None,
-        last_finished=max(done) if done else None,
+        last_finished=last_finished,
     )
 
 
@@ -452,9 +503,15 @@ def _cards_and_banner(
             items.append(
                 SysItemOut(level="warn", text=f"{src.label} 超过 {STALE_DAYS} 个交易日未更新")
             )
+        elif src.status == "warn":
+            items.append(SysItemOut(level="warn", text=f"{src.label} 覆盖不足：{src.detail}"))
     week = now - timedelta(days=7)
     failed_bt = s.scalars(
-        select(BacktestRun).where(BacktestRun.status == "failed", BacktestRun.finished_at >= week)
+        select(BacktestRun).where(
+            BacktestRun.status == "failed",
+            BacktestRun.parent_id.is_(None),
+            BacktestRun.finished_at >= week,
+        )
     ).all()
     if failed_bt:
         items.append(SysItemOut(level="warn", text=f"近 7 天有 {len(failed_bt)} 个回测失败"))

@@ -183,6 +183,7 @@ def test_rolling_beta_and_tail() -> None:
     tail = {r["label"]: r["value"] for r in ba.tail(EQ)}
     r = EQ.pct_change().dropna()
     assert tail["VaR 95%（日）"] == pytest.approx(r.quantile(0.05))
+    assert tail["超额峰度"] == pytest.approx(r.kurt()) and "峰度" not in tail
     assert tail["单日最大亏损"] == pytest.approx(r.min())
     assert tail["CVaR 95%（日）"] <= tail["VaR 95%（日）"]
     dumps(

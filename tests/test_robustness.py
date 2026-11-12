@@ -5,7 +5,14 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from quant.engine.robustness import Variant, grid_axes, plan, scale_costs, walk_forward
+from quant.engine.robustness import (
+    Variant,
+    grid_axes,
+    plan,
+    scale_costs,
+    skipped_neighbor_labels,
+    walk_forward,
+)
 
 S, E = date(2016, 1, 4), date(2026, 10, 30)
 
@@ -42,6 +49,10 @@ def test_out_of_range_cells_skipped() -> None:
     ys = {v.y for v in by_kind(vs, "grid")}
     assert 0 not in ys  # top_k 0 无效
     assert all(1 <= v.params["top_k"] <= 2 for v in by_kind(vs, "grid"))
+    assert skipped_neighbor_labels("etf_momentum", {"universe": ["SPY", "QQQ"], "top_k": 1}) == [
+        "动量回看天数 126 · 持有只数 0"
+    ]
+    assert skipped_neighbor_labels("combo", {"momentum_weight": 0.4}) == []
 
 
 def test_costs_and_starts() -> None:

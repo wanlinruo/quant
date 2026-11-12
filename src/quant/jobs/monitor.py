@@ -174,11 +174,23 @@ class _Stop:
         self.requested = True
 
 
+def next_deadline(previous: float, now: float, interval: float) -> float:
+    """返回固定节拍的下一采集时刻；处理超时时跳过已错过的槽位。"""
+    if interval <= 0:
+        raise ValueError("interval must be positive")
+    deadline = previous + interval
+    if deadline < now:
+        deadline += (int((now - deadline) // interval) + 1) * interval
+    return deadline
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="monitor")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--interval", type=float, default=60.0)
     args = ap.parse_args(argv)
+    if args.interval <= 0:
+        ap.error("--interval 必须大于 0")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
         settings = load_settings()
@@ -197,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     log.info("monitor 启动，每 %.0f 秒采集一次", args.interval)
     last_prune: datetime | None = None
     last_capacity: datetime | None = None
+    deadline = time.monotonic()
     while not stop.requested:
         now = datetime.now(UTC)
         try:
@@ -214,9 +227,12 @@ def main(argv: list[str] | None = None) -> int:
             log.exception("采集失败")
         if args.once:
             break
-        end = time.monotonic() + args.interval
-        while not stop.requested and time.monotonic() < end:
-            time.sleep(1)
+        deadline = next_deadline(deadline, time.monotonic(), args.interval)
+        while not stop.requested:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(1.0, remaining))
     engine.dispose()
     return 0
 

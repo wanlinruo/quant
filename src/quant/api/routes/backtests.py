@@ -169,6 +169,15 @@ def defaults() -> BacktestDefaults:
     )
 
 
+@router.get("/backtests/{run_id}")
+def run_summary(run_id: int, s: SessionDep) -> BacktestRunOut:
+    """单个回测摘要；供直接打开稳健性子回测编号。"""
+    out = queries.backtest_run(s, run_id)
+    if out is None:
+        raise HTTPException(status_code=404, detail="回测不存在")
+    return out
+
+
 @router.post("/backtests", status_code=201)
 def submit_backtest(req: BacktestSubmit, s: SessionDep) -> SubmitResult:
     settings = get_settings()

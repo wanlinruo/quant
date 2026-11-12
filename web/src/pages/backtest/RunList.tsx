@@ -47,23 +47,24 @@ export function RunList({ result, selected, currentId, max, canCreate, onOpen, o
           const cagr = num(r, "cagr");
           const mdd = num(r, "max_drawdown");
           return (
-            <div key={r.id} className={`run${r.id === currentId ? " on" : ""}`} onClick={() => onOpen(r.id)}>
+            <div key={r.id} className={`run${r.id === currentId ? " on" : ""}`}>
               <div className="run-main">
                 <input
                   type="checkbox"
                   aria-label={`对比 #${r.id}`}
                   checked={on}
                   disabled={!on && selected.length >= max}
-                  onClick={(e) => e.stopPropagation()}
                   onChange={() => onToggle(r.id)}
                 />
-                <span className={`pill ${STATUS_PILL[r.status] ?? "hold"}`}>{STATUS_TEXT[r.status] ?? r.status}</span>
-                <b>#{r.id}</b>
-                <span className="muted">{r.strategy}</span>
-                {r.robust && <span className="pill info" title="稳健性检验子回测：完成 + 失败 / 总数">{r.robust.total ? `稳健 ${r.robust.done + r.robust.failed}/${r.robust.total}` : "稳健 待生成"}</span>}
-                <span style={{ flex: 1 }} />
-                <span className="num up">{cagr !== undefined ? pct(cagr, 1) : ""}</span>
-                <span className="num down">{mdd !== undefined ? pct(mdd, 1) : ""}</span>
+                <button type="button" className="run-open" aria-label={`打开回测 #${r.id} ${r.strategy}`} onClick={() => onOpen(r.id)}>
+                  <span className={`pill ${STATUS_PILL[r.status] ?? "hold"}`}>{STATUS_TEXT[r.status] ?? r.status}</span>
+                  <b>#{r.id}</b>
+                  <span className="muted">{r.strategy}</span>
+                  {r.robust && <span className="pill info" title="稳健性检验子回测：完成 + 失败 / 总数">{r.robust.total ? `稳健 ${r.robust.done + r.robust.failed}/${r.robust.total}` : "稳健 待生成"}</span>}
+                  <span style={{ flex: 1 }} />
+                  <span className="num up">{cagr !== undefined ? pct(cagr, 1) : ""}</span>
+                  <span className="num down">{mdd !== undefined ? pct(mdd, 1) : ""}</span>
+                </button>
               </div>
               {r.status === "failed" && r.error && <div className="run-err sm" title={r.error}>{r.error}</div>}
             </div>

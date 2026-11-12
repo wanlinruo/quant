@@ -64,6 +64,34 @@ def test_health_and_meta_without_db(client_no_db: TestClient) -> None:
     assert "database_url" not in json.dumps(meta)
 
 
+@needs_db
+def test_child_backtest_summary_is_directly_accessible(client_db: TestClient, db_url: str) -> None:
+    eng = create_engine(db_url)
+    with Session(eng) as s, s.begin():
+        parent = s.scalar(select(BacktestRun).where(BacktestRun.parent_id.is_(None)))
+        assert parent is not None
+        child = BacktestRun(
+            strategy=parent.strategy,
+            params={"top_n": 9, "_costs": {"slippage": "0.001"}},
+            start=parent.start,
+            end=parent.end,
+            status="done",
+            parent_id=parent.id,
+            variant={"kind": "grid", "x": 0, "y": 0},
+        )
+        s.add(child)
+        s.flush()
+        child_id = child.id
+    eng.dispose()
+
+    rows = client_db.get("/api/backtests").json()
+    assert child_id not in {r["id"] for r in rows}
+    r = client_db.get(f"/api/backtests/{child_id}")
+    assert r.status_code == 200
+    assert r.json()["id"] == child_id and r.json()["params"] == {"top_n": 9}
+    assert client_db.get("/api/backtests/999999").status_code == 404
+
+
 @pytest.mark.parametrize(
     "path",
     [
