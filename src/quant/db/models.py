@@ -128,7 +128,7 @@ class Order(Base):
     STATUSES = ("SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCELLED", "REJECTED", "EXPIRED")
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    client_order_id: Mapped[str] = mapped_column(String(96), unique=True)
+    client_order_id: Mapped[str] = mapped_column(String(96))
     broker_order_id: Mapped[str | None] = mapped_column(String(64), index=True)
     mode: Mapped[str] = mapped_column(String(8))
     symbol: Mapped[str] = mapped_column(String(16))
@@ -148,6 +148,7 @@ class Order(Base):
     )
 
     __table_args__ = (
+        UniqueConstraint("mode", "client_order_id"),
         CheckConstraint(_in("mode", MODES), name="mode"),
         CheckConstraint(_in("side", ("BUY", "SELL")), name="side"),
         CheckConstraint(_in("order_type", ("LMT", "MKT")), name="order_type"),

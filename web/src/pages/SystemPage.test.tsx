@@ -1,6 +1,6 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { mockApi, renderPage } from "../test/utils";
+import { mkMeta, mockApi, renderPage } from "../test/utils";
 import { SystemPage } from "./SystemPage";
 
 const dates = ["2026-10-26", "2026-10-27", "2026-10-28"];
@@ -54,6 +54,16 @@ const SYS = {
 const BASE = { "/api/system/overview": [200, SYS], "/api/market/data-status": [200, []] } as const;
 
 describe("SystemPage", () => {
+  it("requests the overview for the selected account", async () => {
+    const fetch = mockApi(BASE);
+    renderPage(<SystemPage />, "/system?account=live", mkMeta({ has: { live: true } }), "live");
+    await screen.findByText("模拟盘 PAPER");
+    const url = fetch.mock.calls
+      .map(([u]) => new URL(String(u), "http://x"))
+      .find((u) => u.pathname === "/api/system/overview");
+    expect(url?.searchParams.get("mode")).toBe("live");
+  });
+
   it("labels the target trading day for a market task after midnight", async () => {
     mockApi({ ...BASE, "/api/system/overview": [200, { ...SYS, timeline: [{
       job: "market_data", trade_date: "2026-10-27", planned_at: "2026-10-28T00:10:00-04:00",

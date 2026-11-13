@@ -1,7 +1,7 @@
 import { screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
-import { mockApi, renderPage } from "../test/utils";
+import { mkMeta, mockApi, renderPage } from "../test/utils";
 import { StockPage } from "./StockPage";
 
 const BARS = {
@@ -64,6 +64,25 @@ function render(symbol: string, routes: Record<string, readonly [number, unknown
 }
 
 describe("StockPage", () => {
+  it("requests strategy data for the selected account", async () => {
+    const fetch = mockApi(ROUTES);
+    renderPage(
+      <Routes><Route path="/stock/:symbol" element={<StockPage />} /></Routes>,
+      "/stock/NVDA?account=live",
+      mkMeta({ has: { live: true } }),
+      "live",
+    );
+    await screen.findByText("持有中 · 波段仓 · 12.0%");
+    const profile = fetch.mock.calls
+      .map(([u]) => new URL(String(u), "http://x"))
+      .find((u) => u.pathname === "/api/stock/NVDA/profile");
+    const extras = fetch.mock.calls
+      .map(([u]) => new URL(String(u), "http://x"))
+      .find((u) => u.pathname === "/api/stock/NVDA/extras");
+    expect(profile?.searchParams.get("mode")).toBe("live");
+    expect(extras?.searchParams.has("mode")).toBe(false);
+  });
+
   it("shows last close and change", async () => {
     render("NVDA", { "/api/market/bars/NVDA": [200, BARS], "/api/stock/NVDA/profile": [200, PROFILE] });
     expect(await screen.findByText("103.40")).toBeInTheDocument();

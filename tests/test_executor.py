@@ -124,6 +124,56 @@ def test_rerun_same_day_places_nothing(engine: Engine, broker: FakeBroker, clock
     assert len(broker.placed) == 2
 
 
+def test_order_identity_isolated_by_mode(engine: Engine, broker: FakeBroker, clock: Clock) -> None:
+    """不同账户可复用券商与客户端订单号，且不能互相更新订单或成交。"""
+    cid = make_client_order_id(DAY, STRATEGY, "SPY", Side.SELL, 1)
+    with Session(engine) as s, s.begin():
+        s.add(
+            Order(
+                client_order_id=cid,
+                broker_order_id="1001",
+                mode="live",
+                symbol="SPY",
+                side="SELL",
+                order_type="LMT",
+                qty=1,
+                limit_price=D("1"),
+                reference_price=D("1"),
+                status="FILLED",
+                filled_qty=1,
+                avg_fill_price=D("1"),
+            )
+        )
+        s.add(
+            Fill(
+                broker_order_id="1001",
+                mode="live",
+                symbol="SPY",
+                side="SELL",
+                qty=1,
+                price=D("1"),
+                commission=D("0"),
+                filled_at=T0,
+            )
+        )
+
+    assert make(engine, broker, clock).run(DAY).status == "done"
+    assert broker.placed[0].client_order_id == cid
+    with Session(engine) as s:
+        live_order = s.scalar(
+            select(Order).where(Order.mode == "live", Order.client_order_id == cid)
+        )
+        paper_order = s.scalar(
+            select(Order).where(Order.mode == "paper", Order.client_order_id == cid)
+        )
+        assert (
+            live_order is not None and live_order.qty == 1 and live_order.avg_fill_price == D("1")
+        )
+        assert paper_order is not None and paper_order.qty == 160
+        assert len(s.scalars(select(Fill).where(Fill.mode == "live")).all()) == 1
+        assert len(s.scalars(select(Fill).where(Fill.mode == "paper")).all()) == 2
+
+
 def test_timeout_then_retry(engine: Engine, broker: FakeBroker, clock: Clock) -> None:
     broker.behavior["QQQ"] = ["hang", "hang", "fill"]
     report = make(engine, broker, clock).run(DAY)

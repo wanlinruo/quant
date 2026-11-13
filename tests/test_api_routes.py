@@ -23,7 +23,15 @@ from quant.api.routes import market
 from quant.api.schemas import BacktestSubmit, CostsIn
 from quant.broker.sim import CostModel
 from quant.core.settings import ConfigError, CostSettings, Settings
-from quant.db.models import BacktestRun
+from quant.db.models import (
+    AccountSnapshotRow,
+    BacktestRun,
+    Fill,
+    JobRun,
+    Order,
+    PositionSnapshot,
+    Signal,
+)
 from quant.engine.runner import BacktestSpec
 from quant.strategies import STRATEGIES
 
@@ -50,6 +58,51 @@ def client_db(db_url: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> I
     monkeypatch.setenv("TRADING_MODE", "sim")
     eng = create_engine(db_url)
     seed(eng, "paper")
+    eng.dispose()
+    _clear()
+    yield TestClient(create_app())
+    _clear()
+
+
+@pytest.fixture
+def client_dual(
+    db_url: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Iterator[TestClient]:
+    """两个账户同时有数据，并故意使用相同订单号来验证完整隔离。"""
+    monkeypatch.setenv("QUANT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TRADING_MODE", "paper")
+    eng = create_engine(db_url)
+    seed(eng, "paper")
+    seed(eng, "live")
+    with Session(eng) as s, s.begin():
+        live_account = s.scalar(
+            select(AccountSnapshotRow).where(
+                AccountSnapshotRow.mode == "live",
+                AccountSnapshotRow.snapshot_date == date(2026, 10, 28),
+            )
+        )
+        assert live_account is not None
+        live_account.net_liquidation = Decimal("202000")
+        for position_row in s.scalars(
+            select(PositionSnapshot).where(PositionSnapshot.mode == "live")
+        ):
+            position_row.symbol = (
+                "TSLA" if position_row.symbol == "NVDA" else f"L{position_row.symbol}"
+            )
+        live_signal = s.scalar(select(Signal).where(Signal.mode == "live"))
+        assert live_signal is not None
+        live_signal.target_weights = {"TSLA": 1.0}
+        for order_row in s.scalars(select(Order).where(Order.mode == "live")):
+            order_row.symbol = "TSLA"
+        live_fill = s.scalar(select(Fill).where(Fill.mode == "live"))
+        assert live_fill is not None
+        live_fill.symbol = "TSLA"
+        live_job = s.scalar(
+            select(JobRun).where(JobRun.mode == "live", JobRun.job_name == "daily_signal")
+        )
+        assert live_job is not None
+        live_job.status = "success"
+        live_job.error = None
     eng.dispose()
     _clear()
     yield TestClient(create_app())
@@ -153,6 +206,45 @@ def test_portfolio_and_meta_with_data(client_db: TestClient) -> None:
     assert meta["default_account"] == "paper"
     assert [a["has_data"] for a in meta["accounts"]] == [False, True, False]
     assert meta["data_as_of"] is not None
+
+
+@pytest.mark.db
+@needs_db
+def test_dual_account_api_isolation(client_dual: TestClient) -> None:
+    meta = client_dual.get("/api/meta").json()
+    assert meta["default_account"] == "live"
+    assert [a["has_data"] for a in meta["accounts"]] == [False, True, True]
+
+    paper_positions = client_dual.get("/api/portfolio/paper/positions").json()
+    live_positions = client_dual.get("/api/portfolio/live/positions").json()
+    assert {p["symbol"] for p in paper_positions} == {"NVDA", "META"}
+    assert {p["symbol"] for p in live_positions} == {"TSLA", "LMETA"}
+    assert client_dual.get("/api/portfolio/paper/overview").json()["net_liquidation"] == 101000
+    assert client_dual.get("/api/portfolio/live/overview").json()["net_liquidation"] == 202000
+
+    assert client_dual.get("/api/portfolio/paper/orders").json()[0]["symbol"] == "AAPL"
+    assert client_dual.get("/api/portfolio/live/orders").json()[0]["symbol"] == "TSLA"
+    assert client_dual.get("/api/portfolio/paper/fills").json()[0]["symbol"] == "NVDA"
+    assert client_dual.get("/api/portfolio/live/fills").json()[0]["symbol"] == "TSLA"
+    assert client_dual.get("/api/signals/latest?mode=paper").json()[0]["target_weights"] == {
+        "NVDA": 0.6,
+        "META": 0.4,
+    }
+    assert client_dual.get("/api/signals/latest?mode=live").json()[0]["target_weights"] == {
+        "TSLA": 1.0
+    }
+
+    paper_profile = client_dual.get("/api/stock/NVDA/profile?mode=paper").json()
+    live_profile = client_dual.get("/api/stock/TSLA/profile?mode=live").json()
+    assert paper_profile["relation"]["held"] is True
+    assert live_profile["relation"]["held"] is True
+    assert [t["symbol"] for t in paper_profile["trades"]] == ["NVDA"]
+    assert [t["symbol"] for t in live_profile["trades"]] == ["TSLA"]
+
+    paper_jobs = client_dual.get("/api/system/jobs?mode=paper").json()
+    live_jobs = client_dual.get("/api/system/jobs?mode=live").json()
+    assert next(j for j in paper_jobs if j["job_name"] == "daily_signal")["status"] == "failed"
+    assert next(j for j in live_jobs if j["job_name"] == "daily_signal")["status"] == "success"
 
 
 @pytest.mark.db

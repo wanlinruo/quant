@@ -312,7 +312,10 @@ class Executor:
         prefix = make_client_order_id(self._trade_date, self._strategy, symbol, side, 1)[:-1]
         with Session(self._engine) as s:
             ids = s.scalars(
-                select(Order.client_order_id).where(Order.client_order_id.startswith(prefix))
+                select(Order.client_order_id).where(
+                    Order.mode == self._mode,
+                    Order.client_order_id.startswith(prefix),
+                )
             ).all()
         return max((parse_client_order_id(i).attempt for i in ids), default=0) + 1
 
@@ -465,7 +468,12 @@ class Executor:
         for o in ours:
             assert o.client_order_id is not None
             with Session(self._engine) as s, s.begin():
-                row = s.scalar(select(Order).where(Order.client_order_id == o.client_order_id))
+                row = s.scalar(
+                    select(Order).where(
+                        Order.mode == self._mode,
+                        Order.client_order_id == o.client_order_id,
+                    )
+                )
                 if row is None:
                     s.add(_order_row(o, self._mode))
                 elif row.broker_order_id is None:
@@ -506,7 +514,12 @@ class Executor:
 
     def _set_order(self, client_order_id: str, **values: object) -> None:
         with Session(self._engine) as s, s.begin():
-            row = s.scalar(select(Order).where(Order.client_order_id == client_order_id))
+            row = s.scalar(
+                select(Order).where(
+                    Order.mode == self._mode,
+                    Order.client_order_id == client_order_id,
+                )
+            )
             assert row is not None
             for k, v in values.items():
                 setattr(row, k, v)
@@ -514,7 +527,12 @@ class Executor:
     def _sync(self, st: OrderStatus) -> None:
         """券商订单状态写入 orders；到终态且有成交时写入 fills（幂等）。"""
         with Session(self._engine) as s, s.begin():
-            row = s.scalar(select(Order).where(Order.broker_order_id == st.order_id))
+            row = s.scalar(
+                select(Order).where(
+                    Order.mode == self._mode,
+                    Order.broker_order_id == st.order_id,
+                )
+            )
             if row is None:
                 row = _order_row(st, self._mode)
                 s.add(row)
@@ -524,7 +542,15 @@ class Executor:
             row.reason = st.reason or None
             if not st.state.is_terminal or st.filled_qty == 0:
                 return
-            if s.scalar(select(Fill.id).where(Fill.broker_order_id == st.order_id)) is not None:
+            if (
+                s.scalar(
+                    select(Fill.id).where(
+                        Fill.mode == self._mode,
+                        Fill.broker_order_id == st.order_id,
+                    )
+                )
+                is not None
+            ):
                 return
             price = st.avg_fill_price or st.limit_price
             if price is None:
