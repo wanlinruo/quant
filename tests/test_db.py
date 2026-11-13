@@ -57,7 +57,7 @@ def test_all_tables_defined() -> None:
     ("table", "columns"),
     [
         ("job_runs", ("mode", "job_name", "trade_date")),
-        ("orders", ("client_order_id",)),
+        ("orders", ("mode", "client_order_id")),
         ("signals", ("mode", "strategy", "signal_date")),
         ("job_attempts", ("mode", "job_name", "trade_date", "attempt")),
         ("account_snapshots", ("snapshot_date", "mode")),
@@ -128,12 +128,42 @@ def _insert_order(conn: object, cid: str, **overrides: object) -> None:
 
 @pytest.mark.db
 @needs_db
-def test_client_order_id_unique(engine: Engine) -> None:
+def test_client_order_id_unique_within_mode(engine: Engine) -> None:
     cid = "2026-10-29-etf_momentum-SPY-BUY-1"
     with engine.begin() as conn:
         _insert_order(conn, cid)
     with pytest.raises(IntegrityError), engine.begin() as conn:
         _insert_order(conn, cid)
+
+
+@pytest.mark.db
+@needs_db
+def test_same_client_order_id_allowed_across_modes(engine: Engine) -> None:
+    cid = "2026-10-29-etf_momentum-SPY-BUY-1"
+    with engine.begin() as conn:
+        _insert_order(conn, cid, mode="paper")
+        _insert_order(conn, cid, mode="live")
+
+
+@pytest.mark.db
+@needs_db
+def test_order_identity_migration_downgrade_keeps_oldest_row(engine: Engine) -> None:
+    cid = "2026-10-29-etf_momentum-SPY-BUY-1"
+    with engine.begin() as conn:
+        _insert_order(conn, cid, mode="paper")
+        _insert_order(conn, cid, mode="live")
+
+    cfg = _alembic_cfg()
+    command.downgrade(cfg, "d4e6a8c0b2f3")
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT mode, client_order_id FROM orders ORDER BY id")).all()
+        assert rows == [("paper", cid)]
+    with pytest.raises(IntegrityError), engine.begin() as conn:
+        _insert_order(conn, cid, mode="live")
+
+    command.upgrade(cfg, "head")
+    with engine.begin() as conn:
+        _insert_order(conn, cid, mode="live")
 
 
 @pytest.mark.db
