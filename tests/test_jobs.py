@@ -278,11 +278,27 @@ class TestDailyJobs:
             daily_data(ctx, DAY)
 
     def test_report_snapshot_when_consistent(self, engine: Engine, tmp_path: Path) -> None:
-        broker = FakeBroker(Clock(), "1000", {})
+        with Session(engine) as s, s.begin():
+            s.add(
+                AccountSnapshotRow(
+                    snapshot_date=date(2026, 10, 27),
+                    mode="paper",
+                    cash=D("1000"),
+                    net_liquidation=D("1000"),
+                )
+            )
+        broker = FakeBroker(Clock(), "1100", {})
         ctx = make_ctx(engine, tmp_path, broker_factory=lambda: broker)
         assert daily_report(ctx, DAY).startswith("净值")
+        _, body, _ = ctx.notifier.sent[-1]  # type: ignore[attr-defined]
+        assert "当日收益：+10.00%（+100.00，较 2026-10-27）" in body
+        assert "累计收益：+10.00%（+100.00，自 2026-10-27）" in body
+        assert "收益口径：账户净值变化，未调整入金和出金" in body
         with Session(engine) as s:
-            assert s.scalars(select(AccountSnapshotRow)).one().snapshot_date == DAY
+            rows = s.scalars(
+                select(AccountSnapshotRow).order_by(AccountSnapshotRow.snapshot_date)
+            ).all()
+            assert [row.snapshot_date for row in rows] == [date(2026, 10, 27), DAY]
 
     def test_report_mismatch_halts(self, engine: Engine, tmp_path: Path) -> None:
         broker = FakeBroker(Clock(), "1000", {"SPY": 5})

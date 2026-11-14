@@ -68,19 +68,19 @@ def test_validate_url(bad: str) -> None:
     assert "key=x" not in str(e.value)
 
 
-def test_send_markdown() -> None:
+def test_send_plain_text() -> None:
     http = FakeHttp([])
     notifier(http).send("执行完成 2026-10-29", "卖 SPY 160\n买 QQQ 191", Level.INFO)
     url, payload = http.calls[0]
     assert url == URL
-    assert payload["msgtype"] == "markdown"
-    content = payload["markdown"]["content"]
-    assert '<font color="info">**执行完成 2026-10-29**</font>' in content
-    assert "> 卖 SPY 160\n> 买 QQQ 191" in content
+    assert payload["msgtype"] == "text"
+    content = payload["text"]["content"]
+    assert content == "执行完成 2026-10-29\n级别：信息\n卖 SPY 160\n买 QQQ 191"
+    assert "<font" not in content and "✅" not in content
 
 
-def test_error_level_color() -> None:
-    assert '<font color="warning">' in render("熔断", "对账不一致", Level.ERROR)
+def test_error_level_text() -> None:
+    assert render("熔断", "对账不一致", Level.ERROR) == "熔断\n级别：错误\n对账不一致"
 
 
 def test_truncate_utf8() -> None:

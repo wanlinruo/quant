@@ -20,6 +20,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
@@ -50,7 +51,7 @@ from quant.data.universe_bars import (
     universe_store,
 )
 from quant.data.validate import Report, compare_sources
-from quant.db.models import Fill, PositionSnapshot, Signal
+from quant.db.models import AccountSnapshotRow, Fill, PositionSnapshot, Signal
 from quant.engine.backtester import store_field_loader
 from quant.engine.executor import ET, ExecutionError, Executor
 from quant.engine.reconcile import reconcile, record_snapshot, trading_enabled
@@ -436,6 +437,18 @@ def daily_report(ctx: JobContext, d: date) -> str:
             record_snapshot(s, ctx.mode, d, account, positions)
     with Session(ctx.engine) as s:
         enabled = trading_enabled(s)
+        previous = s.scalar(
+            select(AccountSnapshotRow)
+            .where(AccountSnapshotRow.mode == ctx.mode, AccountSnapshotRow.snapshot_date < d)
+            .order_by(AccountSnapshotRow.snapshot_date.desc())
+            .limit(1)
+        )
+        first = s.scalar(
+            select(AccountSnapshotRow)
+            .where(AccountSnapshotRow.mode == ctx.mode)
+            .order_by(AccountSnapshotRow.snapshot_date)
+            .limit(1)
+        )
         start = datetime.combine(d, datetime.min.time(), ET)
         fills = s.scalars(
             select(Fill)
@@ -443,15 +456,18 @@ def daily_report(ctx: JobContext, d: date) -> str:
             .where(Fill.filled_at < start + timedelta(days=1))
             .order_by(Fill.filled_at)
         ).all()
-        fill_lines = [f"- {f.side} {f.symbol} {f.qty} @ {f.price:.2f}" for f in fills]
+        fill_lines = [
+            f"成交明细：{f.side} {f.symbol} {f.qty} 股，价格 {f.price:.2f}" for f in fills
+        ]
     nlv = account.net_liquidation
     pos_lines = [
-        f"- {p.symbol} {p.qty} 股，{p.market_value:,.2f}（{p.market_value / nlv:.1%}）"
+        f"持仓明细：{p.symbol} {p.qty} 股，{p.market_value:,.2f}（{p.market_value / nlv:.1%}）"
         for p in sorted(positions.values(), key=lambda p: p.symbol)
     ]
     body = "\n".join(
         [
             f"净值 {nlv:,.2f}，现金 {account.cash:,.2f}（{account.cash / nlv:.1%}）",
+            *_return_lines(nlv, previous, first),
             "持仓：" if pos_lines else "持仓：无",
             *pos_lines,
             f"当日成交 {len(fill_lines)} 笔" + ("：" if fill_lines else ""),
@@ -465,6 +481,31 @@ def daily_report(ctx: JobContext, d: date) -> str:
     if not rec.ok:
         raise JobStopped(rec.summary())
     return f"净值 {nlv:,.2f}"
+
+
+def _return_lines(
+    nlv: Decimal,
+    previous: AccountSnapshotRow | None,
+    first: AccountSnapshotRow | None,
+) -> list[str]:
+    """日报收益按账户净值变化计算；模拟盘没有现金流时等同于投资收益。"""
+    if previous is None or previous.net_liquidation == 0:
+        daily = "当日收益：暂无（缺少上一交易日净值）"
+    else:
+        change = nlv - previous.net_liquidation
+        daily = (
+            f"当日收益：{change / previous.net_liquidation:+.2%}"
+            f"（{change:+,.2f}，较 {previous.snapshot_date}）"
+        )
+    if first is None or first.net_liquidation == 0:
+        cumulative = "累计收益：暂无（缺少初始净值）"
+    else:
+        change = nlv - first.net_liquidation
+        cumulative = (
+            f"累计收益：{change / first.net_liquidation:+.2%}"
+            f"（{change:+,.2f}，自 {first.snapshot_date}）"
+        )
+    return [daily, cumulative, "收益口径：账户净值变化，未调整入金和出金"]
 
 
 def _weights_text(weights: dict[str, float]) -> str:

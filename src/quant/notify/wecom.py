@@ -1,8 +1,8 @@
-"""企业微信群机器人告警（#36 确认渠道，#33）。
+"""企业微信群机器人纯文本告警（#36 确认渠道，#33）。
 
 接口（官方文档 https://developer.work.weixin.qq.com/document/path/91770 ）：
 - POST https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=KEY，JSON 正文
-- markdown 消息 content 最长 4096 字节（UTF-8），超出时截断
+- text 消息 content 最长 2048 字节（UTF-8），超出时截断
 - 每个机器人每分钟最多 20 条，超出时等待
 
 webhook 地址含 key，属于密钥：只来自环境变量 QUANT_NOTIFY_WEBHOOK_URL，
@@ -26,10 +26,9 @@ log = logging.getLogger(__name__)
 
 HOST = "qyapi.weixin.qq.com"
 PATH = "/cgi-bin/webhook/send"
-MAX_BYTES = 4096
+MAX_BYTES = 2048
 RATE_LIMIT = 20  # 条/分钟
-_COLOR = {Level.INFO: "info", Level.WARNING: "comment", Level.ERROR: "warning"}
-_MARK = {Level.INFO: "✅", Level.WARNING: "⚠️", Level.ERROR: "🚨"}
+_LEVEL_TEXT = {Level.INFO: "信息", Level.WARNING: "警告", Level.ERROR: "错误"}
 
 # (url, body bytes, timeout 秒) → 响应 JSON
 Post = Callable[[str, bytes, float], dict[str, object]]
@@ -64,10 +63,9 @@ def truncate_utf8(text: str, limit: int = MAX_BYTES) -> str:
 
 
 def render(title: str, body: str, level: Level) -> str:
-    """markdown：标题按级别着色，正文原样放入引用块。"""
-    head = f'{_MARK[level]} <font color="{_COLOR[level]}">**{title}**</font>'
-    quoted = "\n".join(f"> {line}" if line else ">" for line in body.splitlines())
-    return truncate_utf8(f"{head}\n{quoted}" if quoted else head)
+    """只使用纯文本，避免企微客户端不支持 Markdown 或特殊符号。"""
+    head = f"{title}\n级别：{_LEVEL_TEXT[level]}"
+    return truncate_utf8(f"{head}\n{body}" if body else head)
 
 
 class WeComNotifier:
@@ -102,7 +100,7 @@ class WeComNotifier:
         self._sent.append(self._now())
 
     def send(self, title: str, body: str, level: Level = Level.INFO) -> None:
-        payload = {"msgtype": "markdown", "markdown": {"content": render(title, body, level)}}
+        payload = {"msgtype": "text", "text": {"content": render(title, body, level)}}
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         for attempt in range(self._retries + 1):
             self._throttle()
